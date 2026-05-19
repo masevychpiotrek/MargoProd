@@ -92,7 +92,7 @@ export const useShiftStore = create<ShiftState>()(
 
         const today = new Date().toISOString().split('T')[0]
 
-        // Check if operator is operator_1 or operator_2
+        // Szukaj jako operator_1
         const { data: asOp1 } = await supabase
           .from('shifts')
           .select('*, machine:machines(*)')
@@ -106,7 +106,7 @@ export const useShiftStore = create<ShiftState>()(
           return
         }
 
-        // Check as operator_2
+        // Szukaj jako operator_2
         const { data: asOp2 } = await supabase
           .from('shifts')
           .select('*, machine:machines(*)')
@@ -117,6 +117,15 @@ export const useShiftStore = create<ShiftState>()(
 
         if (asOp2) {
           set({ activeShift: asOp2, activeMachine: asOp2.machine as Machine })
+          return
+        }
+
+        // Żadna aktywna zmiana nie znaleziona w bazie —
+        // jeśli store trzymał zmianę (np. zamkniętą automatycznie przez system),
+        // wyczyść go żeby UI pokazało poprawny stan
+        const { activeShift } = get()
+        if (activeShift) {
+          set({ activeShift: null, activeMachine: null })
         }
       }
     }),
