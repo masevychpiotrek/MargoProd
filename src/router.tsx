@@ -55,15 +55,22 @@ const router = createBrowserRouter([
     children: [
       { index: true, element: <Navigate to="/operator" replace /> },
 
-      // ── OPERATOR ──
+      // ── OPERATOR — tylko rola 'operator' ──
       {
         path: 'operator',
-        children: [
-          { index: true, element: <Wrap><OperatorDashboard /></Wrap> },
-          { path: 'shift',   element: <Wrap><OperatorShift /></Wrap> },
-          { path: 'report',  element: <Wrap><OperatorReport /></Wrap> },
-          { path: 'history', element: <Wrap><OperatorHistory /></Wrap> }
-        ]
+        element: <RequireAuth roles="operator"><Wrap><OperatorDashboard /></Wrap></RequireAuth>
+      },
+      {
+        path: 'operator/shift',
+        element: <RequireAuth roles="operator"><Wrap><OperatorShift /></Wrap></RequireAuth>
+      },
+      {
+        path: 'operator/report',
+        element: <RequireAuth roles="operator"><Wrap><OperatorReport /></Wrap></RequireAuth>
+      },
+      {
+        path: 'operator/history',
+        element: <RequireAuth roles="operator"><Wrap><OperatorHistory /></Wrap></RequireAuth>
       },
 
       // ── MANAGER ──
