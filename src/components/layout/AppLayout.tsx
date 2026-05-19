@@ -15,9 +15,7 @@ const NAV_OPERATOR = [
 
 const NAV_MANAGER = [
   { to: '/manager', label: 'Live produkcja', icon: '📡', end: true },
-  { to: '/manager/reports', label: 'Raporty', icon: '📊' },
-  { to: '/manager/operators', label: 'Operatorzy', icon: '👥' },
-  { to: '/manager/downtime', label: 'Przestoje', icon: '⏸️' },
+  { to: '/manager/orders', label: 'Zlecenia', icon: '📋' },
   { to: '/manager/export', label: 'Eksport', icon: '📥' }
 ]
 
