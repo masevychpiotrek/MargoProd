@@ -131,9 +131,9 @@ export default function AppLayout() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-navy-700 p-3">
+        <div className="border-t border-navy-700 p-3 space-y-3">
           {sidebarOpen && (
-            <div className="mb-3">
+            <div>
               <div className="font-mono text-xl font-bold text-white">{time}</div>
               <div className="text-xs text-navy-400">{date}</div>
             </div>
@@ -148,8 +148,19 @@ export default function AppLayout() {
                 <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
               </div>
             )}
-            <LogoutButton hasActiveShift={!!activeShift} onLogout={handleSignOut} />
           </div>
+          {sidebarOpen
+            ? <LogoutButton hasActiveShift={!!activeShift} onLogout={handleSignOut} />
+            : (
+              <button
+                onClick={handleSignOut}
+                title="Wyloguj się"
+                className="w-full flex items-center justify-center py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all text-lg"
+              >
+                🚪
+              </button>
+            )
+          }
         </div>
       </aside>
 
