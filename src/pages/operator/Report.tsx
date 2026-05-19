@@ -3,69 +3,84 @@ import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
-import { useCurrentHourBlock, useHourCountdown, useClock } from '@/hooks/useClock'
+import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
 import type { HourlyReport, DowntimeCategory } from '@/types/database'
 
 const TARGET = 2100
 
-interface DowntimeEntry {
-  category: DowntimeCategory
-  duration_min: number
-  description: string
+interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
+interface ProductionOrder {
+  id: string; order_number: string; machine_id: string
+  target_qty: number; produced_qty: number
+  status: 'active' | 'paused' | 'completed' | 'cancelled'; notes: string | null
 }
-
-// Rozszerzony typ raportu z licznikami
 interface ReportExt extends HourlyReport {
-  counter_good?:    number
-  counter_reject?:  number
-  counter_runtime?: number
-  counter_ready?:   number
-  counter_alarm?:   number
-  ready_min?:       number
-  alarm_min?:       number
-  reject_pct?:      number
-  machine_rate?:    number
-  availability_pct?: number
+  counter_good?: number; counter_reject?: number
+  counter_runtime?: number; counter_ready?: number; counter_alarm?: number
+  ready_min?: number; alarm_min?: number; order_id?: string; order_qty?: number
 }
 
-function CounterInput({
-  label, sublabel, value, onChange, prevValue, color = 'text-white', placeholder = '0'
-}: {
-  label: string, sublabel?: string, value: string,
-  onChange: (v: string) => void, prevValue: number,
-  color?: string, placeholder?: string
-}) {
-  const cur = parseInt(value) || 0
-  const increment = value ? Math.max(0, cur - prevValue) : 0
-  const hasError = value !== '' && prevValue > 0 && cur < prevValue
+// ── HH:MM helpers ─────────────────────────────────────────────────────────
+function parseHHMM(val: string): number {
+  const m = val.match(/^(\d{1,2}):(\d{2})$/)
+  return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 0
+}
+function minsToHHMM(mins: number): string {
+  return `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`
+}
 
+// ── TimeInput ─────────────────────────────────────────────────────────────
+function TimeInput({ label, sublabel, value, onChange, prevValue, color = 'text-white' }:
+  { label: string; sublabel?: string; value: string; onChange: (v: string) => void; prevValue: number; color?: string }) {
+  const cur = parseHHMM(value)
+  const increment = value && cur >= prevValue ? cur - prevValue : 0
+  const hasError = value !== '' && parseHHMM(value) < prevValue && prevValue > 0
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    let v = e.target.value.replace(/[^0-9:]/g, '')
+    if (v.length === 2 && !v.includes(':')) v = v + ':'
+    if (v.length > 5) return
+    onChange(v)
+  }
   return (
     <div>
       <label className="label">{label}</label>
       {sublabel && <div className="text-xs text-navy-500 mb-1.5">{sublabel}</div>}
-      <input
-        type="number" value={value} onChange={e => onChange(e.target.value)}
-        placeholder={placeholder} min="0"
-        className={cn('input text-xl font-bold font-mono py-3.5', hasError && 'border-red-500/60')}
-      />
-      {prevValue > 0 && (
-        <div className="text-xs text-navy-500 mt-1">
-          Poprzedni: <span className="font-mono text-navy-300">{prevValue.toLocaleString('pl-PL')}</span>
-        </div>
-      )}
+      <input type="text" value={value} onChange={handleChange} placeholder="00:00" maxLength={5}
+        className={cn('input text-xl font-bold font-mono py-3.5 text-center tracking-widest', hasError && 'border-red-500/60')} />
+      {prevValue > 0 && <div className="text-xs text-navy-500 mt-1">Poprzedni: <span className="font-mono text-navy-300">{minsToHHMM(prevValue)}</span></div>}
       {value !== '' && (
         <div className={cn('text-sm font-bold mt-1', hasError ? 'text-red-400' : color)}>
-          {hasError
-            ? '⚠ Licznik nie może maleć'
-            : `+${increment.toLocaleString('pl-PL')} ${label.includes('min') || label.includes('czas') || label.includes('Czas') ? 'min' : 'szt'}`
-          }
+          {hasError ? '⚠ Licznik nie może maleć' : `+${minsToHHMM(increment)}`}
         </div>
       )}
     </div>
   )
 }
 
+// ── CounterInput ──────────────────────────────────────────────────────────
+function CounterInput({ label, sublabel, value, onChange, prevValue, color = 'text-white', placeholder = '0' }:
+  { label: string; sublabel?: string; value: string; onChange: (v: string) => void; prevValue: number; color?: string; placeholder?: string }) {
+  const cur = parseInt(value) || 0
+  const increment = value !== '' ? Math.max(0, cur - prevValue) : 0
+  const hasError = value !== '' && prevValue > 0 && cur < prevValue
+  return (
+    <div>
+      <label className="label">{label}</label>
+      {sublabel && <div className="text-xs text-navy-500 mb-1.5">{sublabel}</div>}
+      <input type="number" value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder} min="0"
+        className={cn('input text-xl font-bold font-mono py-3.5', hasError && 'border-red-500/60')} />
+      {prevValue > 0 && <div className="text-xs text-navy-500 mt-1">Poprzedni: <span className="font-mono text-navy-300">{prevValue.toLocaleString('pl-PL')}</span></div>}
+      {value !== '' && (
+        <div className={cn('text-sm font-bold mt-1', hasError ? 'text-red-400' : color)}>
+          {hasError ? '⚠ Licznik nie może maleć' : `+${increment.toLocaleString('pl-PL')} szt`}
+        </div>
+      )}
+    </div>
+  )
+}
+
+// ── MAIN COMPONENT ────────────────────────────────────────────────────────
 export default function OperatorReport() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
@@ -73,14 +88,11 @@ export default function OperatorReport() {
   const { display: countdown, isUrgent } = useHourCountdown()
   const { hour, dateISO } = useClock()
 
-  // Liczniki produkcji
-  const [counterGood,   setCounterGood]   = useState('')
-  const [counterReject, setCounterReject] = useState('')
-
-  // Liczniki czasów
-  const [counterRuntime, setCounterRuntime] = useState('') // czas pracy
-  const [counterReady,   setCounterReady]   = useState('') // czas w gotowości
-  const [counterAlarm,   setCounterAlarm]   = useState('') // czas w alarmie
+  const [counterGood,    setCounterGood]    = useState('')
+  const [counterReject,  setCounterReject]  = useState('')
+  const [counterRuntime, setCounterRuntime] = useState('')
+  const [counterReady,   setCounterReady]   = useState('')
+  const [counterAlarm,   setCounterAlarm]   = useState('')
 
   const [downtimeReason, setDowntimeReason] = useState('')
   const [notes,          setNotes]          = useState('')
@@ -91,72 +103,108 @@ export default function OperatorReport() {
   const [errors,  setErrors]  = useState<string[]>([])
   const [selectedHour, setSelectedHour] = useState(hour)
 
+  // Orders
+  const [orders,         setOrders]         = useState<ProductionOrder[]>([])
+  const [activeOrderId,  setActiveOrderId]  = useState('')
+  const [orderQty,       setOrderQty]       = useState('')
+  const [showNewOrder,   setShowNewOrder]   = useState(false)
+  const [newOrderNumber, setNewOrderNumber] = useState('')
+  const [newOrderTarget, setNewOrderTarget] = useState('')
+  const [newOrderNotes,  setNewOrderNotes]  = useState('')
+  const [savingOrder,    setSavingOrder]    = useState(false)
+
   useEffect(() => {
     if (!activeShift) { navigate('/operator/shift'); return }
-    loadReports()
+    loadReports(); loadOrders()
   }, [activeShift])
-
   useEffect(() => { setSelectedHour(hour) }, [hour])
 
   const loadReports = async () => {
     if (!activeShift) return
-    const { data } = await supabase
-      .from('hourly_reports').select('*')
-      .eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
+    const { data } = await supabase.from('hourly_reports').select('*').eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
     if (data) setExistingReports(data as ReportExt[])
   }
+  const loadOrders = async () => {
+    if (!activeShift) return
+    const { data } = await supabase.from('production_orders').select('*').eq('machine_id', activeShift.machine_id).in('status', ['active','paused']).order('created_at', { ascending: false })
+    if (data) {
+      setOrders(data as ProductionOrder[])
+      const active = (data as ProductionOrder[]).find(o => o.status === 'active')
+      if (active) setActiveOrderId(active.id)
+    }
+  }
 
-  // Poprzedni raport (ostatni przed wybraną godziną)
-  const prevReport = [...existingReports]
-    .filter(r => r.hour_start < selectedHour)
-    .sort((a, b) => b.hour_start - a.hour_start)[0] as ReportExt | undefined
+  const handleCreateOrder = async () => {
+    if (!newOrderNumber || !activeShift || !profile) return
+    setSavingOrder(true)
+    if (activeOrderId) await supabase.from('production_orders').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', activeOrderId)
+    const { data, error } = await supabase.from('production_orders').insert({
+      order_number: newOrderNumber, machine_id: activeShift.machine_id,
+      target_qty: parseInt(newOrderTarget) || 0, status: 'active',
+      created_by: profile.id, notes: newOrderNotes || null
+    }).select().single()
+    if (!error && data) { setActiveOrderId(data.id); setShowNewOrder(false); setNewOrderNumber(''); setNewOrderTarget(''); setNewOrderNotes(''); loadOrders() }
+    setSavingOrder(false)
+  }
+  const handlePauseOrder = async (id: string) => {
+    await supabase.from('production_orders').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', id)
+    if (activeOrderId === id) setActiveOrderId(''); loadOrders()
+  }
+  const handleResumeOrder = async (id: string) => {
+    if (activeOrderId) await supabase.from('production_orders').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', activeOrderId)
+    await supabase.from('production_orders').update({ status: 'active', paused_at: null }).eq('id', id)
+    setActiveOrderId(id); loadOrders()
+  }
+  const handleCompleteOrder = async (id: string) => {
+    if (!confirm('Oznaczyć zlecenie jako zakończone?')) return
+    await supabase.from('production_orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id)
+    if (activeOrderId === id) setActiveOrderId(''); loadOrders()
+  }
 
-  // Poprzednie stany liczników
+  // Prev report
+  const prevReport = [...existingReports].filter(r => r.hour_start < selectedHour).sort((a,b) => b.hour_start - a.hour_start)[0] as ReportExt | undefined
   const prevGood    = prevReport?.counter_good    ?? 0
   const prevReject  = prevReport?.counter_reject  ?? 0
   const prevRuntime = prevReport?.counter_runtime ?? 0
   const prevReady   = prevReport?.counter_ready   ?? 0
   const prevAlarm   = prevReport?.counter_alarm   ?? 0
 
-  // Aktualne wartości
   const curGood    = parseInt(counterGood)    || 0
   const curReject  = parseInt(counterReject)  || 0
-  const curRuntime = parseInt(counterRuntime) || 0
-  const curReady   = parseInt(counterReady)   || 0
-  const curAlarm   = parseInt(counterAlarm)   || 0
+  const curRuntime = parseHHMM(counterRuntime)
+  const curReady   = parseHHMM(counterReady)
+  const curAlarm   = parseHHMM(counterAlarm)
 
-  // Przyrosty
   const incGood    = counterGood    !== '' ? Math.max(0, curGood    - prevGood)    : 0
   const incReject  = counterReject  !== '' ? Math.max(0, curReject  - prevReject)  : 0
   const incRuntime = counterRuntime !== '' ? Math.max(0, curRuntime - prevRuntime) : 0
   const incReady   = counterReady   !== '' ? Math.max(0, curReady   - prevReady)   : 0
   const incAlarm   = counterAlarm   !== '' ? Math.max(0, curAlarm   - prevAlarm)   : 0
 
-  const timeSum    = incRuntime + incReady + incAlarm
+  const timeSum = incRuntime + incReady + incAlarm
   const allTimesFilled = counterRuntime !== '' && counterReady !== '' && counterAlarm !== ''
-
-  // Wskaźniki
   const efficiency  = incGood > 0 ? Math.round(incGood / TARGET * 100) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const machineRate = incRuntime > 0 ? Math.round(incGood / incRuntime * 60) : 0
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
   const belowTarget = incGood > 0 && incGood < TARGET
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
+  const activeOrder = orders.find(o => o.id === activeOrderId)
 
   const validate = (): string[] => {
     const errs: string[] = []
     if (!counterGood)    errs.push('Wpisz stan licznika dobrych sztuk')
-    if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy')
-    if (!counterReady)   errs.push('Wpisz stan licznika czasu w gotowości')
-    if (!counterAlarm)   errs.push('Wpisz stan licznika czasu w alarmie')
-    if (allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów czasów wynosi ${timeSum} min — musi wynosić dokładnie 60 min`)
-    if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu (${TARGET}) — wymagana przyczyna`)
+    if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy (HH:MM)')
+    if (!counterReady)   errs.push('Wpisz stan licznika czasu gotowości (HH:MM)')
+    if (!counterAlarm)   errs.push('Wpisz stan licznika czasu alarmu (HH:MM)')
+    if (allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
+    if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
     if (alreadyReported) errs.push(`Raport za ${formatHourBlock(selectedHour)} już istnieje`)
-    if (counterGood   !== '' && prevGood   > 0 && curGood   < prevGood)   errs.push('Licznik dobrych nie może być mniejszy niż poprzednio')
-    if (counterReject !== '' && prevReject > 0 && curReject < prevReject)  errs.push('Licznik odrzutu nie może być mniejszy niż poprzednio')
-    if (counterRuntime !== '' && prevRuntime > 0 && curRuntime < prevRuntime) errs.push('Licznik czasu pracy nie może być mniejszy niż poprzednio')
-    if (counterReady   !== '' && prevReady   > 0 && curReady   < prevReady)   errs.push('Licznik czasu gotowości nie może być mniejszy niż poprzednio')
-    if (counterAlarm   !== '' && prevAlarm   > 0 && curAlarm   < prevAlarm)   errs.push('Licznik czasu alarmu nie może być mniejszy niż poprzednio')
+    if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie może maleć')
+    if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie może maleć')
+    if (counterRuntime !== '' && prevRuntime > 0 && curRuntime < prevRuntime) errs.push('Licznik czasu pracy nie może maleć')
+    if (counterReady !== '' && prevReady > 0 && curReady < prevReady) errs.push('Licznik czasu gotowości nie może maleć')
+    if (counterAlarm !== '' && prevAlarm > 0 && curAlarm < prevAlarm) errs.push('Licznik czasu alarmu nie może maleć')
     return errs
   }
 
@@ -164,64 +212,32 @@ export default function OperatorReport() {
     const errs = validate()
     if (errs.length) { setErrors(errs); return }
     if (!activeShift || !profile) return
-
     setSaving(true); setErrors([])
     try {
-      const { data: report, error } = await supabase
-        .from('hourly_reports').insert({
-          shift_id:    activeShift.id,
-          machine_id:  activeShift.machine_id,
-          operator_id: profile.id,
-          hour_block:  formatHourBlock(selectedHour),
-          report_date: dateISO,
-          hour_start:  selectedHour,
-          // Przyrosty produkcji
-          good_count:   incGood,
-          reject_count: incReject,
-          total_count:  curGood,
-          // Stany liczników produkcji
-          counter_good:   curGood,
-          counter_reject: curReject,
-          // Przyrosty czasów
-          runtime_min:        incRuntime,
-          ready_min:          incReady,
-          alarm_min:          incAlarm,
-          // Stany liczników czasów
-          counter_runtime: curRuntime,
-          counter_ready:   curReady,
-          counter_alarm:   curAlarm,
-          // Stare kolumny — zerujemy (nie używane)
-          downtime_min:       0,
-          micro_stoppage_min: 0,
-          changeover_min:     0,
-          failure_min:        0,
-          target:       activeMachine?.target_per_hour ?? TARGET,
-          downtime_reason: downtimeReason || null,
-          notes:           notes || null,
-          status:          'submitted'
-        }).select().single()
-
+      const orderQtyVal = parseInt(orderQty) || incGood
+      const { data: report, error } = await supabase.from('hourly_reports').insert({
+        shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
+        hour_block: formatHourBlock(selectedHour), report_date: dateISO, hour_start: selectedHour,
+        good_count: incGood, reject_count: incReject, total_count: curGood,
+        counter_good: curGood, counter_reject: curReject,
+        runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
+        downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
+        counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
+        target: activeMachine?.target_per_hour ?? TARGET,
+        downtime_reason: downtimeReason || null, notes: notes || null, status: 'submitted',
+        order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
+      }).select().single()
       if (error) { setErrors([error.message]); return }
-
       if (downtimes.length && report) {
-        await supabase.from('downtime_events').insert(
-          downtimes.map(d => ({
-            report_id:    report.id,
-            shift_id:     activeShift.id,
-            machine_id:   activeShift.machine_id,
-            category:     d.category,
-            duration_min: d.duration_min,
-            description:  d.description || null
-          }))
-        )
+        await supabase.from('downtime_events').insert(downtimes.map(d => ({
+          report_id: report.id, shift_id: activeShift.id, machine_id: activeShift.machine_id,
+          category: d.category, duration_min: d.duration_min, description: d.description || null
+        })))
       }
-
-      setSaved(true)
-      setTimeout(() => setSaved(false), 3000)
-      setCounterGood(''); setCounterReject('')
-      setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
-      setDowntimeReason(''); setNotes(''); setDowntimes([])
-      loadReports()
+      setSaved(true); setTimeout(() => setSaved(false), 3000)
+      setCounterGood(''); setCounterReject(''); setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
+      setDowntimeReason(''); setNotes(''); setDowntimes([]); setOrderQty('')
+      loadReports(); loadOrders()
     } finally { setSaving(false) }
   }
 
@@ -229,7 +245,6 @@ export default function OperatorReport() {
 
   return (
     <div className="max-w-4xl mx-auto">
-      {/* Header */}
       <div className="flex items-start justify-between mb-5 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Wpisz wynik godziny</h1>
@@ -237,8 +252,8 @@ export default function OperatorReport() {
         </div>
         <div className="text-right">
           <div className={cn('text-3xl font-bold font-mono', isUrgent ? 'text-red-400' : 'text-white')}>{countdown}</div>
-          <div className="text-xs text-navy-400 mt-0.5">do końca godziny</div>
-          {isUrgent && <div className="text-xs text-red-400 font-bold mt-0.5 animate-pulse">⚠ CZAS NA WPIS!</div>}
+          <div className="text-xs text-navy-400">do końca godziny</div>
+          {isUrgent && <div className="text-xs text-red-400 font-bold animate-pulse">⚠ CZAS NA WPIS!</div>}
         </div>
       </div>
 
@@ -251,12 +266,8 @@ export default function OperatorReport() {
               <div>
                 <div className="card-title">Blok godziny</div>
                 {prevReport
-                  ? <div className="text-xs text-navy-400 mt-1">
-                      Poprzednia godzina: dobre <span className="text-white font-mono font-bold">{prevGood.toLocaleString('pl-PL')}</span> ·
-                      odrzut <span className="text-red-400 font-mono font-bold">{prevReject.toLocaleString('pl-PL')}</span> ·
-                      czas pracy <span className="text-green-400 font-mono font-bold">{prevRuntime}</span> min
-                    </div>
-                  : <div className="text-xs text-amber-400 mt-1">⚠ Pierwsza godzina zmiany — wpisz aktualny stan liczników</div>
+                  ? <div className="text-xs text-navy-400 mt-1">Poprzednia: dobre <span className="text-white font-mono font-bold">{prevGood.toLocaleString('pl-PL')}</span> · czas pracy <span className="text-green-400 font-mono font-bold">{minsToHHMM(prevRuntime)}</span></div>
+                  : <div className="text-xs text-amber-400 mt-1">⚠ Pierwsza godzina zmiany</div>
                 }
               </div>
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
@@ -267,122 +278,155 @@ export default function OperatorReport() {
             </div>
           </div>
 
-          {/* Liczniki produkcji */}
+          {/* Zlecenia */}
           <div className="card">
             <div className="card-header">
-              <div>
-                <div className="card-title">Liczniki produkcji</div>
-                <div className="card-sub">Aktualny stan licznika na koniec godziny {String(selectedHour+1).padStart(2,'0')}:00</div>
-              </div>
-              {incGood > 0 && (
-                <div className={cn('text-2xl font-bold font-mono', efficiencyColor(efficiency))}>{efficiency}%</div>
-              )}
+              <div><div className="card-title">Zlecenie produkcyjne</div><div className="card-sub">Aktywne zlecenie</div></div>
+              <button onClick={() => setShowNewOrder(true)} className="btn-secondary text-xs py-1.5 px-3">+ Nowe zlecenie</button>
             </div>
 
-            <div className="grid grid-cols-2 gap-4 mb-3">
-              <CounterInput
-                label="Licznik dobrych (szt)"
-                sublabel="Stan licznika — wyroby zgodne łącznie"
-                value={counterGood} onChange={setCounterGood}
-                prevValue={prevGood} color="text-green-400"
-                placeholder="np. 4256"
-              />
-              <CounterInput
-                label="Licznik odrzutu (szt)"
-                sublabel="Stan licznika — odrzut łącznie"
-                value={counterReject} onChange={setCounterReject}
-                prevValue={prevReject} color="text-red-400"
-                placeholder="np. 328"
-              />
-            </div>
-
-            {/* Pasek efektywności */}
-            {incGood > 0 && (
-              <div className="bg-navy-900 rounded-xl p-3 mb-3">
-                <div className="flex justify-between text-sm mb-2">
-                  <span className="text-navy-400">Przyrost tej godziny</span>
-                  <span className={cn('font-bold font-mono', efficiencyColor(efficiency))}>
-                    +{incGood.toLocaleString('pl-PL')} szt ({efficiency}% targetu)
-                  </span>
-                </div>
-                <div className="h-2 bg-navy-700 rounded-full overflow-hidden">
-                  <div className={cn('h-full rounded-full', efficiencyBg(efficiency))}
-                    style={{ width: `${Math.min(efficiency, 100)}%` }} />
-                </div>
-                {incReject > 0 && (
-                  <div className={cn('text-sm font-bold mt-2', rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400')}>
-                    Odrzut tej godziny: +{incReject} szt · {rejectPct}%
+            {activeOrder ? (
+              <div className="bg-brand/10 border border-brand/30 rounded-xl p-4 mb-3">
+                <div className="flex items-center justify-between mb-2">
+                  <div>
+                    <div className="font-bold text-white text-lg font-mono">{activeOrder.order_number}</div>
+                    <div className="text-xs text-green-400 font-bold">● AKTYWNE</div>
                   </div>
-                )}
+                  {activeOrder.target_qty > 0 && (
+                    <div className="text-right">
+                      <div className="text-lg font-bold font-mono text-white">{activeOrder.produced_qty.toLocaleString('pl-PL')} / {activeOrder.target_qty.toLocaleString('pl-PL')} szt</div>
+                      <div className="h-1.5 bg-navy-700 rounded-full overflow-hidden mt-1 w-40">
+                        <div className="h-full bg-brand rounded-full" style={{ width: `${Math.min(activeOrder.produced_qty / activeOrder.target_qty * 100, 100)}%` }} />
+                      </div>
+                      <div className="text-xs text-navy-400 mt-0.5">{Math.round(activeOrder.produced_qty / activeOrder.target_qty * 100)}% · pozostało {Math.max(0, activeOrder.target_qty - activeOrder.produced_qty).toLocaleString('pl-PL')} szt</div>
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-2">
+                  <button onClick={() => handlePauseOrder(activeOrder.id)} className="btn-secondary text-xs py-1.5 px-3">⏸ Pauzuj</button>
+                  <button onClick={() => handleCompleteOrder(activeOrder.id)} className="btn-success text-xs py-1.5 px-3">✓ Zakończ</button>
+                </div>
               </div>
+            ) : (
+              <div className="text-center py-3 text-navy-500 text-sm mb-2">Brak aktywnego zlecenia</div>
             )}
 
-            {/* Below target */}
-            {belowTarget && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
-                <div className="text-red-400 font-bold text-sm mb-2">
-                  ⚠ Przyrost {incGood} szt poniżej targetu ({TARGET}) — wymagana przyczyna
+            {orders.filter(o => o.status === 'paused').map(o => (
+              <div key={o.id} className="bg-navy-900 border border-navy-700 rounded-xl p-3 mb-2">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-bold text-white font-mono">{o.order_number}</div>
+                    <div className="text-xs text-amber-400">⏸ ZAPAUZOWANE · {o.produced_qty.toLocaleString('pl-PL')} szt</div>
+                  </div>
+                  <button onClick={() => handleResumeOrder(o.id)} className="btn-primary text-xs py-1.5 px-3">▶ Wznów</button>
                 </div>
-                <textarea value={downtimeReason} onChange={e => setDowntimeReason(e.target.value)}
-                  placeholder="Opisz przyczynę niewykonania planu..."
-                  rows={2} className="input text-sm font-normal resize-none" />
+              </div>
+            ))}
+
+            {activeOrderId && (
+              <div className="mt-3">
+                <label className="label">Sztuki na zlecenie tej godziny</label>
+                <input type="number" value={orderQty} onChange={e => setOrderQty(e.target.value)}
+                  placeholder={incGood > 0 ? `${incGood} (cały przyrost)` : 'Automatycznie'}
+                  className="input" />
               </div>
             )}
           </div>
 
-          {/* Liczniki czasów */}
+          {/* Modal nowe zlecenie */}
+          {showNewOrder && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
+              <div className="bg-navy-800 border border-navy-600 rounded-2xl p-6 w-full max-w-md">
+                <h2 className="text-xl font-bold text-white mb-5">Nowe zlecenie produkcyjne</h2>
+                <div className="space-y-4">
+                  <div>
+                    <label className="label">Numer zlecenia</label>
+                    <input value={newOrderNumber} onChange={e => setNewOrderNumber(e.target.value)} placeholder="Z/01/05/26" className="input font-mono text-lg" />
+                    <div className="text-xs text-navy-500 mt-1">Format: Z/numer/miesiąc/rok</div>
+                  </div>
+                  <div>
+                    <label className="label">Wielkość zlecenia (szt)</label>
+                    <input type="number" value={newOrderTarget} onChange={e => setNewOrderTarget(e.target.value)} placeholder="np. 50000" className="input text-lg font-bold font-mono" />
+                  </div>
+                  <div>
+                    <label className="label">Uwagi</label>
+                    <input value={newOrderNotes} onChange={e => setNewOrderNotes(e.target.value)} placeholder="Opcjonalnie..." className="input" />
+                  </div>
+                  {activeOrderId && (
+                    <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-400">
+                      ⚠ Aktywne zlecenie zostanie zapauzowane automatycznie
+                    </div>
+                  )}
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={handleCreateOrder} disabled={savingOrder || !newOrderNumber} className="btn-primary flex-1 py-3">
+                    {savingOrder ? 'Tworzenie...' : 'Utwórz zlecenie'}
+                  </button>
+                  <button onClick={() => setShowNewOrder(false)} className="btn-secondary px-5 py-3">Anuluj</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Liczniki produkcji */}
           <div className="card">
             <div className="card-header">
-              <div>
-                <div className="card-title">Liczniki czasów pracy</div>
-                <div className="card-sub">Aktualny stan licznika — przyrost musi sumować się do 60 min</div>
+              <div><div className="card-title">Liczniki produkcji</div><div className="card-sub">Stan licznika na koniec godziny</div></div>
+              {incGood > 0 && <div className={cn('text-2xl font-bold font-mono', efficiencyColor(efficiency))}>{efficiency}%</div>}
+            </div>
+            <div className="grid grid-cols-2 gap-4 mb-3">
+              <CounterInput label="Licznik dobrych (szt)" sublabel="Wyroby zgodne łącznie" value={counterGood} onChange={setCounterGood} prevValue={prevGood} color="text-green-400" placeholder="np. 4256" />
+              <CounterInput label="Licznik odrzutu (szt)" sublabel="Odrzut łącznie" value={counterReject} onChange={setCounterReject} prevValue={prevReject} color="text-red-400" placeholder="np. 328" />
+            </div>
+            {incGood > 0 && (
+              <div className="bg-navy-900 rounded-xl p-3 mb-3">
+                <div className="flex justify-between text-sm mb-2">
+                  <span className="text-navy-400">Przyrost tej godziny</span>
+                  <span className={cn('font-bold font-mono', efficiencyColor(efficiency))}>+{incGood.toLocaleString('pl-PL')} szt ({efficiency}%)</span>
+                </div>
+                <div className="h-2 bg-navy-700 rounded-full overflow-hidden">
+                  <div className={cn('h-full rounded-full', efficiencyBg(efficiency))} style={{ width: `${Math.min(efficiency,100)}%` }} />
+                </div>
+                {incReject > 0 && <div className={cn('text-sm font-bold mt-2', rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400')}>Odrzut: +{incReject} szt · {rejectPct}%</div>}
               </div>
+            )}
+            {belowTarget && (
+              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
+                <div className="text-red-400 font-bold text-sm mb-2">⚠ Przyrost {incGood} szt poniżej targetu ({TARGET}) — wymagana przyczyna</div>
+                <textarea value={downtimeReason} onChange={e => setDowntimeReason(e.target.value)} placeholder="Opisz przyczynę..." rows={2} className="input text-sm font-normal resize-none" />
+              </div>
+            )}
+          </div>
+
+          {/* Liczniki czasów HH:MM */}
+          <div className="card">
+            <div className="card-header">
+              <div><div className="card-title">Liczniki czasów pracy</div><div className="card-sub">Format HH:MM — przyrost musi sumować się do 01:00</div></div>
               {allTimesFilled && (
                 <div className={cn('font-bold font-mono text-lg', timeSum === 60 ? 'text-green-400' : timeSum > 60 ? 'text-red-400' : 'text-amber-400')}>
-                  {timeSum} / 60 min
+                  {minsToHHMM(timeSum)} / 01:00
                 </div>
               )}
             </div>
-
-            {/* Progress bar */}
             {allTimesFilled && (
               <div className="mb-4">
                 <div className="flex gap-px h-3 rounded-xl overflow-hidden">
-                  <div className="bg-green-500 rounded-l transition-all" style={{ width: `${Math.min(incRuntime/60*100, 100)}%` }} title={`Czas pracy: ${incRuntime} min`} />
-                  <div className="bg-amber-400 transition-all" style={{ width: `${Math.min(incReady/60*100, 100)}%` }} title={`Gotowość: ${incReady} min`} />
-                  <div className="bg-red-500 rounded-r transition-all" style={{ width: `${Math.min(incAlarm/60*100, 100)}%` }} title={`Alarm: ${incAlarm} min`} />
+                  <div className="bg-green-500 rounded-l" style={{ width: `${Math.min(incRuntime/60*100,100)}%` }} />
+                  <div className="bg-amber-400" style={{ width: `${Math.min(incReady/60*100,100)}%` }} />
+                  <div className="bg-red-500 rounded-r" style={{ width: `${Math.min(incAlarm/60*100,100)}%` }} />
                 </div>
                 <div className="flex gap-4 mt-1.5 text-xs">
-                  <span className="text-green-400">● Praca: {incRuntime} min</span>
-                  <span className="text-amber-400">● Gotowość: {incReady} min</span>
-                  <span className="text-red-400">● Alarm: {incAlarm} min</span>
-                  {timeSum === 60 && <span className="text-green-400 ml-auto">✓ suma OK</span>}
+                  <span className="text-green-400">● Praca: {minsToHHMM(incRuntime)}</span>
+                  <span className="text-amber-400">● Gotowość: {minsToHHMM(incReady)}</span>
+                  <span className="text-red-400">● Alarm: {minsToHHMM(incAlarm)}</span>
+                  {timeSum === 60 && <span className="text-green-400 ml-auto">✓ OK</span>}
                 </div>
               </div>
             )}
-
             <div className="grid grid-cols-3 gap-4">
-              <CounterInput
-                label="Czas pracy (min)"
-                sublabel="Maszyna produkuje"
-                value={counterRuntime} onChange={setCounterRuntime}
-                prevValue={prevRuntime} color="text-green-400"
-                placeholder="np. 315"
-              />
-              <CounterInput
-                label="Czas gotowości (min)"
-                sublabel="Maszyna stoi, gotowa"
-                value={counterReady} onChange={setCounterReady}
-                prevValue={prevReady} color="text-amber-400"
-                placeholder="np. 12"
-              />
-              <CounterInput
-                label="Czas alarmu (min)"
-                sublabel="Maszyna zatrzymana"
-                value={counterAlarm} onChange={setCounterAlarm}
-                prevValue={prevAlarm} color="text-red-400"
-                placeholder="np. 8"
-              />
+              <TimeInput label="Czas pracy" sublabel="Maszyna produkuje" value={counterRuntime} onChange={setCounterRuntime} prevValue={prevRuntime} color="text-green-400" />
+              <TimeInput label="Czas gotowości" sublabel="Maszyna stoi, gotowa" value={counterReady} onChange={setCounterReady} prevValue={prevReady} color="text-amber-400" />
+              <TimeInput label="Czas alarmu" sublabel="Maszyna zatrzymana" value={counterAlarm} onChange={setCounterAlarm} prevValue={prevAlarm} color="text-red-400" />
             </div>
           </div>
 
@@ -390,45 +434,37 @@ export default function OperatorReport() {
           {incGood > 0 && incRuntime > 0 && (
             <div className="grid grid-cols-4 gap-3">
               {[
-                { l: 'Efektywność', v: efficiency + '%', c: efficiencyColor(efficiency) },
-                { l: '% odrzutu', v: rejectPct + '%', c: rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400' },
-                { l: 'Wyd. maszyny', v: machineRate + ' szt/h', c: 'text-cyan-400', sub: 'aktywny czas' },
-                { l: 'Dostępność', v: availability + '%', c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400' },
+                { l: 'Efektywność',  v: efficiency + '%',       c: efficiencyColor(efficiency) },
+                { l: '% odrzutu',    v: rejectPct + '%',        c: rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400' },
+                { l: 'Wyd. maszyny', v: machineRate + ' szt/h', c: 'text-cyan-400' },
+                { l: 'Dostępność',   v: availability + '%',     c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400' },
               ].map(k => (
                 <div key={k.l} className="bg-navy-900 rounded-xl p-3 text-center">
                   <div className="text-xs text-navy-400 mb-1">{k.l}</div>
                   <div className={cn('text-lg font-bold font-mono', k.c)}>{k.v}</div>
-                  {k.sub && <div className="text-xs text-navy-600">{k.sub}</div>}
                 </div>
               ))}
             </div>
           )}
 
-          {/* Zdarzenia przestojowe */}
+          {/* Przestoje */}
           <div className="card">
             <div className="card-header">
               <div><div className="card-title">Zdarzenia przestojowe</div><div className="card-sub">Opcjonalnie</div></div>
-              <button onClick={() => setDowntimes(p => [...p, { category: 'mechanical_failure', duration_min: 0, description: '' }])}
-                className="btn-secondary text-xs py-1.5 px-3">+ Dodaj</button>
+              <button onClick={() => setDowntimes(p => [...p, { category: 'mechanical_failure', duration_min: 0, description: '' }])} className="btn-secondary text-xs py-1.5 px-3">+ Dodaj</button>
             </div>
             {downtimes.length === 0
               ? <div className="text-center py-4 text-navy-500 text-sm">Brak zdarzeń</div>
               : downtimes.map((d, i) => (
                 <div key={i} className="bg-navy-900 rounded-xl p-3 mb-2">
                   <div className="grid grid-cols-3 gap-2 mb-2">
-                    <select value={d.category}
-                      onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, category: e.target.value as DowntimeCategory} : x))}
-                      className="input text-sm col-span-2">
+                    <select value={d.category} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, category: e.target.value as DowntimeCategory} : x))} className="input text-sm col-span-2">
                       {Object.entries(DOWNTIME_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
                     </select>
-                    <input type="number" value={d.duration_min || ''}
-                      onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, duration_min: parseInt(e.target.value)||0} : x))}
-                      placeholder="min" className="input text-sm" />
+                    <input type="number" value={d.duration_min||''} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, duration_min: parseInt(e.target.value)||0} : x))} placeholder="min" className="input text-sm" />
                   </div>
                   <div className="flex gap-2">
-                    <input type="text" value={d.description}
-                      onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, description: e.target.value} : x))}
-                      placeholder="Opis..." className="input text-sm flex-1" />
+                    <input type="text" value={d.description} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, description: e.target.value} : x))} placeholder="Opis..." className="input text-sm flex-1" />
                     <button onClick={() => setDowntimes(p => p.filter((_,j) => j!==i))} className="text-red-400 px-2">✕</button>
                   </div>
                 </div>
@@ -436,14 +472,11 @@ export default function OperatorReport() {
             }
           </div>
 
-          {/* Notes */}
           <div className="card">
             <label className="label">Uwagi ogólne</label>
-            <textarea value={notes} onChange={e => setNotes(e.target.value)}
-              placeholder="Opcjonalnie..." rows={2} className="input text-sm font-normal resize-none" />
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opcjonalnie..." rows={2} className="input text-sm font-normal resize-none" />
           </div>
 
-          {/* Errors */}
           {errors.length > 0 && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
               <div className="font-bold text-red-400 mb-2 text-sm">Popraw błędy:</div>
@@ -460,9 +493,7 @@ export default function OperatorReport() {
         {/* Sidebar */}
         <div className="space-y-4">
           <div className="card">
-            <div className="card-header">
-              <div><div className="card-title">Raporty tej zmiany</div><div className="card-sub">{existingReports.length} godzin</div></div>
-            </div>
+            <div className="card-header"><div><div className="card-title">Raporty tej zmiany</div><div className="card-sub">{existingReports.length} godzin</div></div></div>
             {existingReports.length === 0
               ? <div className="text-center py-4 text-navy-500 text-sm">Brak raportów</div>
               : <div className="space-y-2">
@@ -475,15 +506,17 @@ export default function OperatorReport() {
                         <span className="font-mono text-xs text-navy-400">{r.hour_block}</span>
                         <span className={cn('font-bold text-sm', efficiencyColor(eff))}>{eff}%</span>
                       </div>
-                      <div className="flex justify-between items-center">
+                      <div className="flex justify-between">
                         <span className="font-bold text-white font-mono">+{r.good_count.toLocaleString('pl-PL')} szt</span>
                         {r.reject_count > 0 && <span className="text-red-400 text-xs">{rj}% odrz.</span>}
                       </div>
                       <div className="flex gap-2 mt-1 text-xs">
-                        <span className="text-green-400">⏱ {r.runtime_min}min</span>
-                        {(r as ReportExt).ready_min != null && (r as ReportExt).ready_min! > 0 && <span className="text-amber-400">⏸ {(r as ReportExt).ready_min}min</span>}
-                        {(r as ReportExt).alarm_min != null && (r as ReportExt).alarm_min! > 0 && <span className="text-red-400">🔔 {(r as ReportExt).alarm_min}min</span>}
+                        <span className="text-green-400">⏱ {minsToHHMM(r.runtime_min)}</span>
+                        {(r as ReportExt).alarm_min != null && (r as ReportExt).alarm_min! > 0 && <span className="text-red-400">🔔 {minsToHHMM((r as ReportExt).alarm_min!)}</span>}
                       </div>
+                      {(r as ReportExt).order_id && (
+                        <div className="text-xs text-brand mt-1">📋 {orders.find(o => o.id === (r as ReportExt).order_id)?.order_number ?? 'zlecenie'}</div>
+                      )}
                       <div className="h-1 bg-navy-700 rounded mt-1.5 overflow-hidden">
                         <div className={cn('h-full rounded', efficiencyBg(eff))} style={{ width: `${Math.min(eff,100)}%` }} />
                       </div>
@@ -500,11 +533,10 @@ export default function OperatorReport() {
               <div className="space-y-2 text-sm">
                 {[
                   { l: 'Produkcja łącznie', v: existingReports.reduce((s,r)=>s+r.good_count,0).toLocaleString('pl-PL') + ' szt', c: 'text-white' },
-                  { l: 'Śr. efektywność', v: Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length) + '%',
-                    c: efficiencyColor(Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length)) },
+                  { l: 'Śr. efektywność', v: Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length) + '%', c: efficiencyColor(Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length)) },
                   { l: 'Odrzut łącznie', v: existingReports.reduce((s,r)=>s+r.reject_count,0) + ' szt', c: 'text-red-400' },
-                  { l: 'Czas pracy łącznie', v: existingReports.reduce((s,r)=>s+r.runtime_min,0) + ' min', c: 'text-green-400' },
-                  { l: 'Czas alarmu łącznie', v: existingReports.reduce((s,r)=>s+((r as ReportExt).alarm_min??0),0) + ' min', c: 'text-red-400' },
+                  { l: 'Czas pracy łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+r.runtime_min,0)), c: 'text-green-400' },
+                  { l: 'Czas alarmu łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+((r as ReportExt).alarm_min??0),0)), c: 'text-red-400' },
                 ].map(k => (
                   <div key={k.l} className="flex justify-between">
                     <span className="text-navy-400">{k.l}</span>
