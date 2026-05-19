@@ -148,13 +148,7 @@ export default function AppLayout() {
                 <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
               </div>
             )}
-            <button
-              onClick={handleSignOut}
-              className="text-navy-400 hover:text-red-400 transition-colors text-sm flex-shrink-0"
-              title="Wyloguj"
-            >
-              🚪
-            </button>
+            <LogoutButton hasActiveShift={!!activeShift} onLogout={handleSignOut} />
           </div>
         </div>
       </aside>
