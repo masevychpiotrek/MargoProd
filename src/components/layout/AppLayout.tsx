@@ -16,6 +16,7 @@ const NAV_OPERATOR = [
 const NAV_MANAGER = [
   { to: '/manager', label: 'Live produkcja', icon: '📡', end: true },
   { to: '/manager/orders', label: 'Zlecenia', icon: '📋' },
+  { to: '/manager/assortments', label: 'Asortyment', icon: '📊' },
   { to: '/manager/export', label: 'Eksport', icon: '📥' }
 ]
 
