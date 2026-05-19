@@ -19,6 +19,8 @@ const AdminAudit         = lazy(() => import('@/pages/admin/Audit'))
 const AdminMachines      = lazy(() => import('@/pages/admin/Machines'))
 const AdminTargets       = lazy(() => import('@/pages/admin/Targets'))
 const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
+const AdminOrders        = lazy(() => import('@/pages/admin/Orders'))
+const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
 
 function PageLoader() {
   return (
@@ -106,6 +108,14 @@ const router = createBrowserRouter([
       {
         path: 'admin/schedules',
         element: <RequireAuth roles="admin"><Wrap><AdminSchedules /></Wrap></RequireAuth>
+      },
+      {
+        path: 'admin/orders',
+        element: <RequireAuth roles="admin"><Wrap><AdminOrders /></Wrap></RequireAuth>
+      },
+      {
+        path: 'admin/reset',
+        element: <RequireAuth roles="admin"><Wrap><AdminReset /></Wrap></RequireAuth>
       },
 
       { path: 'unauthorized', element: (

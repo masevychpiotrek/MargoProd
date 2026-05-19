@@ -26,7 +26,9 @@ const NAV_ADMIN = [
   { to: '/admin/machines', label: 'Maszyny', icon: '🤖' },
   { to: '/admin/targets', label: 'Targety', icon: '🎯' },
   { to: '/admin/schedules', label: 'Harmonogram', icon: '📅' },
-  { to: '/admin/audit', label: 'Audit log', icon: '🔍' }
+  { to: '/admin/orders', label: 'Zlecenia', icon: '📋' },
+  { to: '/admin/audit', label: 'Audit log', icon: '🔍' },
+  { to: '/admin/reset', label: 'Reset danych', icon: '🗑️' }
 ]
 
 export default function AppLayout() {
