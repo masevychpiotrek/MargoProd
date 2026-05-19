@@ -5,7 +5,6 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
-import { LogoutButton } from '@/components/shared/FormControls'
 
 const NAV_OPERATOR = [
   { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
@@ -48,15 +47,26 @@ export default function AppLayout() {
     : NAV_OPERATOR
 
   const handleSignOut = async () => {
-    await signOut()
-    navigate('/login')
+    if (activeShift) {
+      if (window.confirm(
+        'Masz aktywną zmianę produkcyjną.\n\n' +
+        'Czy na pewno chcesz się wylogować?\n\n' +
+        'Zmiana pozostanie aktywna — drugi operator lub Ty po ponownym zalogowaniu możecie kontynuować.'
+      )) {
+        await signOut()
+        navigate('/login')
+      }
+    } else {
+      await signOut()
+      navigate('/login')
+    }
   }
 
   return (
     <div className="flex min-h-screen bg-navy-900 text-white">
       {/* SIDEBAR */}
       <aside className={cn(
-        'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-200 sticky top-0 h-screen',
+        'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-200 sticky top-0 h-screen overflow-hidden flex-shrink-0',
         sidebarOpen ? 'w-60' : 'w-16'
       )}>
         {/* Brand */}
@@ -120,7 +130,6 @@ export default function AppLayout() {
               <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2 mt-4">
                 Inne widoki
               </div>
-        
               {profile?.role === 'admin' && (
                 <NavLink to="/manager" className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm text-navy-400 hover:bg-navy-700 hover:text-white transition-all">
                   <span>👔</span><span>Widok kierownika</span>
@@ -131,16 +140,19 @@ export default function AppLayout() {
         </nav>
 
         {/* Footer */}
-        <div className="border-t border-navy-700 p-3 space-y-3">
+        <div className="border-t border-navy-700 p-3 flex-shrink-0">
+          {/* Clock */}
           {sidebarOpen && (
-            <div>
+            <div className="mb-2">
               <div className="font-mono text-xl font-bold text-white">{time}</div>
               <div className="text-xs text-navy-400">{date}</div>
             </div>
           )}
-          <div className="flex items-center gap-2">
+
+          {/* User info */}
+          <div className="flex items-center gap-2 mb-2">
             <div className="w-8 h-8 rounded-lg bg-brand/20 flex items-center justify-center text-brand text-xs font-bold flex-shrink-0">
-              {profile?.full_name.slice(0,2).toUpperCase()}
+              {profile?.full_name.slice(0, 2).toUpperCase()}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
@@ -149,18 +161,32 @@ export default function AppLayout() {
               </div>
             )}
           </div>
-          {sidebarOpen
-            ? <LogoutButton hasActiveShift={!!activeShift} onLogout={handleSignOut} />
-            : (
-              <button
-                onClick={handleSignOut}
-                title="Wyloguj się"
-                className="w-full flex items-center justify-center py-2.5 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all text-lg"
-              >
-                🚪
-              </button>
-            )
-          }
+
+          {/* Logout button — inline, nie z FormControls */}
+          {sidebarOpen ? (
+            <button
+              onClick={handleSignOut}
+              className={cn(
+                'flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all',
+                'w-full',
+                activeShift
+                  ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                  : 'bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20'
+              )}
+            >
+              <span className="text-lg flex-shrink-0">{activeShift ? '⚠️' : '🚪'}</span>
+              <span>Wyloguj się</span>
+              {activeShift && <span className="ml-auto text-xs opacity-70">zmiana aktywna</span>}
+            </button>
+          ) : (
+            <button
+              onClick={handleSignOut}
+              title="Wyloguj się"
+              className="flex items-center justify-center w-10 h-10 rounded-xl bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20 transition-all text-lg mx-auto"
+            >
+              🚪
+            </button>
+          )}
         </div>
       </aside>
 
