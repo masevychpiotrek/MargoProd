@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
+import { TimeInput, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
 import type { HourlyReport, DowntimeCategory } from '@/types/database'
 
 const TARGET = 2100
@@ -21,42 +22,7 @@ interface ReportExt extends HourlyReport {
   ready_min?: number; alarm_min?: number; order_id?: string; order_qty?: number
 }
 
-// ── HH:MM helpers ─────────────────────────────────────────────────────────
-function parseHHMM(val: string): number {
-  const m = val.match(/^(\d{1,2}):(\d{2})$/)
-  return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 0
-}
-function minsToHHMM(mins: number): string {
-  return `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`
-}
 
-// ── TimeInput ─────────────────────────────────────────────────────────────
-function TimeInput({ label, sublabel, value, onChange, prevValue, color = 'text-white' }:
-  { label: string; sublabel?: string; value: string; onChange: (v: string) => void; prevValue: number; color?: string }) {
-  const cur = parseHHMM(value)
-  const increment = value && cur >= prevValue ? cur - prevValue : 0
-  const hasError = value !== '' && parseHHMM(value) < prevValue && prevValue > 0
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let v = e.target.value.replace(/[^0-9:]/g, '')
-    if (v.length === 2 && !v.includes(':')) v = v + ':'
-    if (v.length > 5) return
-    onChange(v)
-  }
-  return (
-    <div>
-      <label className="label">{label}</label>
-      {sublabel && <div className="text-xs text-navy-500 mb-1.5">{sublabel}</div>}
-      <input type="text" value={value} onChange={handleChange} placeholder="00:00" maxLength={5}
-        className={cn('input text-xl font-bold font-mono py-3.5 text-center tracking-widest', hasError && 'border-red-500/60')} />
-      {prevValue > 0 && <div className="text-xs text-navy-500 mt-1">Poprzedni: <span className="font-mono text-navy-300">{minsToHHMM(prevValue)}</span></div>}
-      {value !== '' && (
-        <div className={cn('text-sm font-bold mt-1', hasError ? 'text-red-400' : color)}>
-          {hasError ? '⚠ Licznik nie może maleć' : `+${minsToHHMM(increment)}`}
-        </div>
-      )}
-    </div>
-  )
-}
 
 // ── CounterInput ──────────────────────────────────────────────────────────
 function CounterInput({ label, sublabel, value, onChange, prevValue, color = 'text-white', placeholder = '0' }:

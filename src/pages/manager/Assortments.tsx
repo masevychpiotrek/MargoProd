@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
+import { PlanInput } from '@/components/shared/FormControls'
 
 interface Assortment { id: string; name: string; code: string }
 interface MonthlyPlan { id?: string; assortment_id: string; planned_qty: number; notes: string | null }
@@ -223,16 +224,15 @@ export default function ManagerAssortments() {
                         ⏱ {etPct}% ef. czasu
                       </div>
                     )}
-                    <input
-                      type="number"
-                      value={qty || ''}
-                      onChange={e => setEditPlans(prev => ({
-                        ...prev,
-                        [a.id]: { qty: parseInt(e.target.value) || 0, notes: prev[a.id]?.notes ?? '' }
-                      }))}
-                      placeholder="Plan (szt)"
-                      className="input text-right text-sm font-bold font-mono w-32 py-1.5"
-                    />
+                    <div className="w-48">
+                      <PlanInput
+                        value={qty}
+                        onChange={v => setEditPlans(prev => ({
+                          ...prev,
+                          [a.id]: { qty: v, notes: prev[a.id]?.notes ?? '' }
+                        }))}
+                      />
+                    </div>
                   </div>
                 </div>
 

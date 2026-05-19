@@ -5,6 +5,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
+import { LogoutButton } from '@/components/shared/FormControls'
 
 const NAV_OPERATOR = [
   { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
