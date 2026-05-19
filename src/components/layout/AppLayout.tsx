@@ -112,11 +112,7 @@ export default function AppLayout() {
               <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2 mt-4">
                 Inne widoki
               </div>
-              {profile?.role !== 'operator' && (
-                <NavLink to="/operator" className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm text-navy-400 hover:bg-navy-700 hover:text-white transition-all">
-                  <span>👷</span><span>Widok operatora</span>
-                </NavLink>
-              )}
+        
               {profile?.role === 'admin' && (
                 <NavLink to="/manager" className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm text-navy-400 hover:bg-navy-700 hover:text-white transition-all">
                   <span>👔</span><span>Widok kierownika</span>

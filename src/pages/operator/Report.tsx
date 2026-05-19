@@ -112,6 +112,14 @@ export default function OperatorReport() {
   const [newOrderTarget, setNewOrderTarget] = useState('')
   const [newOrderNotes,  setNewOrderNotes]  = useState('')
   const [savingOrder,    setSavingOrder]    = useState(false)
+  const [showFinishOrder, setShowFinishOrder] = useState(false)
+  const [finishCounterGood,    setFinishCounterGood]    = useState('')
+  const [finishCounterReject,  setFinishCounterReject]  = useState('')
+  const [finishCounterRuntime, setFinishCounterRuntime] = useState('')
+  const [finishCounterReady,   setFinishCounterReady]   = useState('')
+  const [finishCounterAlarm,   setFinishCounterAlarm]   = useState('')
+  const [finishNotes,          setFinishNotes]          = useState('')
+  const [savingFinish,         setSavingFinish]         = useState(false)
 
   useEffect(() => {
     if (!activeShift) { navigate('/operator/shift'); return }
@@ -190,6 +198,55 @@ export default function OperatorReport() {
   const belowTarget = incGood > 0 && incGood < TARGET
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
+
+  const handleFinishOrder = async () => {
+    if (!activeShift || !profile || !activeOrderId) return
+    const curG = parseInt(finishCounterGood)  || 0
+    const curR = parseInt(finishCounterReject) || 0
+    const curRt = parseHHMM(finishCounterRuntime)
+    const curRd = parseHHMM(finishCounterReady)
+    const curAl = parseHHMM(finishCounterAlarm)
+    const lastReport = [...existingReports].sort((a,b) => b.hour_start - a.hour_start)[0] as ReportExt | undefined
+    const lastGood    = lastReport?.counter_good    ?? 0
+    const lastReject  = lastReport?.counter_reject  ?? 0
+    const lastRuntime = lastReport?.counter_runtime ?? 0
+    const lastReady   = lastReport?.counter_ready   ?? 0
+    const lastAlarm   = lastReport?.counter_alarm   ?? 0
+    const incG  = Math.max(0, curG  - lastGood)
+    const incRj = Math.max(0, curR  - lastReject)
+    const incRt = Math.max(0, curRt - lastRuntime)
+    const incRd = Math.max(0, curRd - lastReady)
+    const incAl = Math.max(0, curAl - lastAlarm)
+    if (!finishCounterGood) { setErrors(['Wpisz stan licznika dobrych sztuk']); return }
+    setSavingFinish(true)
+    const now = new Date()
+    const finishHour = now.getHours()
+    const { error } = await supabase.from('hourly_reports').insert({
+      shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
+      hour_block: `${String(finishHour).padStart(2,'0')}:00–${String(finishHour).padStart(2,'00')}:${String(now.getMinutes()).padStart(2,'0')}`,
+      report_date: dateISO, hour_start: finishHour,
+      good_count: incG, reject_count: incRj, total_count: curG,
+      counter_good: curG, counter_reject: curR,
+      runtime_min: incRt, ready_min: incRd, alarm_min: incAl,
+      downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
+      counter_runtime: curRt, counter_ready: curRd, counter_alarm: curAl,
+      target: activeMachine?.target_per_hour ?? TARGET,
+      notes: finishNotes || 'Zakończenie zlecenia', status: 'submitted',
+      order_id: activeOrderId, order_qty: incG
+    })
+    if (!error) {
+      await supabase.from('production_orders').update({ status: 'completed', completed_at: now.toISOString() }).eq('id', activeOrderId)
+      setActiveOrderId('')
+      setShowFinishOrder(false)
+      setFinishCounterGood(''); setFinishCounterReject('')
+      setFinishCounterRuntime(''); setFinishCounterReady(''); setFinishCounterAlarm('')
+      setFinishNotes('')
+      loadReports(); loadOrders()
+    } else {
+      setErrors([error.message])
+    }
+    setSavingFinish(false)
+  }
 
   const validate = (): string[] => {
     const errs: string[] = []
@@ -304,7 +361,7 @@ export default function OperatorReport() {
                 </div>
                 <div className="flex gap-2">
                   <button onClick={() => handlePauseOrder(activeOrder.id)} className="btn-secondary text-xs py-1.5 px-3">⏸ Pauzuj</button>
-                  <button onClick={() => handleCompleteOrder(activeOrder.id)} className="btn-success text-xs py-1.5 px-3">✓ Zakończ</button>
+                  <button onClick={() => setShowFinishOrder(true)} className="bg-amber-500 hover:bg-amber-400 text-navy-900 font-bold text-xs py-1.5 px-3 rounded-xl transition-all">🏁 Zakończ zlecenie</button>
                 </div>
               </div>
             ) : (
@@ -476,6 +533,56 @@ export default function OperatorReport() {
             <label className="label">Uwagi ogólne</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opcjonalnie..." rows={2} className="input text-sm font-normal resize-none" />
           </div>
+
+          {/* Modal zakończenia zlecenia */}
+          {showFinishOrder && activeOrder && (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
+              <div className="bg-navy-800 border border-amber-500/30 rounded-2xl p-6 w-full max-w-lg">
+                <h2 className="text-xl font-bold text-white mb-1">🏁 Zakończ zlecenie</h2>
+                <p className="text-navy-400 text-sm mb-5">Zlecenie: <span className="font-mono font-bold text-white">{activeOrder.order_number}</span> · Wpisz aktualny stan liczników</p>
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-400 mb-4">
+                  ⚠ Suma czasów NIE musi wynosić 60 minut — wpisz rzeczywisty czas od ostatniego raportu do teraz
+                </div>
+                <div className="space-y-4">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="label">Licznik dobrych (szt)</label>
+                      <input type="number" value={finishCounterGood} onChange={e => setFinishCounterGood(e.target.value)} placeholder="Stan licznika" className="input text-lg font-bold font-mono" />
+                    </div>
+                    <div>
+                      <label className="label">Licznik odrzutu (szt)</label>
+                      <input type="number" value={finishCounterReject} onChange={e => setFinishCounterReject(e.target.value)} placeholder="Stan licznika" className="input text-lg font-bold font-mono" />
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div>
+                      <label className="label text-green-400">Czas pracy</label>
+                      <input type="text" value={finishCounterRuntime} onChange={e => setFinishCounterRuntime(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                    </div>
+                    <div>
+                      <label className="label text-amber-400">Czas gotowości</label>
+                      <input type="text" value={finishCounterReady} onChange={e => setFinishCounterReady(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                    </div>
+                    <div>
+                      <label className="label text-red-400">Czas alarmu</label>
+                      <input type="text" value={finishCounterAlarm} onChange={e => setFinishCounterAlarm(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="label">Uwagi</label>
+                    <input value={finishNotes} onChange={e => setFinishNotes(e.target.value)} placeholder="Opcjonalnie..." className="input" />
+                  </div>
+                </div>
+                <div className="flex gap-3 mt-6">
+                  <button onClick={handleFinishOrder} disabled={savingFinish || !finishCounterGood}
+                    className="flex-1 bg-amber-500 hover:bg-amber-400 text-navy-900 font-bold py-3 rounded-xl transition-all disabled:opacity-50">
+                    {savingFinish ? 'Zapisywanie...' : '🏁 Zakończ i zapisz'}
+                  </button>
+                  <button onClick={() => setShowFinishOrder(false)} className="btn-secondary px-5 py-3">Anuluj</button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {errors.length > 0 && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
