@@ -26,9 +26,13 @@ const NAV_ADMIN = [
   { to: '/admin/machines', label: 'Maszyny', icon: '🤖' },
   { to: '/admin/targets', label: 'Targety', icon: '🎯' },
   { to: '/admin/schedules', label: 'Harmonogram', icon: '📅' },
-  { to: '/admin/orders', label: 'Zlecenia', icon: '📋' },
+  { to: '/admin/orders', label: 'Zlecenia (admin)', icon: '📋' },
   { to: '/admin/audit', label: 'Audit log', icon: '🔍' },
-  { to: '/admin/reset', label: 'Reset danych', icon: '🗑️' }
+  { to: '/admin/reset', label: 'Reset danych', icon: '🗑️' },
+  { to: '/manager', label: '── Live produkcja', icon: '📡' },
+  { to: '/manager/orders', label: '── Zlecenia', icon: '📋' },
+  { to: '/manager/assortments', label: '── Asortyment', icon: '📊' },
+  { to: '/manager/export', label: '── Eksport', icon: '📥' }
 ]
 
 export default function AppLayout() {
