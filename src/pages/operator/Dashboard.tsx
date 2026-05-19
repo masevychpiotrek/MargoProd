@@ -19,6 +19,12 @@ export default function OperatorDashboard() {
   const [reports, setReports] = useState<HourlyReport[]>([])
 
   useEffect(() => {
+    // Auto-detect shift for operator_2
+    const { loadActiveShift } = useShiftStore.getState()
+    loadActiveShift()
+  }, [])
+
+  useEffect(() => {
     if (activeShift) loadReports()
   }, [activeShift])
 

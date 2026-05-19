@@ -91,7 +91,9 @@ export const useShiftStore = create<ShiftState>()(
         if (!profile) return
 
         const today = new Date().toISOString().split('T')[0]
-        const { data } = await supabase
+
+        // Check if operator is operator_1 or operator_2
+        const { data: asOp1 } = await supabase
           .from('shifts')
           .select('*, machine:machines(*)')
           .eq('operator_1_id', profile.id)
@@ -99,8 +101,22 @@ export const useShiftStore = create<ShiftState>()(
           .is('ended_at', null)
           .maybeSingle()
 
-        if (data) {
-          set({ activeShift: data, activeMachine: data.machine as Machine })
+        if (asOp1) {
+          set({ activeShift: asOp1, activeMachine: asOp1.machine as Machine })
+          return
+        }
+
+        // Check as operator_2
+        const { data: asOp2 } = await supabase
+          .from('shifts')
+          .select('*, machine:machines(*)')
+          .eq('operator_2_id', profile.id)
+          .eq('shift_date', today)
+          .is('ended_at', null)
+          .maybeSingle()
+
+        if (asOp2) {
+          set({ activeShift: asOp2, activeMachine: asOp2.machine as Machine })
         }
       }
     }),
