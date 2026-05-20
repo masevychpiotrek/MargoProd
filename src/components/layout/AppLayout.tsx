@@ -5,9 +5,8 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
-import { TutorialProvider } from '@/features/tutorial/TutorialContext'
+import { TutorialProvider, useTutorial } from '@/features/tutorial/TutorialContext'
 import { TutorialOverlay } from '@/features/tutorial/TutorialOverlay'
-import { useTutorial } from '@/features/tutorial/TutorialContext'
 
 const NAV_OPERATOR = [
   { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
