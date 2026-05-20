@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
-import { useTutorial } from '@/features/tutorial/TutorialContext'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -25,7 +24,6 @@ export default function OperatorShift() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, isLoading } = useShiftStore()
-  const { advanceIfWaitingForShift } = useTutorial()
   const [machines, setMachines]       = useState<Machine[]>([])
   const [operators, setOperators]     = useState<Profile[]>([])
   const [assortments, setAssortments] = useState<Assortment[]>([])
@@ -34,11 +32,9 @@ export default function OperatorShift() {
   const [selectedOp2,     setSelectedOp2]     = useState('')
   const [error, setError] = useState('')
 
-  // Blokada — czy na tej maszynie i zmianie już ktoś pracuje
   const [shiftTaken, setShiftTaken] = useState(false)
   const [shiftTakenBy, setShiftTakenBy] = useState('')
 
-  // Zlecenia
   const [orders,            setOrders]            = useState<ProductionOrder[]>([])
   const [selectedOrderId,   setSelectedOrderId]   = useState('')
   const [showNewOrder,      setShowNewOrder]       = useState(false)
@@ -47,21 +43,16 @@ export default function OperatorShift() {
   const [newOrderAssortment,setNewOrderAssortment] = useState('')
   const [newOrderNotes,     setNewOrderNotes]      = useState('')
 
-  // Ostrzeżenie przy kończeniu zmiany
   const [showEndWarning, setShowEndWarning] = useState(false)
   const [missingHours,   setMissingHours]   = useState<number[]>([])
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
-
-    // Pobierz TYLKO operatorów (rola = 'operator')
     getProfiles().then(({ data }) => {
       if (data) setOperators((data as Profile[]).filter(p => p.role === 'operator'))
     })
-
     supabase.from('assortments').select('*').eq('is_active', true).order('sort_order')
       .then(({ data }) => { if (data) setAssortments(data as Assortment[]) })
-
     const h = new Date().getHours()
     if (h >= 6 && h < 14) setSelectedShift('I')
     else if (h >= 14 && h < 22) setSelectedShift('II')
@@ -72,7 +63,6 @@ export default function OperatorShift() {
     if (selectedMachine) loadOrders(selectedMachine)
   }, [selectedMachine])
 
-  // Sprawdź czy zmiana na tej maszynie jest już zajęta
   useEffect(() => {
     if (!selectedMachine || !selectedShift) return
     const check = async () => {
@@ -87,13 +77,10 @@ export default function OperatorShift() {
         .maybeSingle()
 
       if (data) {
-        // Zmiana istnieje — sprawdź czy zalogowany operator jest już jej częścią
         const isParticipant = data.operator_1_id === profile?.id || data.operator_2_id === profile?.id
         if (isParticipant) {
-          // Operator jest już w tej zmianie — wznowi ją przez startShift
           setShiftTaken(false)
         } else {
-          // Ktoś inny ma tę zmianę
           const op1Name = (data.profiles as any)?.full_name ?? 'inny operator'
           setShiftTaken(true)
           setShiftTakenBy(op1Name)
@@ -141,11 +128,9 @@ export default function OperatorShift() {
 
     const { error: shiftError } = await startShift(selectedMachine, selectedShift, selectedOp2 || undefined)
     if (shiftError) { setError(shiftError); return }
-    advanceIfWaitingForShift()
     navigate('/operator/report')
   }
 
-  // Sprawdź czy zalogowany operator może zakończyć tę zmianę
   const canEndShift = activeShift && profile && (
     activeShift.operator_1_id === profile.id ||
     activeShift.operator_2_id === profile.id
@@ -187,7 +172,6 @@ export default function OperatorShift() {
           <p className="text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
         </div>
 
-        {/* Ostrzeżenie przy kończeniu */}
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
             <div className="bg-navy-800 border-2 border-amber-500/50 rounded-2xl p-6 w-full max-w-md">
@@ -197,7 +181,7 @@ export default function OperatorShift() {
               <div className="bg-navy-900 rounded-xl p-3 mb-4">
                 {missingHours.map(h => (
                   <div key={h} className="text-amber-400 font-mono text-sm">
-                    • {String(h).padStart(2,'0')}:00 – {String((h+1)%24).padStart(2,'0')}:00
+                    • {String(h).padStart(2,'0')}:00 – {String((h+1)%24).padStart(2,'00')}:00
                   </div>
                 ))}
               </div>
@@ -241,13 +225,12 @@ export default function OperatorShift() {
               </div>
             </div>
           </div>
-
           <div className="flex gap-3">
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">
               ✏️ Wpisz wynik godziny
             </button>
             {canEndShift ? (
-              <button onClick={handleEndRequest} data-tutorial="shift-end-btn" className="btn-danger px-6 py-3">
+              <button onClick={handleEndRequest} className="btn-danger px-6 py-3">
                 Zakończ zmianę
               </button>
             ) : (
@@ -270,10 +253,9 @@ export default function OperatorShift() {
       </div>
       <div className="card space-y-5">
 
-        {/* Maszyna */}
         <div>
           <label className="label">Maszyna</label>
-          <div className="grid grid-cols-2 gap-3" data-tutorial="shift-machine">
+          <div className="grid grid-cols-2 gap-3">
             {machines.map(m => (
               <button key={m.id} onClick={() => setSelectedMachine(m.id)}
                 className={cn('p-4 rounded-xl border-2 text-left transition-all',
@@ -285,10 +267,9 @@ export default function OperatorShift() {
           </div>
         </div>
 
-        {/* Zmiana */}
         <div>
           <label className="label">Zmiana</label>
-          <div className="grid grid-cols-3 gap-2" data-tutorial="shift-type">
+          <div className="grid grid-cols-3 gap-2">
             {(['I','II','III'] as ShiftType[]).map(s => (
               <button key={s} onClick={() => setSelectedShift(s)}
                 className={cn('p-3 rounded-xl border-2 text-center transition-all',
@@ -300,14 +281,12 @@ export default function OperatorShift() {
           </div>
         </div>
 
-        {/* Blokada — zmiana zajęta */}
         {shiftTaken && selectedMachine && (
           <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm flex items-center gap-2">
             🔒 Ta zmiana jest już prowadzona przez <span className="font-bold">{shiftTakenBy}</span>. Nie możesz jej rozpocząć.
           </div>
         )}
 
-        {/* Zlecenie */}
         {selectedMachine && !shiftTaken && (
           <div>
             <label className="label">Zlecenie produkcyjne</label>
@@ -388,7 +367,6 @@ export default function OperatorShift() {
           </div>
         )}
 
-        {/* Operatorzy — tylko rola 'operator', bez siebie */}
         <div>
           <label className="label">Operator Moduł 1</label>
           <div className="input bg-navy-700 text-navy-300 cursor-not-allowed">{profile?.full_name} (Ty)</div>
@@ -403,15 +381,15 @@ export default function OperatorShift() {
           </select>
         </div>
 
-        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
-        <div data-tutorial="tutorial-alert-info" className="bg-brand/5 border border-brand/20 rounded-xl px-4 py-3 text-xs text-navy-400 flex items-center gap-2">
+        <div className="bg-brand/5 border border-brand/20 rounded-xl px-4 py-3 text-xs text-navy-400 flex items-center gap-2">
           🔔 System przypomni Ci o wpisaniu wyniku pod koniec każdej godziny
         </div>
+
+        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
 
         <button
           onClick={handleStart}
           disabled={isLoading || !selectedMachine || shiftTaken}
-          data-tutorial="shift-start-btn"
           className="btn-primary w-full py-4 text-base disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isLoading ? 'Uruchamianie...' : '🚀 Rozpocznij zmianę'}
