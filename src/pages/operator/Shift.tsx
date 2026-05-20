@@ -270,7 +270,7 @@ export default function OperatorShift() {
         {/* Maszyna */}
         <div>
           <label className="label">Maszyna</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-2 gap-3" data-tutorial="shift-machine">
             {machines.map(m => (
               <button key={m.id} onClick={() => setSelectedMachine(m.id)}
                 className={cn('p-4 rounded-xl border-2 text-left transition-all',
@@ -285,7 +285,7 @@ export default function OperatorShift() {
         {/* Zmiana */}
         <div>
           <label className="label">Zmiana</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-3 gap-2" data-tutorial="shift-type">
             {(['I','II','III'] as ShiftType[]).map(s => (
               <button key={s} onClick={() => setSelectedShift(s)}
                 className={cn('p-3 rounded-xl border-2 text-center transition-all',
@@ -401,10 +401,14 @@ export default function OperatorShift() {
         </div>
 
         {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
+        <div data-tutorial="tutorial-alert-info" className="bg-brand/5 border border-brand/20 rounded-xl px-4 py-3 text-xs text-navy-400 flex items-center gap-2">
+          🔔 System przypomni Ci o wpisaniu wyniku pod koniec każdej godziny
+        </div>
 
         <button
           onClick={handleStart}
           disabled={isLoading || !selectedMachine || shiftTaken}
+          data-tutorial="shift-start-btn"
           className="btn-primary w-full py-4 text-base disabled:opacity-40 disabled:cursor-not-allowed"
         >
           {isLoading ? 'Uruchamianie...' : '🚀 Rozpocznij zmianę'}

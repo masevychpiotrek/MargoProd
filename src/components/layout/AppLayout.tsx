@@ -5,6 +5,9 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
+import { TutorialProvider } from '@/features/tutorial/TutorialContext'
+import { TutorialOverlay } from '@/features/tutorial/TutorialOverlay'
+import { useTutorial } from '@/features/tutorial/TutorialContext'
 
 const NAV_OPERATOR = [
   { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
@@ -35,6 +38,19 @@ const NAV_ADMIN = [
   { to: '/manager/export', label: '── Eksport', icon: '📥' }
 ]
 
+function TutorialButtonInner() {
+  const { startTutorial } = useTutorial()
+  return (
+    <button
+      onClick={startTutorial}
+      className="flex items-center gap-3 px-4 py-2.5 rounded-xl text-xs font-bold text-navy-400 hover:text-white hover:bg-navy-700 border border-transparent hover:border-navy-600 transition-all w-full mt-1"
+    >
+      <span className="text-base">🎓</span>
+      <span>Samouczek</span>
+    </button>
+  )
+}
+
 export default function AppLayout() {
   const { profile, signOut } = useAuthStore()
   const { activeShift, activeMachine } = useShiftStore()
@@ -47,7 +63,8 @@ export default function AppLayout() {
     : NAV_OPERATOR
 
   const handleSignOut = async () => {
-    if (activeShift) {
+    const isOperator = profile?.role === 'operator'
+    if (isOperator && activeShift) {
       if (window.confirm(
         'Masz aktywną zmianę produkcyjną.\n\n' +
         'Czy na pewno chcesz się wylogować?\n\n' +
@@ -63,6 +80,7 @@ export default function AppLayout() {
   }
 
   return (
+    <TutorialProvider>
     <div className="flex min-h-screen bg-navy-900 text-white">
       {/* SIDEBAR */}
       <aside className={cn(
@@ -101,7 +119,7 @@ export default function AppLayout() {
         )}
 
         {/* Navigation */}
-        <nav className="flex-1 py-3 px-2 overflow-y-auto">
+        <nav className="flex-1 py-3 px-2 overflow-y-auto" data-tutorial="sidebar-nav">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
               {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : 'Operator'}
@@ -112,6 +130,11 @@ export default function AppLayout() {
               key={item.to}
               to={item.to}
               end={item.end}
+              data-tutorial={
+                item.to === '/operator/shift' ? 'nav-shift' :
+                item.to === '/operator/report' ? 'nav-report' :
+                undefined
+              }
               className={({ isActive }) => cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-all',
                 isActive
@@ -169,14 +192,14 @@ export default function AppLayout() {
               className={cn(
                 'flex items-center gap-3 px-4 py-3 rounded-xl font-bold text-sm transition-all',
                 'w-full',
-                activeShift
+                (profile?.role === 'operator' && activeShift)
                   ? 'bg-amber-500/10 border border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
                   : 'bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20'
               )}
             >
-              <span className="text-lg flex-shrink-0">{activeShift ? '⚠️' : '🚪'}</span>
+              <span className="text-lg flex-shrink-0">{(profile?.role === 'operator' && activeShift) ? '⚠️' : '🚪'}</span>
               <span>Wyloguj się</span>
-              {activeShift && <span className="ml-auto text-xs opacity-70">zmiana aktywna</span>}
+              {(profile?.role === 'operator' && activeShift) && <span className="ml-auto text-xs opacity-70">zmiana aktywna</span>}
             </button>
           ) : (
             <button
@@ -186,6 +209,10 @@ export default function AppLayout() {
             >
               🚪
             </button>
+          )}
+          {/* Przycisk samouczka — tylko dla operatora i managera */}
+          {sidebarOpen && profile?.role !== 'admin' && (
+            <TutorialButtonInner />
           )}
         </div>
       </aside>
@@ -211,6 +238,8 @@ export default function AppLayout() {
           </div>
         </AlertProvider>
       </main>
+      <TutorialOverlay />
     </div>
+    </TutorialProvider>
   )
 }
