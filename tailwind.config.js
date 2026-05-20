@@ -12,9 +12,9 @@ export default {
           900: '#0f1a2e', 950: '#070d1a'
         },
         brand: {
-          DEFAULT: '#3B82F6',
-          dark: '#2563EB',
-          glow: 'rgba(59,130,246,0.12)'
+          DEFAULT: '#c9a84c',
+          dark: '#9a7a2e',
+          glow: 'rgba(201,168,76,0.12)'
         }
       },
       fontFamily: {
