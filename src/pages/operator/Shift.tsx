@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
+import { useTutorial } from '@/features/tutorial/TutorialContext'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
@@ -24,6 +25,7 @@ export default function OperatorShift() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, isLoading } = useShiftStore()
+  const { advanceIfWaitingForShift } = useTutorial()
   const [machines, setMachines]       = useState<Machine[]>([])
   const [operators, setOperators]     = useState<Profile[]>([])
   const [assortments, setAssortments] = useState<Assortment[]>([])
@@ -139,6 +141,7 @@ export default function OperatorShift() {
 
     const { error: shiftError } = await startShift(selectedMachine, selectedShift, selectedOp2 || undefined)
     if (shiftError) { setError(shiftError); return }
+    advanceIfWaitingForShift()
     navigate('/operator/report')
   }
 
@@ -244,7 +247,7 @@ export default function OperatorShift() {
               ✏️ Wpisz wynik godziny
             </button>
             {canEndShift ? (
-              <button onClick={handleEndRequest} className="btn-danger px-6 py-3">
+              <button onClick={handleEndRequest} data-tutorial="shift-end-btn" className="btn-danger px-6 py-3">
                 Zakończ zmianę
               </button>
             ) : (

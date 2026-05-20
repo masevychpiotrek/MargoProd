@@ -397,7 +397,7 @@ export default function OperatorReport() {
               <div><div className="card-title">Liczniki produkcji</div><div className="card-sub">Stan licznika na koniec godziny</div></div>
               {incGood > 0 && <div className={cn('text-2xl font-bold font-mono', efficiencyColor(efficiency))}>{efficiency}%</div>}
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-3">
+            <div className="grid grid-cols-2 gap-4 mb-3" data-tutorial="report-counter-good">
               <CounterInput label="Licznik dobrych (szt)" sublabel="Wyroby zgodne łącznie" value={counterGood} onChange={setCounterGood} prevValue={prevGood} color="text-green-400" placeholder="np. 4256" />
               <CounterInput label="Licznik odrzutu (szt)" sublabel="Odrzut łącznie" value={counterReject} onChange={setCounterReject} prevValue={prevReject} color="text-red-400" placeholder="np. 328" />
             </div>
@@ -446,7 +446,7 @@ export default function OperatorReport() {
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-4">
+            <div className="grid grid-cols-3 gap-4" data-tutorial="report-counter-times">
               <TimeInput label="Czas pracy" sublabel="Maszyna produkuje" value={counterRuntime} onChange={setCounterRuntime} prevValue={prevRuntime} color="text-green-400" />
               <TimeInput label="Czas gotowości" sublabel="Maszyna stoi, gotowa" value={counterReady} onChange={setCounterReady} prevValue={prevReady} color="text-amber-400" />
               <TimeInput label="Czas alarmu" sublabel="Maszyna zatrzymana" value={counterAlarm} onChange={setCounterAlarm} prevValue={prevAlarm} color="text-red-400" />
@@ -557,7 +557,7 @@ export default function OperatorReport() {
             </div>
           )}
 
-          <button onClick={handleSave} disabled={saving}
+          <button onClick={handleSave} disabled={saving} data-tutorial="report-save-btn"
             className={cn('btn w-full py-4 text-base font-bold', saved ? 'bg-green-500 text-white' : 'btn-primary')}>
             {saving ? 'Zapisywanie...' : saved ? '✓ Zapisano!' : '💾 Zapisz raport godzinowy'}
           </button>
