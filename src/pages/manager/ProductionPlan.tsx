@@ -348,7 +348,7 @@ export default function ProductionPlan() {
                     <table className="w-full text-sm">
                       <thead>
                         <tr className="border-b border-navy-700">
-                          {['Prior.','Produkt','Nr produktu','SKU','Klient','Plan','Wykonanie','Realizacja','Termin','Status','Automaty',''].map(h => (
+                          {['Prior.','Asortyment','Plan','Wykonanie','Realizacja','Termin','Status','Automaty',''].map(h => (
                             <th key={h} className="text-left py-2.5 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
                           ))}
                         </tr>
@@ -370,9 +370,7 @@ export default function ProductionPlan() {
                                 {item.product_name}
                                 {item.assortment && <div className="text-xs text-brand">{item.assortment.name}</div>}
                               </td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-navy-300">{item.product_number || '—'}</td>
-                              <td className="py-2.5 px-3 font-mono text-xs text-navy-300">{item.sku || '—'}</td>
-                              <td className="py-2.5 px-3 text-xs text-navy-300">{item.customer || '—'}</td>
+
                               <td className="py-2.5 px-3 font-bold font-mono text-brand">{item.planned_qty.toLocaleString('pl-PL')}</td>
                               <td className="py-2.5 px-3 font-bold font-mono text-white">{produced.toLocaleString('pl-PL')}</td>
                               <td className="py-2.5 px-3 min-w-[100px]">
@@ -459,28 +457,11 @@ export default function ProductionPlan() {
             </h2>
             <div className="grid grid-cols-2 gap-4">
               <div className="col-span-2">
-                <label className="label">Nazwa produktu *</label>
-                <input value={itemForm.product_name ?? ''} onChange={e => setItemForm(f => ({...f, product_name: e.target.value}))}
-                  placeholder="np. IS PRO 150 cm" className="input" />
-              </div>
-              <div>
-                <label className="label">Numer produktu</label>
-                <input value={itemForm.product_number ?? ''} onChange={e => setItemForm(f => ({...f, product_number: e.target.value}))}
-                  placeholder="np. ISP-150" className="input font-mono" />
-              </div>
-              <div>
-                <label className="label">SKU</label>
-                <input value={itemForm.sku ?? ''} onChange={e => setItemForm(f => ({...f, sku: e.target.value}))}
-                  placeholder="np. 123456" className="input font-mono" />
-              </div>
-              <div>
-                <label className="label">Klient</label>
-                <input value={itemForm.customer ?? ''} onChange={e => setItemForm(f => ({...f, customer: e.target.value}))}
-                  placeholder="np. Medicover" className="input" />
-              </div>
-              <div>
-                <label className="label">Asortyment</label>
-                <select value={itemForm.assortment_id ?? ''} onChange={e => setItemForm(f => ({...f, assortment_id: e.target.value || null}))} className="input">
+                <label className="label">Asortyment *</label>
+                <select value={itemForm.assortment_id ?? ''} onChange={e => {
+                  const a = assortments.find(a => a.id === e.target.value)
+                  setItemForm(f => ({...f, assortment_id: e.target.value || null, product_name: a?.name ?? f.product_name}))
+                }} className="input text-base">
                   <option value="">— Wybierz asortyment —</option>
                   {assortments.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
                 </select>
@@ -489,10 +470,10 @@ export default function ProductionPlan() {
                 <label className="label">Planowana ilość (szt)</label>
                 <input type="number" value={itemForm.planned_qty ?? 0}
                   onChange={e => setItemForm(f => ({...f, planned_qty: parseInt(e.target.value) || 0}))}
-                  className="input text-lg font-bold font-mono" />
+                  className="input text-xl font-bold font-mono" />
               </div>
               <div>
-                <label className="label">Wymagany termin</label>
+                <label className="label">Termin realizacji</label>
                 <input type="date" value={itemForm.deadline ?? ''}
                   onChange={e => setItemForm(f => ({...f, deadline: e.target.value}))} className="input" />
               </div>
