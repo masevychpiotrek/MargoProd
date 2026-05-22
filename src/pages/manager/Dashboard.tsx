@@ -11,13 +11,8 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 const TARGET     = 2100
 const REAL_TARGET = 2500
 
-const RANGES = [
-  { label: '1 dzień',  days: 1  },
-  { label: '5 dni',    days: 5  },
-  { label: '10 dni',   days: 10 },
-  { label: 'Miesiąc',  days: 30 },
-  { label: 'Rok',      days: 365 },
-]
+const MONTHS_PL = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień']
+const VIEW_MODES = ['Dziś','Tydzień','Miesiąc','Rok']
 
 const CHART_OPTS = {
   responsive: true, maintainAspectRatio: false,
@@ -60,11 +55,31 @@ export default function ManagerDashboard() {
   const [monthPlan,    setMonthPlan]    = useState<{ assortment_id: string; planned_qty: number }[]>([])
   const [monthProduced,setMonthProduced]= useState(0)
   const [monthPlanned, setMonthPlanned] = useState(0)
-  const [rangeIdx,     setRangeIdx]     = useState(0)
+  const [viewMode,     setViewMode]     = useState('Miesiąc')
+  const [selYear,      setSelYear]      = useState(new Date().getFullYear())
+  const [selMonth,     setSelMonth]     = useState(new Date().getMonth() + 1)
   const [loading,      setLoading]      = useState(true)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
-  const days = RANGES[rangeIdx].days
+  // Oblicz fromStr i toStr na podstawie viewMode
+  const getDateRange = () => {
+    const now = new Date()
+    if (viewMode === 'Dziś') {
+      return { fromStr: dateISO, toStr: dateISO }
+    } else if (viewMode === 'Tydzień') {
+      const mon = new Date(now)
+      mon.setDate(now.getDate() - now.getDay() + 1)
+      return { fromStr: mon.toISOString().split('T')[0], toStr: dateISO }
+    } else if (viewMode === 'Miesiąc') {
+      return {
+        fromStr: `${selYear}-${String(selMonth).padStart(2,'0')}-01`,
+        toStr:   new Date(selYear, selMonth, 0).toISOString().split('T')[0]
+      }
+    } else { // Rok
+      return { fromStr: `${selYear}-01-01`, toStr: `${selYear}-12-31` }
+    }
+  }
+  const { fromStr: rangeFrom, toStr: rangeTo } = getDateRange()
 
   useEffect(() => {
     load()
@@ -74,7 +89,7 @@ export default function ManagerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
       .subscribe()
     return () => { channel.current?.unsubscribe() }
-  }, [dateISO, rangeIdx])
+  }, [dateISO, viewMode, selYear, selMonth])
 
   const load = async () => {
     setLoading(true)
@@ -91,7 +106,7 @@ export default function ManagerDashboard() {
     const [mRes, sRes, rRes, pRes, ordRes, planRes, planRep] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
       supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').eq('shift_date', dateISO).is('ended_at', null),
-      supabase.from('hourly_reports').select('*').gte('report_date', fromStr).is('deleted_at', null).order('report_date').order('hour_start'),
+      supabase.from('hourly_reports').select('*').gte('report_date', fromStr).lte('report_date', rangeTo).is('deleted_at', null).order('report_date').order('hour_start'),
       supabase.from('hourly_reports').select('good_count,reject_count,runtime_min,ready_min,alarm_min,downtime_min,failure_min').gte('report_date', prevFromStr).lte('report_date', prevToStr).is('deleted_at', null),
       supabase.from('production_orders').select('id,order_number,target_qty,produced_qty,machine_id').in('status', ['active','paused']),
       supabase.from('monthly_plans').select('assortment_id,planned_qty').eq('year', now.getFullYear()).eq('month', now.getMonth() + 1),
@@ -214,14 +229,35 @@ export default function ManagerDashboard() {
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
             <span className="text-xs text-green-400 font-bold">LIVE</span>
           </div>
+          {/* Tryb widoku */}
           <div className="flex gap-1">
-            {RANGES.map((r, i) => (
-              <button key={r.label} onClick={() => setRangeIdx(i)}
-                className={cn('btn text-xs py-1.5 px-3', rangeIdx === i ? 'btn-primary' : 'btn-secondary')}>
-                {r.label}
+            {VIEW_MODES.map(m => (
+              <button key={m} onClick={() => setViewMode(m)}
+                className={cn('btn text-xs py-1.5 px-3', viewMode === m ? 'btn-primary' : 'btn-secondary')}>
+                {m}
               </button>
             ))}
           </div>
+          {/* Selektor miesiąca/roku */}
+          {(viewMode === 'Miesiąc' || viewMode === 'Rok') && (
+            <div className="flex items-center gap-1">
+              <button onClick={() => {
+                if (viewMode === 'Miesiąc') {
+                  if (selMonth === 1) { setSelMonth(12); setSelYear(y => y-1) }
+                  else setSelMonth(m => m-1)
+                } else setSelYear(y => y-1)
+              }} className="btn-secondary text-xs py-1.5 px-2">‹</button>
+              <span className="text-xs font-bold text-white px-2 min-w-[120px] text-center">
+                {viewMode === 'Miesiąc' ? `${MONTHS_PL[selMonth-1]} ${selYear}` : selYear}
+              </span>
+              <button onClick={() => {
+                if (viewMode === 'Miesiąc') {
+                  if (selMonth === 12) { setSelMonth(1); setSelYear(y => y+1) }
+                  else setSelMonth(m => m+1)
+                } else setSelYear(y => y+1)
+              }} className="btn-secondary text-xs py-1.5 px-2">›</button>
+            </div>
+          )}
           <button onClick={load} className="btn-secondary text-xs py-1.5 px-3">↻</button>
         </div>
       </div>
