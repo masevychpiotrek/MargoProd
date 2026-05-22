@@ -5,6 +5,7 @@ import LoginPage from '@/pages/Login'
 
 // Lazy loaded pages
 import { lazy, Suspense } from 'react'
+import { useAuthStore } from '@/stores/authStore'
 const OperatorDashboard  = lazy(() => import('@/pages/operator/Dashboard'))
 const OperatorShift      = lazy(() => import('@/pages/operator/Shift'))
 const OperatorReport     = lazy(() => import('@/pages/operator/Report'))
@@ -40,6 +41,14 @@ function Wrap({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageLoader />}>{children}</Suspense>
 }
 
+
+function RoleRedirect() {
+  const { profile } = useAuthStore()
+  if (profile?.role === 'admin') return <Navigate to="/admin" replace />
+  if (profile?.role === 'manager') return <Navigate to="/manager" replace />
+  return <Navigate to="/operator" replace />
+}
+
 const router = createBrowserRouter([
   {
     path: '/login',
@@ -53,24 +62,18 @@ const router = createBrowserRouter([
       </RequireAuth>
     ),
     children: [
-      { index: true, element: <Navigate to="/operator" replace /> },
+      { index: true, element: <RoleRedirect /> },
 
-      // ── OPERATOR — tylko rola 'operator' ──
+      // ── OPERATOR ──
       {
         path: 'operator',
-        element: <RequireAuth roles="operator"><Wrap><OperatorDashboard /></Wrap></RequireAuth>
-      },
-      {
-        path: 'operator/shift',
-        element: <RequireAuth roles="operator"><Wrap><OperatorShift /></Wrap></RequireAuth>
-      },
-      {
-        path: 'operator/report',
-        element: <RequireAuth roles="operator"><Wrap><OperatorReport /></Wrap></RequireAuth>
-      },
-      {
-        path: 'operator/history',
-        element: <RequireAuth roles="operator"><Wrap><OperatorHistory /></Wrap></RequireAuth>
+        element: <RequireAuth roles='operator'><Outlet /></RequireAuth>,
+        children: [
+          { index: true, element: <Wrap><OperatorDashboard /></Wrap> },
+          { path: 'shift',   element: <Wrap><OperatorShift /></Wrap> },
+          { path: 'report',  element: <Wrap><OperatorReport /></Wrap> },
+          { path: 'history', element: <Wrap><OperatorHistory /></Wrap> }
+        ]
       },
 
       // ── MANAGER ──

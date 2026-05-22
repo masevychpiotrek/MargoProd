@@ -32,7 +32,10 @@ export function RequireAuth({ children, roles }: RequireAuthProps) {
   if (roles && profile) {
     const allowed = Array.isArray(roles) ? roles : [roles]
     if (!allowed.includes(profile.role)) {
-      return <Navigate to="/unauthorized" replace />
+      // Przekieruj na właściwą stronę dla danej roli
+      if (profile.role === 'admin') return <Navigate to="/admin" replace />
+      if (profile.role === 'manager') return <Navigate to="/manager" replace />
+      return <Navigate to="/operator" replace />
     }
   }
 
@@ -41,6 +44,10 @@ export function RequireAuth({ children, roles }: RequireAuthProps) {
 
 export function PublicOnly({ children }: { children: React.ReactNode }) {
   const { user } = useAuthStore()
-  if (user) return <Navigate to="/operator" replace />
+  if (user) {
+    if (profile?.role === 'admin') return <Navigate to="/admin" replace />
+    if (profile?.role === 'manager') return <Navigate to="/manager" replace />
+    return <Navigate to="/operator" replace />
+  }
   return <>{children}</>
 }
