@@ -270,7 +270,7 @@ export default function ManagerDashboard() {
             {loading ? '...' : totalGood.toLocaleString('pl-PL')}
             <TrendBadge pct={trendGood} />
           </div>
-          <div className="kpi-sub">szt · {RANGES[rangeIdx].label.toLowerCase()}</div>
+          <div className="kpi-sub">szt · {viewMode === 'Miesiąc' ? `${MONTHS_PL[selMonth-1]} ${selYear}` : viewMode.toLowerCase()}</div>
         </div>
         <div className="kpi-card">
           <div className="kpi-label">OEE</div>
@@ -516,7 +516,7 @@ export default function ManagerDashboard() {
           </div>
         </div>
         <div className="card">
-          <div className="card-header"><div><div className="card-title">Trend produkcji — {RANGES[rangeIdx].label}</div><div className="card-sub">Dzienna produkcja łącznie</div></div></div>
+          <div className="card-header"><div><div className="card-title">Trend produkcji — {viewMode === 'Miesiąc' ? `${MONTHS_PL[selMonth-1]} ${selYear}` : viewMode}</div><div className="card-sub">Dzienna produkcja łącznie</div></div></div>
           <div style={{ height: 200 }}>
             {trendLabels.length > 0
               ? <Line data={{
