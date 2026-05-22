@@ -5,7 +5,6 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
-import { LogoutButton } from '@/components/shared/FormControls'
 
 const NAV_OPERATOR = [
   { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
@@ -48,6 +47,11 @@ export default function AppLayout() {
     : NAV_OPERATOR
 
   const handleSignOut = async () => {
+    if (activeShift) {
+      if (!window.confirm(
+        'Masz aktywną zmianę produkcyjną.\n\nCzy na pewno chcesz się wylogować?\n\nZmiana pozostanie aktywna — możesz do niej wrócić po ponownym zalogowaniu.'
+      )) return
+    }
     await signOut()
     navigate('/login')
   }
@@ -99,7 +103,7 @@ export default function AppLayout() {
           )}
           {navItems.map(item => (
             <NavLink
-              key={item.to}
+              key={item.to + item.label}
               to={item.to}
               end={item.end}
               className={({ isActive }) => cn(
@@ -113,43 +117,48 @@ export default function AppLayout() {
               {sidebarOpen && <span>{item.label}</span>}
             </NavLink>
           ))}
-
-          {/* Role switcher links */}
-          {sidebarOpen && profile?.role !== 'operator' && (
-            <>
-              <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2 mt-4">
-                Inne widoki
-              </div>
-        
-              {profile?.role === 'admin' && (
-                <NavLink to="/manager" className="flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm text-navy-400 hover:bg-navy-700 hover:text-white transition-all">
-                  <span>👔</span><span>Widok kierownika</span>
-                </NavLink>
-              )}
-            </>
-          )}
         </nav>
 
-        {/* Footer */}
-        <div className="border-t border-navy-700 p-3">
+        {/* Footer — user info + logout */}
+        <div className="border-t border-navy-700 p-3 space-y-2">
+          {/* Zegar */}
           {sidebarOpen && (
-            <div className="mb-3">
-              <div className="font-mono text-xl font-bold text-white">{time}</div>
+            <div className="px-1 mb-1">
+              <div className="font-mono text-lg font-bold text-white">{time}</div>
               <div className="text-xs text-navy-400">{date}</div>
             </div>
           )}
-          <div className="flex items-center gap-2">
+
+          {/* User info */}
+          <div className="flex items-center gap-2 px-1">
             <div className="w-8 h-8 rounded-lg bg-brand/20 flex items-center justify-center text-brand text-xs font-bold flex-shrink-0">
-              {profile?.full_name.slice(0,2).toUpperCase()}
+              {profile?.full_name?.slice(0,2).toUpperCase()}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-medium text-white truncate">{profile?.full_name}</div>
+                <div className="text-xs font-semibold text-white truncate">{profile?.full_name}</div>
                 <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
               </div>
             )}
-            <LogoutButton hasActiveShift={!!activeShift} onLogout={handleSignOut} />
           </div>
+
+          {/* Logout button — pełna szerokość, na dole */}
+          <button
+            onClick={handleSignOut}
+            className={cn(
+              'w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all border',
+              activeShift
+                ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
+                : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
+            )}
+          >
+            <span className="text-base flex-shrink-0">{activeShift ? '⚠️' : '🚪'}</span>
+            {sidebarOpen && (
+              <span className="flex-1 text-left">
+                {activeShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}
+              </span>
+            )}
+          </button>
         </div>
       </aside>
 
