@@ -6,33 +6,53 @@ import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 
+// ── SVG Icons ────────────────────────────────────────────────────────────────
+const Icons = {
+  dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
+  shift:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="9" stroke="currentColor" strokeWidth="1.5"/><path d="M11 6v5l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  report:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M14 2H6a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-4-6z" stroke="currentColor" strokeWidth="1.5"/><path d="M14 2v6h6M8 13h6M8 17h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  history:    (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M3 11a8 8 0 1016 0 8 8 0 00-16 0z" stroke="currentColor" strokeWidth="1.5"/><path d="M11 7v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M3 4L1 2M3 4h3M3 4v3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  live:       (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="3" fill="currentColor"/><circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.5"/><circle cx="11" cy="11" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.25"/></svg>),
+  orders:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="3" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.5"/><path d="M8 12h6M8 16h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  assortment: (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M3 3h6v6H3zM13 3h6v6h-6zM3 13h6v6H3zM13 13h6v6h-6z" stroke="currentColor" strokeWidth="1.5" rx="1"/></svg>),
+  export:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M21 15v4a2 2 0 01-2 2H3a2 2 0 01-2-2v-4" stroke="currentColor" strokeWidth="1.5"/><polyline points="7 10 12 15 17 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><line x1="12" y1="15" x2="12" y2="3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  admin:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="3" stroke="currentColor" strokeWidth="1.5"/><path d="M11 2v2M11 18v2M2 11h2M18 11h2M4.93 4.93l1.41 1.41M15.66 15.66l1.41 1.41M4.93 17.07l1.41-1.41M15.66 6.34l1.41-1.41" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  users:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="9" cy="7" r="4" stroke="currentColor" strokeWidth="1.5"/><path d="M2 20v-1a7 7 0 0114 0v1" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M16 3.13a4 4 0 010 7.75" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M21 20v-1a4 4 0 00-3-3.85" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  machines:   (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="7" width="18" height="12" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 7V5a2 2 0 012-2h4a2 2 0 012 2v2" stroke="currentColor" strokeWidth="1.5"/><circle cx="11" cy="13" r="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
+  targets:    (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="9" stroke="currentColor" strokeWidth="1.5"/><circle cx="11" cy="11" r="5" stroke="currentColor" strokeWidth="1.5"/><circle cx="11" cy="11" r="1.5" fill="currentColor"/></svg>),
+  schedule:   (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="3" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M16 2v4M8 2v4M3 10h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  audit:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M11 20l-7-4V6l7-4 7 4v10l-7 4z" stroke="currentColor" strokeWidth="1.5"/><path d="M11 12a2 2 0 100-4 2 2 0 000 4zM11 12v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  reset:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><polyline points="1 4 1 10 7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  logo:       (<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.5" fill="none"/><path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.75" opacity="0.25"/><circle cx="11" cy="11" r="2.5" fill="#c9a84c"/></svg>),
+}
+
 const NAV_OPERATOR = [
-  { to: '/operator', label: 'Dashboard', icon: '📊', end: true },
-  { to: '/operator/shift', label: 'Moja zmiana', icon: '🔄' },
-  { to: '/operator/report', label: 'Wpisz wynik', icon: '✏️' },
-  { to: '/operator/history', label: 'Historia', icon: '📋' }
+  { to: '/operator', label: 'Dashboard', icon: Icons.dashboard, end: true },
+  { to: '/operator/shift', label: 'Moja zmiana', icon: Icons.shift },
+  { to: '/operator/report', label: 'Wpisz wynik', icon: Icons.report },
+  { to: '/operator/history', label: 'Historia', icon: Icons.history }
 ]
 
 const NAV_MANAGER = [
-  { to: '/manager', label: 'Live produkcja', icon: '📡', end: true },
-  { to: '/manager/orders', label: 'Zlecenia', icon: '📋' },
-  { to: '/manager/assortments', label: 'Asortyment', icon: '📊' },
-  { to: '/manager/export', label: 'Eksport', icon: '📥' }
+  { to: '/manager', label: 'Live produkcja', icon: Icons.live, end: true },
+  { to: '/manager/orders', label: 'Zlecenia', icon: Icons.orders },
+  { to: '/manager/assortments', label: 'Asortyment', icon: Icons.assortment },
+  { to: '/manager/export', label: 'Eksport', icon: Icons.export }
 ]
 
 const NAV_ADMIN = [
-  { to: '/admin', label: 'Panel admina', icon: '⚙️', end: true },
-  { to: '/admin/users', label: 'Użytkownicy', icon: '👤' },
-  { to: '/admin/machines', label: 'Maszyny', icon: '🤖' },
-  { to: '/admin/targets', label: 'Targety', icon: '🎯' },
-  { to: '/admin/schedules', label: 'Harmonogram', icon: '📅' },
-  { to: '/admin/orders', label: 'Zlecenia (admin)', icon: '📋' },
-  { to: '/admin/audit', label: 'Audit log', icon: '🔍' },
-  { to: '/admin/reset', label: 'Reset danych', icon: '🗑️' },
-  { to: '/manager', label: '── Live produkcja', icon: '📡' },
-  { to: '/manager/orders', label: '── Zlecenia', icon: '📋' },
-  { to: '/manager/assortments', label: '── Asortyment', icon: '📊' },
-  { to: '/manager/export', label: '── Eksport', icon: '📥' }
+  { to: '/admin', label: 'Panel admina', icon: Icons.admin, end: true },
+  { to: '/admin/users', label: 'Użytkownicy', icon: Icons.users },
+  { to: '/admin/machines', label: 'Maszyny', icon: Icons.machines },
+  { to: '/admin/targets', label: 'Targety', icon: Icons.targets },
+  { to: '/admin/schedules', label: 'Harmonogram', icon: Icons.schedule },
+  { to: '/admin/orders', label: 'Zlecenia (admin)', icon: Icons.orders },
+  { to: '/admin/audit', label: 'Audit log', icon: Icons.audit },
+  { to: '/admin/reset', label: 'Reset danych', icon: Icons.reset },
+  { to: '/manager', label: '── Live produkcja', icon: Icons.live },
+  { to: '/manager/orders', label: '── Zlecenia', icon: Icons.orders },
+  { to: '/manager/assortments', label: '── Asortyment', icon: Icons.assortment },
+  { to: '/manager/export', label: '── Eksport', icon: Icons.export }
 ]
 
 export default function AppLayout() {
@@ -60,18 +80,18 @@ export default function AppLayout() {
     <div className="flex min-h-screen bg-navy-900 text-white">
       {/* SIDEBAR */}
       <aside className={cn(
-        'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-200 sticky top-0 h-screen',
+        'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-200 sticky top-0 h-screen overflow-hidden flex-shrink-0',
         sidebarOpen ? 'w-60' : 'w-16'
       )}>
         {/* Brand */}
         <div className="p-4 border-b border-navy-700">
           <div className="flex items-center gap-3">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-brand to-blue-400 flex items-center justify-center text-lg flex-shrink-0 shadow-md shadow-brand/20">
-              🏭
+            <div className="w-9 h-9 rounded-xl bg-navy-900 border border-yellow-600/30 flex items-center justify-center flex-shrink-0">
+              {Icons.logo}
             </div>
             {sidebarOpen && (
               <div>
-                <div className="font-bold text-white text-sm leading-tight">MargoProd</div>
+                <div className="font-bold text-white text-sm leading-tight tracking-wide">MargoProd</div>
                 <div className="text-navy-400 text-xs">MES v1.0</div>
               </div>
             )}
@@ -105,7 +125,7 @@ export default function AppLayout() {
             <NavLink
               key={item.to + item.label}
               to={item.to}
-              end={item.end}
+              end={(item as { end?: boolean }).end}
               className={({ isActive }) => cn(
                 'flex items-center gap-3 px-3 py-2.5 rounded-xl mb-1 text-sm font-medium transition-all',
                 isActive
@@ -113,7 +133,7 @@ export default function AppLayout() {
                   : 'text-navy-300 hover:bg-navy-700 hover:text-white border border-transparent'
               )}
             >
-              <span className="text-base flex-shrink-0">{item.icon}</span>
+              <span className="flex-shrink-0">{item.icon}</span>
               {sidebarOpen && <span>{item.label}</span>}
             </NavLink>
           ))}
@@ -121,9 +141,8 @@ export default function AppLayout() {
 
         {/* Footer — user info + logout */}
         <div className="border-t border-navy-700 p-3 space-y-2">
-          {/* Zegar */}
           {sidebarOpen && (
-            <div className="px-1 mb-1">
+            <div className="px-1">
               <div className="font-mono text-lg font-bold text-white">{time}</div>
               <div className="text-xs text-navy-400">{date}</div>
             </div>
@@ -142,7 +161,7 @@ export default function AppLayout() {
             )}
           </div>
 
-          {/* Logout button — pełna szerokość, na dole */}
+          {/* Logout button */}
           <button
             onClick={handleSignOut}
             className={cn(
@@ -152,11 +171,13 @@ export default function AppLayout() {
                 : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
             )}
           >
-            <span className="text-base flex-shrink-0">{activeShift ? '⚠️' : '🚪'}</span>
+            <svg width="16" height="16" viewBox="0 0 22 22" fill="none" className="flex-shrink-0">
+              <path d="M9 21H5a2 2 0 01-2-2V3a2 2 0 012-2h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <polyline points="16 17 21 12 16 7" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+              <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+            </svg>
             {sidebarOpen && (
-              <span className="flex-1 text-left">
-                {activeShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}
-              </span>
+              <span>{activeShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}</span>
             )}
           </button>
         </div>
@@ -164,19 +185,14 @@ export default function AppLayout() {
 
       {/* MAIN CONTENT */}
       <main className="flex-1 flex flex-col min-w-0">
-        {/* Topbar */}
         <div className="bg-navy-800/80 backdrop-blur border-b border-navy-700 px-6 py-3 flex items-center gap-4 sticky top-0 z-10">
-          <button
-            onClick={() => setSidebarOpen(v => !v)}
-            className="text-navy-400 hover:text-white transition-colors"
-          >
-            ☰
+          <button onClick={() => setSidebarOpen(v => !v)} className="text-navy-400 hover:text-white transition-colors">
+            <svg width="18" height="18" viewBox="0 0 22 22" fill="none"><line x1="3" y1="6" x2="19" y2="6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><line x1="3" y1="11" x2="19" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><line x1="3" y1="16" x2="19" y2="16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>
           </button>
           <div className="flex-1" />
           <div className="text-xs text-navy-400 font-mono">{time}</div>
         </div>
 
-        {/* Page content */}
         <AlertProvider>
           <div className="flex-1 p-6">
             <Outlet />
