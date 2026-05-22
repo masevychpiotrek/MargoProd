@@ -13,7 +13,7 @@ const OperatorHistory    = lazy(() => import('@/pages/operator/History'))
 const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ManagerOrders      = lazy(() => import('@/pages/manager/Orders'))
-const ManagerPlan        = lazy(() => import('@/pages/manager/ProductionPlan'))
+const ManagerAssortments = lazy(() => import('@/pages/manager/Assortments'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
 const AdminUsers         = lazy(() => import('@/pages/admin/Users'))
 const AdminAudit         = lazy(() => import('@/pages/admin/Audit'))
@@ -90,8 +90,8 @@ const router = createBrowserRouter([
         element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerOrders /></Wrap></RequireAuth>
       },
       {
-        path: 'manager/plan',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerPlan /></Wrap></RequireAuth>
+        path: 'manager/assortments',
+        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerAssortments /></Wrap></RequireAuth>
       },
 
       // ── ADMIN ──
