@@ -1,4 +1,4 @@
-import { createBrowserRouter, RouterProvider, Navigate } from 'react-router-dom'
+import { createBrowserRouter, RouterProvider, Navigate, Outlet } from 'react-router-dom'
 import { RequireAuth, PublicOnly } from '@/features/auth/RequireAuth'
 import AppLayout from '@/components/layout/AppLayout'
 import LoginPage from '@/pages/Login'
