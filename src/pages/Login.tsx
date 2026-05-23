@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -11,22 +11,16 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
-
-const LOGIN_KEYFRAMES = `
-  @keyframes login-float { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-8px) scale(1.04)} }
-  @keyframes login-glow  { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.5)} }
-  @keyframes login-spin  { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-`
+const HexLogo = () => (
+  <svg width="32" height="32" viewBox="0 0 22 22" fill="none">
+    <path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.5" fill="none"/>
+    <path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.75" opacity="0.25"/>
+    <circle cx="11" cy="11" r="2.5" fill="#c9a84c"/>
+  </svg>
+)
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  useEffect(() => {
-    const el = document.createElement('style')
-    el.textContent = LOGIN_KEYFRAMES
-    document.head.appendChild(el)
-    return () => { el.remove() }
-  }, [])
-
   const { signIn, isLoading } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
 
@@ -45,57 +39,51 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-navy-900 flex items-center justify-center p-4">
-      {/* Background glow */}
-      <div className="absolute inset-0 bg-gradient-to-b from-brand/5 to-transparent pointer-events-none" />
+    <div className="min-h-screen flex items-center justify-center p-4" style={{
+      background: 'radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.13) 0%, #0d1117 55%)',
+      backgroundColor: '#0d1117'
+    }}>
+      {/* Delikatna siatka w tle */}
+      <div className="absolute inset-0 pointer-events-none" style={{
+        backgroundImage: 'linear-gradient(rgba(201,168,76,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(201,168,76,0.04) 1px, transparent 1px)',
+        backgroundSize: '32px 32px'
+      }} />
 
-      <div className="w-full max-w-md relative">
+      <div className="w-full max-w-md relative z-10">
         {/* Logo */}
         <div className="text-center mb-8">
-
-          <div style={{position:'relative',display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:20}}>
-            {/* Rotating outer ring */}
-            <div style={{
-              position:'absolute',width:96,height:96,borderRadius:'50%',
-              border:'1px dashed rgba(201,168,76,.3)',
-              animation:'login-spin 8s linear infinite'
-            }}/>
-            {/* Glow */}
-            <div style={{
-              position:'absolute',width:80,height:80,borderRadius:'50%',
-              background:'radial-gradient(circle,rgba(201,168,76,.2) 0%,transparent 70%)',
-              filter:'blur(12px)',
-              animation:'login-glow 3s ease-in-out infinite'
-            }}/>
-            {/* Logo box */}
-            <div style={{
-              width:72,height:72,borderRadius:16,
-              background:'linear-gradient(135deg,#0D0E16,#111320)',
-              border:'1.5px solid rgba(201,168,76,.5)',
-              display:'flex',alignItems:'center',justifyContent:'center',
-              boxShadow:'0 0 24px rgba(201,168,76,.2)',
-              animation:'login-float 3.5s ease-in-out infinite'
-            }}>
-              <svg width="40" height="40" viewBox="0 0 44 44" fill="none">
-                <path d="M22 3 L39 12.5 L39 31.5 L22 41 L5 31.5 L5 12.5 Z" stroke="#c9a84c" strokeWidth="1.5" fill="none"/>
-                <path d="M22 3 L22 41 M5 12.5 L39 31.5 M39 12.5 L5 31.5" stroke="#c9a84c" strokeWidth=".75" opacity=".3"/>
-                <circle cx="22" cy="22" r="4" fill="#c9a84c" style={{filter:'drop-shadow(0 0 6px rgba(201,168,76,.8))'}}/>
-              </svg>
-            </div>
+          <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 shadow-lg" style={{
+            background: '#161c26',
+            border: '1.5px solid rgba(201,168,76,0.4)',
+            boxShadow: '0 0 32px rgba(201,168,76,0.12)'
+          }}>
+            <HexLogo />
           </div>
-          <h1 className="text-3xl font-bold text-white tracking-tight">MargoLine</h1>
-          <p className="text-sm" style={{color:'#c9a84c',letterSpacing:'.12em',marginTop:4}}>MES v1.0</p>
+          <div className="flex items-center justify-center gap-2 mb-1">
+            <h1 className="text-3xl font-bold text-white tracking-tight">MargoLine</h1>
+            <span className="text-[10px] font-bold px-2 py-0.5 rounded" style={{
+              background: 'rgba(201,168,76,0.15)',
+              color: '#c9a84c',
+              border: '1px solid rgba(201,168,76,0.3)'
+            }}>BETA</span>
+          </div>
+          <p className="text-sm" style={{ color: '#6b7f99' }}>System Monitorowania Produkcji</p>
         </div>
+
         {/* Card */}
-        <div className="bg-navy-800 border border-navy-600 rounded-2xl p-8 shadow-2xl">
+        <div className="rounded-2xl p-8 shadow-2xl" style={{
+          background: 'rgba(22,28,38,0.9)',
+          border: '1px solid rgba(201,168,76,0.15)',
+          backdropFilter: 'blur(12px)'
+        }}>
           <div className="mb-6">
             <h2 className="text-xl font-semibold text-white">Logowanie</h2>
-            <p className="text-navy-200 text-sm mt-1">Wpisz e-mail i hasło aby kontynuować</p>
+            <p className="text-sm mt-1" style={{ color: '#6b7f99' }}>Wpisz e-mail i hasło aby kontynuować</p>
           </div>
 
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
-              <label className="block text-xs font-bold text-navy-200 uppercase tracking-wider mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
                 Adres e-mail
               </label>
               <input
@@ -103,7 +91,13 @@ export default function LoginPage() {
                 type="email"
                 autoComplete="email"
                 placeholder="twoje.imie@margomed.pl"
-                className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-400 focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 transition-all"
+                className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
+                style={{
+                  background: '#0d1117',
+                  border: '1px solid #263145',
+                }}
+                onFocus={e => e.target.style.borderColor = '#c9a84c'}
+                onBlur={e => e.target.style.borderColor = '#263145'}
               />
               {errors.email && (
                 <p className="text-red-400 text-xs mt-1.5">{errors.email.message}</p>
@@ -111,7 +105,7 @@ export default function LoginPage() {
             </div>
 
             <div>
-              <label className="block text-xs font-bold text-navy-200 uppercase tracking-wider mb-2">
+              <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
                 Hasło
               </label>
               <input
@@ -119,7 +113,13 @@ export default function LoginPage() {
                 type="password"
                 autoComplete="current-password"
                 placeholder="••••••••••"
-                className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-400 focus:outline-none focus:border-brand focus:ring-2 focus:ring-brand/20 transition-all"
+                className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
+                style={{
+                  background: '#0d1117',
+                  border: '1px solid #263145',
+                }}
+                onFocus={e => e.target.style.borderColor = '#c9a84c'}
+                onBlur={e => e.target.style.borderColor = '#263145'}
               />
               {errors.password && (
                 <p className="text-red-400 text-xs mt-1.5">{errors.password.message}</p>
@@ -135,7 +135,12 @@ export default function LoginPage() {
             <button
               type="submit"
               disabled={isLoading}
-              className="w-full bg-brand hover:bg-brand-dark disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold py-3.5 rounded-xl transition-all active:scale-[0.98] shadow-lg shadow-brand/20 mt-2"
+              className="w-full font-semibold py-3.5 rounded-xl transition-all mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+              style={{
+                background: 'linear-gradient(135deg, #c9a84c, #9a7a2e)',
+                color: '#0d1117',
+                boxShadow: '0 4px 20px rgba(201,168,76,0.25)'
+              }}
             >
               {isLoading ? (
                 <span className="flex items-center justify-center gap-2">
@@ -149,17 +154,17 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-6 pt-5 border-t border-navy-600">
-            <p className="text-xs text-navy-400 text-center">
-              Domyślne hasło: <span className="text-navy-200 font-mono">Margomed123</span>
+          <div className="mt-6 pt-5" style={{ borderTop: '1px solid #1e2736' }}>
+            <p className="text-xs text-center" style={{ color: '#4a5568' }}>
+              Domyślne hasło: <span className="font-mono" style={{ color: '#8899bb' }}>Margomed123</span>
             </p>
-            <p className="text-xs text-navy-500 text-center mt-1">
+            <p className="text-xs text-center mt-1" style={{ color: '#374151' }}>
               Zmień hasło po pierwszym logowaniu w ustawieniach profilu
             </p>
           </div>
         </div>
 
-        <p className="text-center text-navy-500 text-xs mt-6">
+        <p className="text-center text-xs mt-6" style={{ color: '#374151' }}>
           MargoLine MES v1.0 · Margomed
         </p>
       </div>
