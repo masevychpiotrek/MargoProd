@@ -108,3 +108,4 @@ Zmienne środowiskowe na Vercel:
 * `VITE\_SUPABASE\_URL`
 * `VITE\_SUPABASE\_ANON\_KEY` 
 
+
