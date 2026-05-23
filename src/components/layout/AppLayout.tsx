@@ -62,7 +62,16 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
-  const [showLoading, setShowLoading] = useState(true)
+  const [showLoading, setShowLoading] = useState(false)
+
+  useEffect(() => {
+    // Show loading animation only on first mount
+    const shown = sessionStorage.getItem('ml_loaded')
+    if (!shown) {
+      setShowLoading(true)
+      sessionStorage.setItem('ml_loaded', '1')
+    }
+  }, [])
 
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
@@ -125,14 +134,19 @@ export default function AppLayout() {
   return (
     <div className="flex min-h-screen bg-navy-900 text-white">
       {showLoading && <LoadingScreen onComplete={() => setShowLoading(false)} />}
-      {/* Mobile overlay backdrop */}
+      {/* Mobile overlay backdrop - only on mobile */}
       {sidebarOpen && (
-        <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={() => setSidebarOpen(false)} />
+        <div
+          className="fixed inset-0 bg-black/60 md:hidden"
+          style={{ zIndex: 35 }}
+          onClick={() => setSidebarOpen(false)}
+        />
       )}
 
       <aside className={cn(
         'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-300 h-screen overflow-hidden flex-shrink-0',
-        'fixed md:sticky top-0 z-40',
+        'fixed md:sticky top-0',
+        sidebarOpen ? 'z-40' : 'md:z-10 -z-10 md:z-auto',
         sidebarOpen ? 'w-64 translate-x-0' : 'w-0 md:w-16 -translate-x-full md:translate-x-0'
       )}>
         {/* Brand */}
