@@ -43,7 +43,7 @@ export default function OperatorDashboard() {
     ? Math.round(reports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / reports.length) : 0
 
   return (
-    <div className="space-y-5 page-enter">
+    <div className="space-y-5" style={{ animation: "ml-page-in 0.35s cubic-bezier(0.22,1,0.36,1) both" }}>
       {/* Welcome */}
       <div>
         <h1 className="text-2xl font-bold text-white">Witaj, {profile?.full_name?.split(' ')[0]}!</h1>
@@ -68,9 +68,9 @@ export default function OperatorDashboard() {
           {/* Alert - report due */}
           {!currentHourReported && (
             <div className={cn('rounded-2xl p-4 border', isUrgent
-              ? 'bg-red-500/10 border-red-500/30 alert-pulse-border'
+              ? 'bg-red-500/10 border-red-500/30'
               : 'bg-amber-500/10 border-amber-500/30'
-            )}>
+            )} style={isUrgent ? { animation: 'ml-alert-border 2s ease-in-out infinite' } : {}}>
               <div className="flex items-center justify-between flex-wrap gap-3">
                 <div>
                   <div className={cn('font-bold text-lg', isUrgent ? 'text-red-400' : 'text-amber-400')}>

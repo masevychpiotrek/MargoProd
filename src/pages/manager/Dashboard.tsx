@@ -100,7 +100,7 @@ export default function ManagerDashboard() {
   const trendLabels = sortedDates.map(d => d.slice(5))
 
   return (
-    <div className="space-y-5 page-enter">
+    <div className="space-y-5" style={{ animation: "ml-page-in 0.35s cubic-bezier(0.22,1,0.36,1) both" }}>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Live Produkcja</h1>
@@ -129,7 +129,9 @@ export default function ManagerDashboard() {
           { l: 'Odrzut', v: totalReject.toLocaleString('pl-PL') + ' szt', c: 'text-red-400' },
           { l: 'Przestoje', v: totalDowntime + ' min', c: 'text-amber-400' },
         ].map((k, i) => (
-          <div key={k.l} className="kpi-card kpi-animate" style={{ animationDelay: `${i * 80}ms` }}>
+          <div key={k.l} className="kpi-card" style={{
+            animation: `ml-kpi-in 0.4s cubic-bezier(0.22,1,0.36,1) ${i * 80}ms both`
+          }}>
             <div className="kpi-label">{k.l}</div>
             <div className={cn('kpi-value', k.c)}>{loading ? '...' : k.v}</div>
           </div>
