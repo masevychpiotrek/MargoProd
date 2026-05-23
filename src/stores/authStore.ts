@@ -17,6 +17,8 @@ interface AuthState {
   hasRole: (role: UserRole | UserRole[]) => boolean
 }
 
+let authListenerSet = false
+
 export const useAuthStore = create<AuthState>()(
   persist(
     (set, get) => ({
@@ -27,7 +29,9 @@ export const useAuthStore = create<AuthState>()(
       isInitialized: false,
 
       initialize: async () => {
+        if (get().isInitialized) return
         set({ isLoading: true })
+
         try {
           const { data: { session } } = await supabase.auth.getSession()
           if (session?.user) {
@@ -43,24 +47,16 @@ export const useAuthStore = create<AuthState>()(
           set({ isLoading: false, isInitialized: true })
         }
 
-        // Listen for auth changes — set isLoading during transition
-        supabase.auth.onAuthStateChange(async (event, session) => {
-          if (event === 'SIGNED_IN' && session?.user) {
-            // Don't re-fetch if we already have the profile for this user
-            const current = get()
-            if (current.profile?.id === session.user.id) return
-            set({ isLoading: true })
-            try {
-              const { data: profile } = await supabase
-                .from('profiles').select('*').eq('id', session.user.id).single()
-              set({ user: session.user, session, profile: profile ?? null })
-            } finally {
-              set({ isLoading: false })
+        // Set up listener only once
+        if (!authListenerSet) {
+          authListenerSet = true
+          supabase.auth.onAuthStateChange(async (event, session) => {
+            if (event === 'SIGNED_OUT') {
+              set({ user: null, session: null, profile: null, isInitialized: true })
             }
-          } else if (event === 'SIGNED_OUT') {
-            set({ user: null, session: null, profile: null })
-          }
-        })
+            // SIGNED_IN is handled by signIn() directly — skip to avoid race
+          })
+        }
       },
 
       signIn: async (email, password) => {
@@ -78,9 +74,19 @@ export const useAuthStore = create<AuthState>()(
             return { error: 'Konto jest nieaktywne. Skontaktuj się z administratorem.' }
           }
 
-          set({ user: data.user, session: data.session, profile })
+          // Set everything at once — no race condition
+          set({
+            user: data.user,
+            session: data.session,
+            profile,
+            isLoading: false,
+            isInitialized: true
+          })
+
           await logAudit('login')
           return { error: null }
+        } catch (e: unknown) {
+          return { error: e instanceof Error ? e.message : 'Błąd logowania' }
         } finally {
           set({ isLoading: false })
         }
@@ -89,7 +95,7 @@ export const useAuthStore = create<AuthState>()(
       signOut: async () => {
         await logAudit('logout')
         await supabase.auth.signOut()
-        set({ user: null, session: null, profile: null })
+        set({ user: null, session: null, profile: null, isInitialized: true })
       },
 
       refreshProfile: async () => {
@@ -113,4 +119,3 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 )
-// fix
