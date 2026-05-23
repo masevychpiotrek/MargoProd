@@ -5,6 +5,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
+import LoadingScreen from '@/components/shared/LoadingScreen'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -55,12 +56,13 @@ const NAV_ADMIN = [
 ]
 
 export default function AppLayout() {
-  const { profile, signOut } = useAuthStore()
+  const { profile, signOut, isLoading } = useAuthStore()
   const { activeShift, activeMachine } = useShiftStore()
   const { time, date } = useClock()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [showLoading, setShowLoading] = useState(true)
 
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
@@ -81,8 +83,48 @@ export default function AppLayout() {
     navigate('/login')
   }
 
+  if (isLoading || !profile) {
+    return (
+      <div style={{ display:'flex', minHeight:'100vh', background:'#07080D', alignItems:'center', justifyContent:'center' }}>
+        <style>{`
+          @keyframes pulse-ring { 0%,100%{opacity:0.15;transform:scale(0.95)} 50%{opacity:0.5;transform:scale(1.15)} }
+          @keyframes pulse-ring2 { 0%,100%{opacity:0.08;transform:scale(0.9)} 50%{opacity:0.3;transform:scale(1.3)} }
+          @keyframes pulse-ring3 { 0%,100%{opacity:0.04;transform:scale(0.85)} 50%{opacity:0.15;transform:scale(1.5)} }
+          @keyframes glow-burst { 0%,100%{opacity:0.6} 50%{opacity:1} }
+          @keyframes fade-in { from{opacity:0;transform:translateY(8px)} to{opacity:1;transform:translateY(0)} }
+          .margo-ring1{animation:pulse-ring 2s ease-in-out infinite}
+          .margo-ring2{animation:pulse-ring2 2s ease-in-out infinite 0.3s}
+          .margo-ring3{animation:pulse-ring3 2s ease-in-out infinite 0.6s}
+          .margo-logo{animation:glow-burst 2s ease-in-out infinite}
+          .margo-text{animation:fade-in 0.8s ease forwards 0.4s;opacity:0}
+        `}</style>
+        <div style={{ textAlign:'center', position:'relative' }}>
+          {/* Pierścienie pulsujące */}
+          <div style={{ position:'relative', width:120, height:120, margin:'0 auto 24px' }}>
+            <div className="margo-ring3" style={{ position:'absolute', inset:-24, borderRadius:'50%', border:'1px solid #c9a84c', transformOrigin:'center' }} />
+            <div className="margo-ring2" style={{ position:'absolute', inset:-12, borderRadius:'50%', border:'1px solid #c9a84c', transformOrigin:'center' }} />
+            <div className="margo-ring1" style={{ position:'absolute', inset:0, borderRadius:'50%', border:'1.5px solid #c9a84c', transformOrigin:'center' }} />
+            {/* Logo */}
+            <div className="margo-logo" style={{ position:'absolute', inset:0, display:'flex', alignItems:'center', justifyContent:'center' }}>
+              <svg width="72" height="72" viewBox="0 0 22 22" fill="none">
+                <path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.2" fill="none"/>
+                <path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.5" opacity="0.3"/>
+                <circle cx="11" cy="11" r="2.5" fill="#c9a84c"/>
+              </svg>
+            </div>
+          </div>
+          <div className="margo-text">
+            <div style={{ color:'#fff', fontWeight:700, fontSize:18, letterSpacing:'0.05em', marginBottom:6 }}>MargoProd</div>
+            <div style={{ color:'#c9a84c', fontSize:12, letterSpacing:'0.12em', textTransform:'uppercase', opacity:0.7 }}>MES v1.0 · Ładowanie...</div>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="flex min-h-screen bg-navy-900 text-white">
+      {showLoading && <LoadingScreen onComplete={() => setShowLoading(false)} />}
       {/* Mobile overlay backdrop */}
       {sidebarOpen && (
         <div className="fixed inset-0 z-30 bg-black/60 md:hidden" onClick={() => setSidebarOpen(false)} />
@@ -155,12 +197,12 @@ export default function AppLayout() {
           )}
           <div className="flex items-center gap-2 px-1">
             <div className="w-8 h-8 rounded-lg bg-brand/20 flex items-center justify-center text-brand text-xs font-bold flex-shrink-0">
-              {profile?.full_name?.slice(0,2).toUpperCase()}
+              {profile.full_name?.slice(0,2).toUpperCase() ?? '??'}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-white truncate">{profile?.full_name}</div>
-                <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
+                <div className="text-xs font-semibold text-white truncate">{profile.full_name}</div>
+                <div className="text-xs text-navy-400 capitalize">{profile.role}</div>
               </div>
             )}
           </div>
