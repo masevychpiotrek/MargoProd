@@ -211,12 +211,12 @@ export default function AppLayout() {
           )}
           <div className="flex items-center gap-2 px-1">
             <div className="w-8 h-8 rounded-lg bg-brand/20 flex items-center justify-center text-brand text-xs font-bold flex-shrink-0">
-              {profile.full_name?.slice(0,2).toUpperCase() ?? '??'}
+              {profile?.full_name?.slice(0,2).toUpperCase() ?? '??'}
             </div>
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
-                <div className="text-xs font-semibold text-white truncate">{profile.full_name}</div>
-                <div className="text-xs text-navy-400 capitalize">{profile.role}</div>
+                <div className="text-xs font-semibold text-white truncate">{profile?.full_name}</div>
+                <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
               </div>
             )}
           </div>
