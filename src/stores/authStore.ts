@@ -10,8 +10,6 @@ interface AuthState {
   profile: Profile | null
   isLoading: boolean
   isInitialized: boolean
-
-  // Actions
   initialize: () => Promise<void>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signOut: () => Promise<void>
@@ -34,25 +32,31 @@ export const useAuthStore = create<AuthState>()(
           const { data: { session } } = await supabase.auth.getSession()
           if (session?.user) {
             const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single()
-            set({ user: session.user, session, profile })
+              .from('profiles').select('*').eq('id', session.user.id).single()
+            set({ user: session.user, session, profile: profile ?? null })
+          } else {
+            set({ user: null, session: null, profile: null })
           }
+        } catch {
+          set({ user: null, session: null, profile: null })
         } finally {
           set({ isLoading: false, isInitialized: true })
         }
 
-        // Listen for auth changes
+        // Listen for auth changes — set isLoading during transition
         supabase.auth.onAuthStateChange(async (event, session) => {
           if (event === 'SIGNED_IN' && session?.user) {
-            const { data: profile } = await supabase
-              .from('profiles')
-              .select('*')
-              .eq('id', session.user.id)
-              .single()
-            set({ user: session.user, session, profile })
+            // Don't re-fetch if we already have the profile for this user
+            const current = get()
+            if (current.profile?.id === session.user.id) return
+            set({ isLoading: true })
+            try {
+              const { data: profile } = await supabase
+                .from('profiles').select('*').eq('id', session.user.id).single()
+              set({ user: session.user, session, profile: profile ?? null })
+            } finally {
+              set({ isLoading: false })
+            }
           } else if (event === 'SIGNED_OUT') {
             set({ user: null, session: null, profile: null })
           }
@@ -67,10 +71,7 @@ export const useAuthStore = create<AuthState>()(
           if (!data.session) return { error: 'Brak sesji' }
 
           const { data: profile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', data.user.id)
-            .single()
+            .from('profiles').select('*').eq('id', data.user.id).single()
 
           if (!profile?.is_active) {
             await supabase.auth.signOut()
@@ -95,10 +96,7 @@ export const useAuthStore = create<AuthState>()(
         const { user } = get()
         if (!user) return
         const { data } = await supabase
-          .from('profiles')
-          .select('*')
-          .eq('id', user.id)
-          .single()
+          .from('profiles').select('*').eq('id', user.id).single()
         if (data) set({ profile: data })
       },
 
@@ -110,8 +108,8 @@ export const useAuthStore = create<AuthState>()(
       }
     }),
     {
-      name: 'margoprod-auth',
-      partialize: (state) => ({ profile: state.profile })
+      name: 'margoline-auth',
+      partialize: (state) => ({ user: state.user, session: state.session, profile: state.profile })
     }
   )
 )
