@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -11,8 +11,22 @@ const schema = z.object({
 })
 type FormData = z.infer<typeof schema>
 
+
+const LOGIN_KEYFRAMES = `
+  @keyframes login-float { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-8px) scale(1.04)} }
+  @keyframes login-glow  { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.5)} }
+  @keyframes login-spin  { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
+`
+
 export default function LoginPage() {
   const navigate = useNavigate()
+  useEffect(() => {
+    const el = document.createElement('style')
+    el.textContent = LOGIN_KEYFRAMES
+    document.head.appendChild(el)
+    return () => { el.remove() }
+  }, [])
+
   const { signIn, isLoading } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
 
@@ -38,11 +52,7 @@ export default function LoginPage() {
       <div className="w-full max-w-md relative">
         {/* Logo */}
         <div className="text-center mb-8">
-          <style>{`
-            @keyframes login-float { 0%,100%{transform:translateY(0) scale(1)} 50%{transform:translateY(-8px) scale(1.04)} }
-            @keyframes login-glow  { 0%,100%{opacity:.4;transform:scale(1)} 50%{opacity:1;transform:scale(1.5)} }
-            @keyframes login-spin  { 0%{transform:rotate(0deg)} 100%{transform:rotate(360deg)} }
-          `}</style>
+
           <div style={{position:'relative',display:'inline-flex',alignItems:'center',justifyContent:'center',marginBottom:20}}>
             {/* Rotating outer ring */}
             <div style={{
