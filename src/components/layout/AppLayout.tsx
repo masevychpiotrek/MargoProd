@@ -67,7 +67,7 @@ export default function AppLayout() {
     : NAV_OPERATOR
 
   const handleSignOut = async () => {
-    if (activeShift) {
+    if (activeShift && profile?.role === 'operator') {
       setShowLogoutModal(true)
       return
     }
