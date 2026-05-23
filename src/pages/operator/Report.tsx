@@ -296,9 +296,9 @@ export default function OperatorReport() {
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
                 {(() => {
                   const shiftHours: Record<string, number[]> = {
-                    'I':   [7,8,9,10,11,12,13,14],
-                    'II':  [15,16,17,18,19,20,21,22],
-                    'III': [23,0,1,2,3,4,5,6]
+                    'I':   [6,7,8,9,10,11,12,13],
+                    'II':  [14,15,16,17,18,19,20,21],
+                    'III': [22,23,0,1,2,3,4,5]
                   }
                   const hours = activeShift ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h)) : Array.from({length:24},(_,h)=>h)
                   const reported = existingReports.map(r => r.hour_start)

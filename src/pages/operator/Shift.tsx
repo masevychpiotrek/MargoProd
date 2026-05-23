@@ -16,9 +16,9 @@ interface Assortment { id: string; name: string; code: string }
 
 // Godziny poszczególnych zmian
 const SHIFT_HOURS: Record<ShiftType, number[]> = {
-  'I':   [7,8,9,10,11,12,13,14],
-  'II':  [15,16,17,18,19,20,21,22],
-  'III': [23,0,1,2,3,4,5,6]
+  'I':   [6,7,8,9,10,11,12,13],
+  'II':  [14,15,16,17,18,19,20,21],
+  'III': [22,23,0,1,2,3,4,5]
 }
 
 export default function OperatorShift() {
