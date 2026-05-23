@@ -74,3 +74,27 @@
     @apply text-xs text-navy-400 mt-1;
   }
 }
+
+/* ── MargoLine animations ──────────────────────────────────────── */
+@keyframes ml-page-in {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes ml-alert-border {
+  0%,100% { box-shadow: 0 0 0 1px rgba(201,168,76,.15); }
+  50%     { box-shadow: 0 0 0 2px rgba(239,68,68,.7), 0 0 12px rgba(239,68,68,.2); }
+}
+@keyframes ml-kpi-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.page-enter {
+  animation: ml-page-in 0.35s cubic-bezier(0.22,1,0.36,1) both;
+}
+.kpi-animate {
+  animation: ml-kpi-in 0.4s cubic-bezier(0.22,1,0.36,1) both;
+}
+.alert-pulse-border {
+  animation: ml-alert-border 2s ease-in-out infinite;
+}

@@ -3,13 +3,15 @@ import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { efficiencyColor, efficiencyBg, cn } from '@/lib/utils'
 import type { HourlyReport, Shift, Machine } from '@/types/database'
+import { useCountUp } from '@/hooks/useCountUp'
+import { AnimatedBar } from '@/components/shared/AnimatedBar'
+import { MachineStatusDot, getMachineStatus } from '@/components/shared/MachineStatus'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend)
 
-const TARGET    = 2100
-const REAL_TARGET = 2500
+const TARGET = 2100
 
 const CHART_OPTS = {
   responsive: true, maintainAspectRatio: false,
@@ -20,22 +22,16 @@ const CHART_OPTS = {
   }
 }
 
-function minsToHHMM(m: number) {
-  if (!m) return '00:00'
-  return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`
-}
-
 interface MachineStatus {
   machine: Machine
   activeShift: (Shift & { operator_1?: { full_name: string }, operator_2?: { full_name: string } }) | null
-  todayReports: (HourlyReport & { ready_min?: number; alarm_min?: number })[]
+  todayReports: HourlyReport[]
 }
 
 export default function ManagerDashboard() {
   const { time, date, dateISO, hour } = useClock()
-  const [machines,    setMachines]    = useState<MachineStatus[]>([])
-  const [allReports,  setAllReports]  = useState<(HourlyReport & { ready_min?: number; alarm_min?: number })[]>([])
-  const [weekReports, setWeekReports] = useState<(HourlyReport & { ready_min?: number; alarm_min?: number })[]>([])
+  const [machines, setMachines] = useState<MachineStatus[]>([])
+  const [allReports, setAllReports] = useState<HourlyReport[]>([])
   const [range, setRange] = useState<'today'|'7d'|'30d'>('today')
   const [loading, setLoading] = useState(true)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -54,25 +50,18 @@ export default function ManagerDashboard() {
     setLoading(true)
     const days = range === '7d' ? 7 : range === '30d' ? 30 : 1
     const fromDate = new Date(); fromDate.setDate(fromDate.getDate() - days + 1)
-    const fromStr  = fromDate.toISOString().split('T')[0]
+    const fromStr = fromDate.toISOString().split('T')[0]
 
-    // Week for trend comparison
-    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7)
-    const weekStr  = weekAgo.toISOString().split('T')[0]
-
-    const [mRes, sRes, rRes, wRes] = await Promise.all([
+    const [mRes, sRes, rRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
       supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').eq('shift_date', dateISO).is('ended_at', null),
-      supabase.from('hourly_reports').select('*').gte('report_date', fromStr).is('deleted_at', null).order('report_date').order('hour_start'),
-      supabase.from('hourly_reports').select('good_count, reject_count, runtime_min, ready_min, alarm_min, report_date').gte('report_date', weekStr).is('deleted_at', null)
+      supabase.from('hourly_reports').select('*').gte('report_date', fromStr).is('deleted_at', null).order('report_date').order('hour_start')
     ])
 
     const mList = (mRes.data ?? []) as Machine[]
     const sList = sRes.data ?? []
-    const rList = (rRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
-    const wList = (wRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
+    const rList = (rRes.data ?? []) as HourlyReport[]
     setAllReports(rList)
-    setWeekReports(wList)
 
     setMachines(mList.map(m => ({
       machine: m,
@@ -83,57 +72,35 @@ export default function ManagerDashboard() {
   }
 
   const todayReports = allReports.filter(r => r.report_date === dateISO)
+  const totalGood   = todayReports.reduce((s, r) => s + r.good_count, 0)
+  const totalReject = todayReports.reduce((s, r) => s + r.reject_count, 0)
+  const avgEff = todayReports.length > 0 ? Math.round(todayReports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / todayReports.length) : 0
+  const oee = todayReports.length > 0 ? Math.round(totalGood / (todayReports.length * TARGET) * 100) : 0
+  const totalDowntime = todayReports.reduce((s, r) => s + r.downtime_min + r.failure_min, 0)
 
-  // ── KPI obliczenia ────────────────────────────────────────────────────────
-  const totalGood    = todayReports.reduce((s,r) => s + r.good_count, 0)
-  const totalReject  = todayReports.reduce((s,r) => s + r.reject_count, 0)
-  const totalRuntime = todayReports.reduce((s,r) => s + r.runtime_min, 0)
-  const totalDowntime= todayReports.reduce((s,r) => s + r.downtime_min + r.failure_min, 0)
-  const totalAlarm   = todayReports.reduce((s,r) => s + (r.alarm_min ?? 0), 0)
-  const totalReady   = todayReports.reduce((s,r) => s + (r.ready_min ?? 0), 0)
-  const totalTime    = totalRuntime + totalDowntime + totalAlarm + totalReady
-
-  const avgEff       = todayReports.length > 0 ? Math.round(todayReports.reduce((s,r) => s + Number(r.efficiency_pct), 0) / todayReports.length) : 0
-  const oee          = todayReports.length > 0 ? Math.round(totalGood / (todayReports.length * TARGET) * 100) : 0
-  const rejectPct    = (totalGood + totalReject) > 0 ? Math.round(totalReject / (totalGood + totalReject) * 100) : 0
-  const availability = totalTime > 0 ? Math.round(totalRuntime / totalTime * 100) : 0
-
-  // Efektywność czasowa (na podstawie raportów z order_qty)
-  const totalOrderQty = todayReports.reduce((s,r) => s + (((r as { order_qty?: number }).order_qty) ?? 0), 0)
-  const planMins      = totalOrderQty > 0 ? Math.round(totalOrderQty / REAL_TARGET * 60) : 0
-  const faktMins      = totalRuntime + totalDowntime + totalAlarm
-  const timeEfficiency = planMins > 0 && faktMins > 0 ? Math.round(planMins / faktMins * 100) : null
-
-  // Trend vs tydzień temu
-  const prevWeekGood = weekReports.filter(r => r.report_date !== dateISO).reduce((s,r) => s + r.good_count, 0)
-  const prevWeekDays = [...new Set(weekReports.filter(r => r.report_date !== dateISO).map(r => r.report_date))].length
-  const prevWeekAvgDay = prevWeekDays > 0 ? Math.round(prevWeekGood / prevWeekDays) : 0
-  const trendVsLastWeek = prevWeekAvgDay > 0 ? Math.round((totalGood - prevWeekAvgDay) / prevWeekAvgDay * 100) : null
-
-  // Najlepsza godzina
-  const bestReport = todayReports.length > 0
-    ? todayReports.reduce((best, r) => Number(r.efficiency_pct) > Number(best.efficiency_pct) ? r : best, todayReports[0])
-    : null
-
-  // Wykresy
-  const activeHours  = Array.from({length:24},(_,h)=>h).filter(h => machines.some(ms => ms.todayReports.some(r => r.hour_start === h)))
-  const hourLabels   = activeHours.map(h => `${String(h).padStart(2,'0')}:00`)
-  const hourlyDatasets = machines.map((ms,i) => ({
+  const activeHours = Array.from({ length: 24 }, (_, h) => h).filter(h =>
+    machines.some(ms => ms.todayReports.some(r => r.hour_start === h))
+  )
+  const hourLabels = activeHours.map(h => `${String(h).padStart(2,'0')}:00`)
+  const hourlyDatasets = machines.map((ms, i) => ({
     label: ms.machine.name,
     data: activeHours.map(h => ms.todayReports.find(r => r.hour_start === h)?.good_count ?? 0),
     backgroundColor: i === 0 ? 'rgba(59,130,246,0.75)' : 'rgba(6,182,212,0.75)',
     borderRadius: 4
   }))
 
-  // Trend tygodniowy
-  const dateMap: Record<string, number> = {}
-  allReports.forEach(r => { dateMap[r.report_date] = (dateMap[r.report_date] ?? 0) + r.good_count })
-  const sortedDates  = Object.keys(dateMap).sort()
-  const trendLabels  = sortedDates.map(d => d.slice(5))
+  const dateMap: Record<string, { a3: number, a4: number }> = {}
+  allReports.forEach(r => {
+    if (!dateMap[r.report_date]) dateMap[r.report_date] = { a3: 0, a4: 0 }
+    const m = machines.find(ms => ms.machine.id === r.machine_id)
+    if (m?.machine.code === 'A3') dateMap[r.report_date].a3 += r.good_count
+    if (m?.machine.code === 'A4') dateMap[r.report_date].a4 += r.good_count
+  })
+  const sortedDates = Object.keys(dateMap).sort()
+  const trendLabels = sortedDates.map(d => d.slice(5))
 
   return (
-    <div className="space-y-5">
-      {/* Header */}
+    <div className="space-y-5 page-enter">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-white">Live Produkcja</h1>
@@ -154,69 +121,36 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      {/* KPI row 1 — produkcja */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-        {[
-          { l: 'Produkcja łącznie', v: totalGood.toLocaleString('pl-PL') + ' szt', c: 'text-brand',
-            sub: trendVsLastWeek !== null ? `${trendVsLastWeek >= 0 ? '↑' : '↓'} ${Math.abs(trendVsLastWeek)}% vs ostatni tydzień` : 'dziś' },
-          { l: 'OEE', v: oee + '%', c: efficiencyColor(oee), sub: 'Overall Equipment Effectiveness' },
-          { l: 'Śr. efektywność', v: avgEff > 0 ? avgEff + '%' : '—', c: efficiencyColor(avgEff), sub: `vs target ${TARGET} szt/h` },
-          { l: 'Odrzut', v: rejectPct + '%', c: rejectPct > 5 ? 'text-red-400' : rejectPct > 2 ? 'text-amber-400' : 'text-green-400',
-            sub: `${totalReject.toLocaleString('pl-PL')} szt` },
-        ].map(k => (
-          <div key={k.l} className="kpi-card">
-            <div className="kpi-label">{k.l}</div>
-            <div className={cn('kpi-value', k.c)}>{loading ? '...' : k.v}</div>
-            <div className="kpi-sub">{k.sub}</div>
-          </div>
-        ))}
-      </div>
-
-      {/* KPI row 2 — czasy i efektywność */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { l: 'Dostępność maszyn', v: availability > 0 ? availability + '%' : '—',
-            c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400',
-            sub: `czas pracy ${minsToHHMM(totalRuntime)}` },
-          { l: 'Czas przestojów', v: minsToHHMM(totalDowntime),
-            c: totalDowntime > 60 ? 'text-red-400' : totalDowntime > 30 ? 'text-amber-400' : 'text-green-400',
-            sub: 'postoje + awarie' },
-          { l: 'Czas alarmów', v: minsToHHMM(totalAlarm),
-            c: totalAlarm > 60 ? 'text-red-400' : totalAlarm > 30 ? 'text-amber-400' : 'text-green-400',
-            sub: 'czas w alarmie' },
-          { l: 'Ef. czasowa zleceń', v: timeEfficiency !== null ? timeEfficiency + '%' : '—',
-            c: timeEfficiency === null ? 'text-navy-400' : timeEfficiency >= 90 ? 'text-green-400' : timeEfficiency >= 75 ? 'text-amber-400' : 'text-red-400',
-            sub: timeEfficiency !== null ? `plan ${minsToHHMM(planMins)} vs fakt ${minsToHHMM(faktMins)}` : 'brak zleceń z planem' },
-          { l: 'Najlepsza godzina', v: bestReport ? bestReport.hour_block : '—',
-            c: 'text-cyan-400',
-            sub: bestReport ? `${bestReport.good_count.toLocaleString('pl-PL')} szt · ${bestReport.efficiency_pct}%` : 'brak danych' },
-        ].map(k => (
-          <div key={k.l} className="kpi-card">
+          { l: 'Produkcja', v: totalGood.toLocaleString('pl-PL') + ' szt', c: 'text-brand' },
+          { l: 'OEE', v: oee + '%', c: efficiencyColor(oee) },
+          { l: 'Śr. efektywność', v: avgEff > 0 ? avgEff + '%' : '—', c: efficiencyColor(avgEff) },
+          { l: 'Odrzut', v: totalReject.toLocaleString('pl-PL') + ' szt', c: 'text-red-400' },
+          { l: 'Przestoje', v: totalDowntime + ' min', c: 'text-amber-400' },
+        ].map((k, i) => (
+          <div key={k.l} className="kpi-card kpi-animate" style={{ animationDelay: `${i * 80}ms` }}>
             <div className="kpi-label">{k.l}</div>
-            <div className={cn('kpi-value text-xl', k.c)}>{loading ? '...' : k.v}</div>
-            <div className="kpi-sub">{k.sub}</div>
+            <div className={cn('kpi-value', k.c)}>{loading ? '...' : k.v}</div>
           </div>
         ))}
       </div>
 
-      {/* Machine cards */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         {machines.map(ms => {
-          const g    = ms.todayReports.reduce((s,r) => s + r.good_count, 0)
-          const rej  = ms.todayReports.reduce((s,r) => s + r.reject_count, 0)
-          const rt   = ms.todayReports.reduce((s,r) => s + r.runtime_min, 0)
-          const al   = ms.todayReports.reduce((s,r) => s + (r.alarm_min ?? 0), 0)
-          const eff  = ms.todayReports.length > 0 ? Math.round(ms.todayReports.reduce((s,r) => s + Number(r.efficiency_pct), 0) / ms.todayReports.length) : 0
-          const rPct = (g + rej) > 0 ? Math.round(rej / (g + rej) * 100) : 0
+          const g = ms.todayReports.reduce((s, r) => s + r.good_count, 0)
+          const rej = ms.todayReports.reduce((s, r) => s + r.reject_count, 0)
+          const eff = ms.todayReports.length > 0
+            ? Math.round(ms.todayReports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / ms.todayReports.length) : 0
           const reported = ms.todayReports.some(r => r.hour_start === hour)
-          const online   = !!ms.activeShift
+          const online = !!ms.activeShift
           const ops = [ms.activeShift?.operator_1?.full_name, ms.activeShift?.operator_2?.full_name].filter(Boolean).join(' / ')
 
           return (
             <div key={ms.machine.id} className={cn('card border-2', online ? 'border-brand/20' : 'border-navy-700')}>
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
-                  <div className={cn('w-3 h-3 rounded-full', online ? 'bg-green-400 animate-pulse' : 'bg-navy-600')} />
+                  <MachineStatusDot status={getMachineStatus(online, ms.todayReports.reduce((s,r)=>s+(r as {alarm_min?:number}).alarm_min??0,0))} size={12} />
                   <div>
                     <div className="font-bold text-white text-lg">{ms.machine.name}</div>
                     <div className="text-xs text-navy-400">{online ? `Zmiana ${ms.activeShift?.shift_type} · ${ops || '—'}` : 'Brak aktywnej zmiany'}</div>
@@ -228,38 +162,36 @@ export default function ManagerDashboard() {
                 )}
               </div>
 
-              <div className="grid grid-cols-4 gap-2 mb-3">
+              <div className="grid grid-cols-3 gap-2 mb-3">
                 {[
                   { l: 'Produkcja', v: g.toLocaleString('pl-PL'), c: 'text-white' },
                   { l: 'Efektywność', v: eff > 0 ? eff + '%' : '—', c: efficiencyColor(eff) },
-                  { l: '% odrzutu', v: rPct > 0 ? rPct + '%' : '—', c: rPct > 5 ? 'text-red-400' : 'text-green-400' },
-                  { l: 'Alarm', v: al > 0 ? minsToHHMM(al) : '—', c: al > 30 ? 'text-red-400' : 'text-navy-400' }
+                  { l: 'Odrzut', v: rej || '—', c: 'text-red-400' }
                 ].map(s => (
                   <div key={s.l} className="bg-navy-900 rounded-xl p-2.5 text-center">
                     <div className="text-xs text-navy-500 mb-1">{s.l}</div>
-                    <div className={cn('text-base font-bold font-mono', s.c)}>{s.v}</div>
+                    <div className={cn('text-lg font-bold font-mono', s.c)}>{s.v}</div>
                   </div>
                 ))}
               </div>
 
               {eff > 0 && (
                 <div className="mb-3">
-                  <div className="h-2 bg-navy-900 rounded-full overflow-hidden">
-                    <div className={cn('h-full rounded-full', efficiencyBg(eff))} style={{ width: `${Math.min(eff,100)}%` }} />
-                  </div>
+                  <AnimatedBar pct={eff} color={eff >= 90 ? 'bg-green-500' : eff >= 75 ? 'bg-amber-500' : 'bg-brand'} height="h-2" />
                 </div>
               )}
 
-              {/* Mini chart */}
               {ms.todayReports.length > 0 && (
                 <div className="flex items-end gap-px h-8 mt-1">
-                  {Array.from({length:24},(_,h) => {
+                  {Array.from({ length: 24 }, (_, h) => {
                     const r = ms.todayReports.find(r => r.hour_start === h)
                     const e = r ? Number(r.efficiency_pct) : 0
                     return (
                       <div key={h} className="flex-1 flex flex-col justify-end h-full">
-                        {r ? <div className={cn('rounded-sm', efficiencyBg(e))} style={{ height: `${Math.max(e,8)}%` }} title={`${h}:00 — ${r.good_count} szt`} />
-                           : <div className="rounded-sm bg-navy-800 opacity-30" style={{ height: '3px' }} />}
+                        {r
+                          ? <div className={cn('rounded-sm', efficiencyBg(e))} style={{ height: `${Math.max(e, 8)}%` }} title={`${h}:00 — ${r.good_count} szt`} />
+                          : <div className="rounded-sm bg-navy-800 opacity-30" style={{ height: '3px' }} />
+                        }
                       </div>
                     )
                   })}
@@ -270,14 +202,14 @@ export default function ManagerDashboard() {
         })}
       </div>
 
-      {/* Charts */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
         <div className="card">
           <div className="card-header"><div><div className="card-title">Przyrost godzinowy — dziś</div><div className="card-sub">Automat 3 vs Automat 4</div></div></div>
           <div style={{ height: 200 }}>
             {hourLabels.length > 0
               ? <Bar data={{ labels: hourLabels, datasets: hourlyDatasets }} options={CHART_OPTS as never} />
-              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych</div>}
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych dzisiaj</div>
+            }
           </div>
         </div>
 
@@ -288,27 +220,28 @@ export default function ManagerDashboard() {
               ? <Line data={{
                   labels: trendLabels,
                   datasets: [
-                    { label: 'Produkcja łącznie', data: sortedDates.map(d => dateMap[d]), borderColor: '#3B82F6', tension: 0.4, fill: false, pointRadius: 3, spanGaps: true }
+                    { label: 'Automat 3', data: sortedDates.map(d => dateMap[d].a3), borderColor: '#3B82F6', tension: 0.4, fill: false, pointRadius: 3, spanGaps: true },
+                    { label: 'Automat 4', data: sortedDates.map(d => dateMap[d].a4), borderColor: '#06B6D4', tension: 0.4, fill: false, pointRadius: 3, spanGaps: true }
                   ]
                 }} options={CHART_OPTS as never} />
-              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych</div>}
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych</div>
+            }
           </div>
         </div>
       </div>
 
-      {/* Table */}
       <div className="card">
         <div className="card-header">
           <div><div className="card-title">Raporty godzinowe — dziś</div><div className="card-sub">{todayReports.length} wpisów</div></div>
         </div>
         {todayReports.length === 0
-          ? <div className="text-center py-8 text-navy-500">Brak raportów</div>
+          ? <div className="text-center py-8 text-navy-500">Brak raportów dzisiaj</div>
           : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-navy-700">
-                    {['Godzina','Maszyna','Przyrost','Odrzut','Efektyw.','Czas pracy','Alarm','Uwagi'].map(h => (
+                    {['Godzina','Maszyna','Przyrost','Odrzut','Efektywnść','Czas pracy','Przestój','Uwagi'].map(h => (
                       <th key={h} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -324,8 +257,8 @@ export default function ManagerDashboard() {
                         <td className="py-2 px-3 font-bold font-mono text-white">{r.good_count.toLocaleString('pl-PL')}</td>
                         <td className="py-2 px-3 font-mono text-red-400 text-xs">{r.reject_count || '—'}</td>
                         <td className="py-2 px-3"><span className={cn('font-bold', efficiencyColor(eff))}>{eff}%</span></td>
-                        <td className="py-2 px-3 font-mono text-xs text-green-400">{minsToHHMM(r.runtime_min)}</td>
-                        <td className="py-2 px-3 font-mono text-xs text-red-400">{r.alarm_min ? minsToHHMM(r.alarm_min) : '—'}</td>
+                        <td className="py-2 px-3 font-mono text-xs text-navy-400">{r.runtime_min} min</td>
+                        <td className="py-2 px-3 font-mono text-xs text-amber-400">{(r.downtime_min + r.failure_min) > 0 ? (r.downtime_min + r.failure_min) + ' min' : '—'}</td>
                         <td className="py-2 px-3 text-xs text-navy-500 max-w-xs truncate">{r.notes || r.downtime_reason || '—'}</td>
                       </tr>
                     )

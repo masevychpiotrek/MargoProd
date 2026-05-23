@@ -43,7 +43,7 @@ export default function OperatorDashboard() {
     ? Math.round(reports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / reports.length) : 0
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-5 page-enter">
       {/* Welcome */}
       <div>
         <h1 className="text-2xl font-bold text-white">Witaj, {profile?.full_name?.split(' ')[0]}!</h1>
@@ -68,7 +68,7 @@ export default function OperatorDashboard() {
           {/* Alert - report due */}
           {!currentHourReported && (
             <div className={cn('rounded-2xl p-4 border', isUrgent
-              ? 'bg-red-500/10 border-red-500/30 animate-pulse'
+              ? 'bg-red-500/10 border-red-500/30 alert-pulse-border'
               : 'bg-amber-500/10 border-amber-500/30'
             )}>
               <div className="flex items-center justify-between flex-wrap gap-3">
@@ -107,7 +107,7 @@ export default function OperatorDashboard() {
 
           {/* KPI cards */}
           <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
-            <div className="kpi-card" style={{ '--before-bg': 'var(--brand)' } as React.CSSProperties}>
+            <div className="kpi-card kpi-animate" style={{ '--before-bg': 'var(--brand)', animationDelay: '0ms' } as React.CSSProperties}>
               <div className="kpi-label">Produkcja łącznie</div>
               <div className="kpi-value">{totalGood.toLocaleString('pl-PL')}</div>
               <div className="kpi-sub">szt. tej zmiany</div>
