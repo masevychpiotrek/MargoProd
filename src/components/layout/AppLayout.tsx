@@ -114,7 +114,7 @@ export default function AppLayout() {
             </div>
           </div>
           <div className="margo-text">
-            <div style={{ color:'#fff', fontWeight:700, fontSize:18, letterSpacing:'0.05em', marginBottom:6 }}>MargoProd</div>
+            <div style={{ color:'#fff', fontWeight:700, fontSize:18, letterSpacing:'0.05em', marginBottom:6 }}>MargoLine</div>
             <div style={{ color:'#c9a84c', fontSize:12, letterSpacing:'0.12em', textTransform:'uppercase', opacity:0.7 }}>MES v1.0 · Ładowanie...</div>
           </div>
         </div>
@@ -143,7 +143,7 @@ export default function AppLayout() {
             </div>
             {sidebarOpen && (
               <div>
-                <div className="font-bold text-white text-sm leading-tight tracking-wide">MargoProd</div>
+                <div className="font-bold text-white text-sm leading-tight tracking-wide">MargoLine</div>
                 <div className="text-navy-400 text-xs">MES v1.0</div>
               </div>
             )}

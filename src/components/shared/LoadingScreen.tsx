@@ -1,198 +1,167 @@
 import { useEffect, useState } from 'react'
 
-interface LoadingScreenProps {
-  onComplete?: () => void
-}
+interface Props { onComplete?: () => void }
 
-export default function LoadingScreen({ onComplete }: LoadingScreenProps) {
-  const [phase, setPhase] = useState<'pulse' | 'burst' | 'fade'>('pulse')
+export default function LoadingScreen({ onComplete }: Props) {
+  const [phase, setPhase] = useState(0)
+  // phase 0 = pulse, 1 = burst, 2 = fadeout, 3 = done
 
   useEffect(() => {
-    // After 1.2s pulse, trigger burst
-    const t1 = setTimeout(() => setPhase('burst'), 1200)
-    // After burst, fade out
-    const t2 = setTimeout(() => setPhase('fade'), 1800)
-    // After fade, call onComplete
-    const t3 = setTimeout(() => onComplete?.(), 2400)
+    const t1 = setTimeout(() => setPhase(1), 1500)
+    const t2 = setTimeout(() => setPhase(2), 2100)
+    const t3 = setTimeout(() => { setPhase(3); onComplete?.() }, 2700)
     return () => { clearTimeout(t1); clearTimeout(t2); clearTimeout(t3) }
-  }, [onComplete])
+  }, [])
+
+  if (phase === 3) return null
+
+  const isBurst = phase === 1
+  const isFade  = phase === 2
 
   return (
-    <div
-      className="fixed inset-0 flex items-center justify-center"
-      style={{
-        background: '#07080D',
-        zIndex: 9999,
-        opacity: phase === 'fade' ? 0 : 1,
-        transition: phase === 'fade' ? 'opacity 0.6s ease-out' : 'none',
-        pointerEvents: phase === 'fade' ? 'none' : 'all'
-      }}
-    >
+    <div style={{
+      position: 'fixed', inset: 0, zIndex: 9999,
+      background: '#07080D',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      opacity: isFade ? 0 : 1,
+      transition: isFade ? 'opacity 0.6s ease-out' : 'none',
+      pointerEvents: isFade ? 'none' : 'all'
+    }}>
+      <style>{`
+        @keyframes ml-pulse-glow {
+          0%,100% { opacity:.4; transform:scale(1); }
+          50%      { opacity:1;  transform:scale(1.6); }
+        }
+        @keyframes ml-logo-float {
+          0%,100% { transform:translateY(0) scale(1); }
+          50%      { transform:translateY(-6px) scale(1.03); }
+        }
+        @keyframes ml-ring {
+          0%   { transform:scale(.5); opacity:1; }
+          100% { transform:scale(12); opacity:0; }
+        }
+        @keyframes ml-dot {
+          0%,100% { opacity:.2; transform:scale(.8); }
+          50%      { opacity:1;  transform:scale(1.2); }
+        }
+        @keyframes ml-burst-logo {
+          0%  { transform:scale(1); }
+          30% { transform:scale(1.25); }
+          60% { transform:scale(.95); }
+          100%{ transform:scale(1); }
+        }
+        @keyframes ml-text-glow {
+          0%,100% { text-shadow: 0 0 10px rgba(201,168,76,.3); }
+          50%      { text-shadow: 0 0 30px rgba(201,168,76,.9), 0 0 60px rgba(201,168,76,.4); }
+        }
+        @keyframes ml-spark {
+          0%   { transform:translate(0,0) scale(1); opacity:1; }
+          100% { transform:var(--tx) scale(0); opacity:0; }
+        }
+      `}</style>
+
+      {/* Ambient glow */}
+      <div style={{
+        position:'absolute', width:300, height:300, borderRadius:'50%',
+        background:'radial-gradient(circle, rgba(201,168,76,.18) 0%, transparent 70%)',
+        filter:'blur(40px)',
+        animation: isBurst ? 'none' : 'ml-pulse-glow 2s ease-in-out infinite',
+        opacity: isBurst ? 0 : 1,
+        transform: isBurst ? 'scale(6)' : 'scale(1)',
+        transition: isBurst ? 'transform .5s ease-out, opacity .5s' : 'none'
+      }}/>
+
       {/* Burst rings */}
-      {phase === 'burst' && (
-        <>
-          {[1,2,3,4].map(i => (
-            <div key={i} style={{
-              position: 'absolute',
-              width: 80,
-              height: 80,
-              borderRadius: '50%',
-              border: `${5 - i}px solid rgba(201,168,76,${0.8 - i * 0.15})`,
-              animation: `burst-ring ${0.6 + i * 0.1}s ease-out forwards`,
-              animationDelay: `${i * 0.05}s`
-            }} />
-          ))}
-          {/* Gold flash overlay */}
-          <div style={{
-            position: 'absolute',
-            inset: 0,
-            background: 'radial-gradient(ellipse at center, rgba(201,168,76,0.35) 0%, rgba(201,168,76,0.05) 50%, transparent 70%)',
-            animation: 'flash-fade 0.8s ease-out forwards'
-          }} />
-        </>
+      {isBurst && [0,1,2,3,4].map(i => (
+        <div key={i} style={{
+          position:'absolute', width:90, height:90, borderRadius:'50%',
+          border:`${Math.max(1, 4-i)}px solid rgba(201,168,76,${.9 - i*.15})`,
+          animation:`ml-ring ${.5 + i*.12}s cubic-bezier(.2,.8,.4,1) forwards`,
+          animationDelay:`${i*.04}s`,
+          boxShadow:`0 0 ${20-i*3}px rgba(201,168,76,.6)`
+        }}/>
+      ))}
+
+      {/* Sparks */}
+      {isBurst && [
+        {tx:'translate(-120px,-80px)'},{tx:'translate(130px,-90px)'},
+        {tx:'translate(-100px,100px)'},{tx:'translate(110px,90px)'},
+        {tx:'translate(0,-140px)'},{tx:'translate(0,130px)'},
+        {tx:'translate(-150px,10px)'},{tx:'translate(150px,-10px)'},
+      ].map((s,i) => (
+        <div key={i} style={{
+          position:'absolute', width:6, height:6, borderRadius:'50%',
+          background:'#c9a84c',
+          boxShadow:'0 0 8px #c9a84c, 0 0 16px rgba(201,168,76,.6)',
+          '--tx': s.tx,
+          animation:`ml-spark .6s cubic-bezier(.2,.8,.4,1) forwards`,
+          animationDelay:`${i*.03}s`
+        } as React.CSSProperties}/>
+      ))}
+
+      {/* Flash overlay */}
+      {isBurst && (
+        <div style={{
+          position:'absolute', inset:0,
+          background:'radial-gradient(ellipse at center, rgba(201,168,76,.5) 0%, rgba(201,168,76,.15) 30%, transparent 65%)',
+          animation:'ml-ring .7s ease-out forwards',
+          pointerEvents:'none'
+        }}/>
       )}
 
-      {/* Ambient glow behind logo */}
+      {/* Logo box */}
       <div style={{
-        position: 'absolute',
-        width: 200,
-        height: 200,
-        borderRadius: '50%',
-        background: 'radial-gradient(circle, rgba(201,168,76,0.15) 0%, transparent 70%)',
-        animation: phase === 'burst'
-          ? 'glow-burst 0.8s ease-out forwards'
-          : 'glow-pulse 2s ease-in-out infinite',
-        filter: 'blur(20px)'
-      }} />
-
-      {/* Logo container */}
-      <div style={{
-        position: 'relative',
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        gap: 20
+        position:'relative', display:'flex', flexDirection:'column',
+        alignItems:'center', gap:20
       }}>
-        {/* Hexagon logo */}
         <div style={{
-          width: 80,
-          height: 80,
-          borderRadius: 18,
-          background: '#0D0E16',
-          border: '1.5px solid rgba(201,168,76,0.4)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          boxShadow: phase === 'burst'
-            ? '0 0 60px rgba(201,168,76,0.8), 0 0 120px rgba(201,168,76,0.4), inset 0 0 30px rgba(201,168,76,0.1)'
-            : '0 0 20px rgba(201,168,76,0.2), inset 0 0 10px rgba(201,168,76,0.05)',
-          animation: phase === 'burst' ? 'logo-burst 0.6s ease-out forwards' : 'logo-pulse 2s ease-in-out infinite',
-          transition: 'box-shadow 0.3s ease'
+          width:96, height:96, borderRadius:22,
+          background:'linear-gradient(135deg,#0D0E16 0%,#111320 100%)',
+          border:`1.5px solid rgba(201,168,76,${isBurst ? 1 : .4})`,
+          display:'flex', alignItems:'center', justifyContent:'center',
+          boxShadow: isBurst
+            ? '0 0 80px rgba(201,168,76,.9), 0 0 160px rgba(201,168,76,.5), 0 0 240px rgba(201,168,76,.2), inset 0 0 40px rgba(201,168,76,.15)'
+            : '0 0 24px rgba(201,168,76,.2), inset 0 0 12px rgba(201,168,76,.05)',
+          animation: isBurst ? 'ml-burst-logo .6s ease-out' : 'ml-logo-float 3s ease-in-out infinite',
+          transition:'box-shadow .3s, border-color .3s'
         }}>
-          <svg width="44" height="44" viewBox="0 0 44 44" fill="none">
-            {/* Hexagon */}
-            <path
-              d="M22 4 L38 13 L38 31 L22 40 L6 31 L6 13 Z"
-              stroke="#c9a84c"
-              strokeWidth="1.5"
-              fill="none"
-              style={{
-                filter: phase === 'burst' ? 'drop-shadow(0 0 6px #c9a84c)' : 'none',
-                transition: 'filter 0.3s'
-              }}
-            />
-            {/* Inner lines */}
-            <path d="M22 4 L22 40" stroke="#c9a84c" strokeWidth="0.75" opacity="0.3"/>
-            <path d="M6 13 L38 31" stroke="#c9a84c" strokeWidth="0.75" opacity="0.3"/>
-            <path d="M38 13 L6 31" stroke="#c9a84c" strokeWidth="0.75" opacity="0.3"/>
-            {/* Center dot */}
-            <circle
-              cx="22"
-              cy="22"
-              r="4"
-              fill="#c9a84c"
-              style={{
-                filter: phase === 'burst' ? 'drop-shadow(0 0 8px #c9a84c)' : 'none',
-                transition: 'filter 0.3s'
-              }}
-            />
+          <svg width="54" height="54" viewBox="0 0 44 44" fill="none">
+            <path d="M22 3 L39 12.5 L39 31.5 L22 41 L5 31.5 L5 12.5 Z"
+              stroke="#c9a84c" strokeWidth="1.5" fill="none"
+              style={{ filter: isBurst ? 'drop-shadow(0 0 8px #c9a84c)' : 'none', transition:'filter .3s' }}/>
+            <path d="M22 3 L22 41 M5 12.5 L39 31.5 M39 12.5 L5 31.5"
+              stroke="#c9a84c" strokeWidth=".75" opacity=".3"/>
+            <circle cx="22" cy="22" r="4.5" fill="#c9a84c"
+              style={{ filter: isBurst ? 'drop-shadow(0 0 10px #c9a84c) drop-shadow(0 0 20px rgba(201,168,76,.7))' : 'drop-shadow(0 0 4px rgba(201,168,76,.5))', transition:'filter .3s' }}/>
           </svg>
         </div>
 
-        {/* Text */}
-        <div style={{ textAlign: 'center' }}>
+        <div style={{ textAlign:'center' }}>
           <div style={{
-            fontSize: 22,
-            fontWeight: 700,
-            color: '#ffffff',
-            letterSpacing: '0.05em',
-            fontFamily: 'system-ui, sans-serif',
-            opacity: phase === 'burst' ? 1 : 0.9,
-            textShadow: phase === 'burst' ? '0 0 20px rgba(201,168,76,0.6)' : 'none',
-            transition: 'text-shadow 0.3s'
-          }}>
-            MargoProd
-          </div>
+            fontSize:26, fontWeight:800, color:'#fff',
+            letterSpacing:'.08em', fontFamily:'system-ui,sans-serif',
+            animation: isBurst ? 'none' : 'ml-text-glow 3s ease-in-out infinite',
+            textShadow: isBurst ? '0 0 40px rgba(201,168,76,1), 0 0 80px rgba(201,168,76,.6)' : undefined,
+            transition:'text-shadow .3s'
+          }}>MargoLine</div>
           <div style={{
-            fontSize: 11,
-            color: '#c9a84c',
-            letterSpacing: '0.15em',
-            marginTop: 4,
-            fontFamily: 'system-ui, sans-serif'
-          }}>
-            MES v1.0
-          </div>
+            fontSize:11, color:'#c9a84c', letterSpacing:'.18em',
+            marginTop:5, fontFamily:'system-ui,sans-serif', opacity:.8
+          }}>MES v1.0</div>
         </div>
 
-        {/* Loading dots */}
-        {phase === 'pulse' && (
-          <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        {phase === 0 && (
+          <div style={{ display:'flex', gap:7, marginTop:4 }}>
             {[0,1,2].map(i => (
               <div key={i} style={{
-                width: 5,
-                height: 5,
-                borderRadius: '50%',
-                background: '#c9a84c',
-                opacity: 0.4,
-                animation: `dot-pulse 1.2s ease-in-out infinite`,
-                animationDelay: `${i * 0.2}s`
-              }} />
+                width:5, height:5, borderRadius:'50%', background:'#c9a84c',
+                animation:`ml-dot 1.4s ease-in-out infinite`,
+                animationDelay:`${i*.22}s`
+              }}/>
             ))}
           </div>
         )}
       </div>
-
-      <style>{`
-        @keyframes glow-pulse {
-          0%, 100% { transform: scale(1); opacity: 0.6; }
-          50% { transform: scale(1.3); opacity: 1; }
-        }
-        @keyframes glow-burst {
-          0% { transform: scale(1); opacity: 1; }
-          100% { transform: scale(8); opacity: 0; }
-        }
-        @keyframes logo-pulse {
-          0%, 100% { transform: scale(1); }
-          50% { transform: scale(1.04); }
-        }
-        @keyframes logo-burst {
-          0% { transform: scale(1); }
-          40% { transform: scale(1.15); }
-          100% { transform: scale(1); }
-        }
-        @keyframes burst-ring {
-          0% { transform: scale(0.8); opacity: 1; }
-          100% { transform: scale(6); opacity: 0; }
-        }
-        @keyframes flash-fade {
-          0% { opacity: 1; }
-          100% { opacity: 0; }
-        }
-        @keyframes dot-pulse {
-          0%, 100% { opacity: 0.3; transform: scale(1); }
-          50% { opacity: 1; transform: scale(1.3); }
-        }
-      `}</style>
     </div>
   )
 }
