@@ -73,6 +73,8 @@ export default function OperatorShift() {
 
   const handleStart = async () => {
     if (!selectedMachine) { setError('Wybierz maszynę'); return }
+    if (!selectedOrderId && !showNewOrder) { setError('Wybierz zlecenie produkcyjne lub utwórz nowe'); return }
+    if (showNewOrder && !newOrderNumber) { setError('Wpisz numer zlecenia'); return }
     setError('')
     let orderId = selectedOrderId
     if (showNewOrder && newOrderNumber) {
@@ -282,13 +284,7 @@ export default function OperatorShift() {
                   className="w-full p-3 rounded-xl border-2 border-dashed border-navy-600 text-navy-400 hover:border-brand hover:text-brand transition-all text-sm">
                   + Nowe zlecenie
                 </button>
-                {orders.length > 0 && (
-                  <button onClick={() => setSelectedOrderId('')}
-                    className={cn('w-full p-2 rounded-xl text-xs transition-all',
-                      !selectedOrderId && !showNewOrder ? 'bg-navy-700 text-white' : 'text-navy-500 hover:text-navy-300')}>
-                    Bez zlecenia
-                  </button>
-                )}
+                
               </div>
             ) : (
               <div className="bg-navy-900 rounded-xl p-4 space-y-3">
