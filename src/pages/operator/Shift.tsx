@@ -14,43 +14,41 @@ interface ProductionOrder {
 }
 interface Assortment { id: string; name: string; code: string }
 
+// Godziny poszczególnych zmian
 const SHIFT_HOURS: Record<ShiftType, number[]> = {
-  'I':   [6,7,8,9,10,11,12,13],
-  'II':  [14,15,16,17,18,19,20,21],
-  'III': [22,23,0,1,2,3,4,5]
+  'I':   [7,8,9,10,11,12,13,14],
+  'II':  [15,16,17,18,19,20,21,22],
+  'III': [23,0,1,2,3,4,5,6]
 }
 
 export default function OperatorShift() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, isLoading } = useShiftStore()
-  const [machines, setMachines]       = useState<Machine[]>([])
-  const [operators, setOperators]     = useState<Profile[]>([])
+  const [machines, setMachines]     = useState<Machine[]>([])
+  const [operators, setOperators]   = useState<Profile[]>([])
   const [assortments, setAssortments] = useState<Assortment[]>([])
   const [selectedMachine, setSelectedMachine] = useState('')
   const [selectedShift,   setSelectedShift]   = useState<ShiftType>('I')
   const [selectedOp2,     setSelectedOp2]     = useState('')
   const [error, setError] = useState('')
 
-  const [shiftTaken, setShiftTaken] = useState(false)
-  const [shiftTakenBy, setShiftTakenBy] = useState('')
+  // Zlecenia
+  const [orders,         setOrders]         = useState<ProductionOrder[]>([])
+  const [selectedOrderId, setSelectedOrderId] = useState('')
+  const [showNewOrder,   setShowNewOrder]   = useState(false)
+  const [newOrderNumber, setNewOrderNumber] = useState('')
+  const [newOrderTarget, setNewOrderTarget] = useState('')
+  const [newOrderAssortment, setNewOrderAssortment] = useState('')
+  const [newOrderNotes,  setNewOrderNotes]  = useState('')
 
-  const [orders,            setOrders]            = useState<ProductionOrder[]>([])
-  const [selectedOrderId,   setSelectedOrderId]   = useState('')
-  const [showNewOrder,      setShowNewOrder]       = useState(false)
-  const [newOrderNumber,    setNewOrderNumber]     = useState('')
-  const [newOrderTarget,    setNewOrderTarget]     = useState('')
-  const [newOrderAssortment,setNewOrderAssortment] = useState('')
-  const [newOrderNotes,     setNewOrderNotes]      = useState('')
-
+  // Ostrzeżenie przy kończeniu zmiany
   const [showEndWarning, setShowEndWarning] = useState(false)
   const [missingHours,   setMissingHours]   = useState<number[]>([])
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
-    getProfiles().then(({ data }) => {
-      if (data) setOperators((data as Profile[]).filter(p => p.role === 'operator'))
-    })
+    getProfiles().then(({ data }) => { if (data) setOperators(data as Profile[]) })
     supabase.from('assortments').select('*').eq('is_active', true).order('sort_order')
       .then(({ data }) => { if (data) setAssortments(data as Assortment[]) })
     const h = new Date().getHours()
@@ -62,36 +60,6 @@ export default function OperatorShift() {
   useEffect(() => {
     if (selectedMachine) loadOrders(selectedMachine)
   }, [selectedMachine])
-
-  useEffect(() => {
-    if (!selectedMachine || !selectedShift) return
-    const check = async () => {
-      const today = new Date().toISOString().split('T')[0]
-      const { data } = await supabase
-        .from('shifts')
-        .select('id, operator_1_id, operator_2_id, profiles!shifts_operator_1_id_fkey(full_name)')
-        .eq('machine_id', selectedMachine)
-        .eq('shift_date', today)
-        .eq('shift_type', selectedShift)
-        .is('ended_at', null)
-        .maybeSingle()
-
-      if (data) {
-        const isParticipant = data.operator_1_id === profile?.id || data.operator_2_id === profile?.id
-        if (isParticipant) {
-          setShiftTaken(false)
-        } else {
-          const op1Name = (data.profiles as any)?.full_name ?? 'inny operator'
-          setShiftTaken(true)
-          setShiftTakenBy(op1Name)
-        }
-      } else {
-        setShiftTaken(false)
-        setShiftTakenBy('')
-      }
-    }
-    check()
-  }, [selectedMachine, selectedShift, profile?.id])
 
   const loadOrders = async (machineId: string) => {
     const { data } = await supabase
@@ -105,9 +73,7 @@ export default function OperatorShift() {
 
   const handleStart = async () => {
     if (!selectedMachine) { setError('Wybierz maszynę'); return }
-    if (shiftTaken) { setError('Ta zmiana jest już zajęta przez innego operatora'); return }
     setError('')
-
     let orderId = selectedOrderId
     if (showNewOrder && newOrderNumber) {
       const { data, error: orderError } = await supabase
@@ -125,19 +91,14 @@ export default function OperatorShift() {
     } else if (orderId) {
       await supabase.from('production_orders').update({ status: 'active', paused_at: null }).eq('id', orderId)
     }
-
     const { error: shiftError } = await startShift(selectedMachine, selectedShift, selectedOp2 || undefined)
     if (shiftError) { setError(shiftError); return }
     navigate('/operator/report')
   }
 
-  const canEndShift = activeShift && profile && (
-    activeShift.operator_1_id === profile.id ||
-    activeShift.operator_2_id === profile.id
-  )
-
+  // Sprawdź brakujące godziny przed zakończeniem zmiany
   const handleEndRequest = async () => {
-    if (!activeShift || !canEndShift) return
+    if (!activeShift) return
     const { data: reports } = await supabase
       .from('hourly_reports')
       .select('hour_start')
@@ -146,8 +107,11 @@ export default function OperatorShift() {
     const reportedHours = (reports ?? []).map((r: { hour_start: number }) => r.hour_start)
     const currentHour = new Date().getHours()
     const shiftHours = SHIFT_HOURS[activeShift.shift_type as ShiftType]
+    // Tylko godziny które już minęły
     const missing = shiftHours.filter(h => {
-      const alreadyPassed = activeShift.shift_type === 'III' ? true : h < currentHour
+      const alreadyPassed = activeShift.shift_type === 'III'
+        ? true // uproszczenie dla nocnej
+        : h < currentHour
       return alreadyPassed && !reportedHours.includes(h)
     })
     if (missing.length > 0) {
@@ -172,6 +136,7 @@ export default function OperatorShift() {
           <p className="text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
         </div>
 
+        {/* Ostrzeżenie przy kończeniu */}
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
             <div className="bg-navy-800 border-2 border-amber-500/50 rounded-2xl p-6 w-full max-w-md">
@@ -181,7 +146,7 @@ export default function OperatorShift() {
               <div className="bg-navy-900 rounded-xl p-3 mb-4">
                 {missingHours.map(h => (
                   <div key={h} className="text-amber-400 font-mono text-sm">
-                    • {String(h).padStart(2,'0')}:00 – {String((h+1)%24).padStart(2,'00')}:00
+                    • {String(h).padStart(2,'0')}:00 – {String((h+1)%24).padStart(2,'0')}:00
                   </div>
                 ))}
               </div>
@@ -229,15 +194,9 @@ export default function OperatorShift() {
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">
               ✏️ Wpisz wynik godziny
             </button>
-            {canEndShift ? (
-              <button onClick={handleEndRequest} className="btn-danger px-6 py-3">
-                Zakończ zmianę
-              </button>
-            ) : (
-              <div className="px-4 py-3 rounded-xl bg-navy-700 text-navy-400 text-sm flex items-center">
-                🔒 Tylko operator zmiany może ją zakończyć
-              </div>
-            )}
+            <button onClick={handleEndRequest} className="btn-danger px-6 py-3">
+              Zakończ zmianę
+            </button>
           </div>
         </div>
       </div>
@@ -253,6 +212,7 @@ export default function OperatorShift() {
       </div>
       <div className="card space-y-5">
 
+        {/* Maszyna */}
         <div>
           <label className="label">Maszyna</label>
           <div className="grid grid-cols-2 gap-3">
@@ -267,6 +227,7 @@ export default function OperatorShift() {
           </div>
         </div>
 
+        {/* Zmiana */}
         <div>
           <label className="label">Zmiana</label>
           <div className="grid grid-cols-3 gap-2">
@@ -281,13 +242,8 @@ export default function OperatorShift() {
           </div>
         </div>
 
-        {shiftTaken && selectedMachine && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm flex items-center gap-2">
-            🔒 Ta zmiana jest już prowadzona przez <span className="font-bold">{shiftTakenBy}</span>. Nie możesz jej rozpocząć.
-          </div>
-        )}
-
-        {selectedMachine && !shiftTaken && (
+        {/* Zlecenie */}
+        {selectedMachine && (
           <div>
             <label className="label">Zlecenie produkcyjne</label>
             {!showNewOrder ? (
@@ -367,6 +323,7 @@ export default function OperatorShift() {
           </div>
         )}
 
+        {/* Operatorzy */}
         <div>
           <label className="label">Operator Moduł 1</label>
           <div className="input bg-navy-700 text-navy-300 cursor-not-allowed">{profile?.full_name} (Ty)</div>
@@ -381,17 +338,9 @@ export default function OperatorShift() {
           </select>
         </div>
 
-        <div className="bg-brand/5 border border-brand/20 rounded-xl px-4 py-3 text-xs text-navy-400 flex items-center gap-2">
-          🔔 System przypomni Ci o wpisaniu wyniku pod koniec każdej godziny
-        </div>
-
         {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
 
-        <button
-          onClick={handleStart}
-          disabled={isLoading || !selectedMachine || shiftTaken}
-          className="btn-primary w-full py-4 text-base disabled:opacity-40 disabled:cursor-not-allowed"
-        >
+        <button onClick={handleStart} disabled={isLoading || !selectedMachine} className="btn-primary w-full py-4 text-base">
           {isLoading ? 'Uruchamianie...' : '🚀 Rozpocznij zmianę'}
         </button>
       </div>

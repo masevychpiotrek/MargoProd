@@ -294,9 +294,20 @@ export default function OperatorReport() {
                 }
               </div>
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
-                {Array.from({ length: 24 }, (_, h) => (
-                  <option key={h} value={h}>{formatHourBlock(h)}{existingReports.some(r => r.hour_start === h) ? ' ✓' : ''}</option>
-                ))}
+                {(() => {
+                  const shiftHours: Record<string, number[]> = {
+                    'I':   [7,8,9,10,11,12,13,14],
+                    'II':  [15,16,17,18,19,20,21,22],
+                    'III': [23,0,1,2,3,4,5,6]
+                  }
+                  const hours = activeShift ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h)) : Array.from({length:24},(_,h)=>h)
+                  const reported = existingReports.map(r => r.hour_start)
+                  return hours.map(h => (
+                    <option key={h} value={h} disabled={reported.includes(h)}>
+                      {formatHourBlock(h)}{reported.includes(h) ? ' ✓ wpisano' : ''}
+                    </option>
+                  ))
+                })()}
               </select>
             </div>
           </div>
@@ -397,7 +408,7 @@ export default function OperatorReport() {
               <div><div className="card-title">Liczniki produkcji</div><div className="card-sub">Stan licznika na koniec godziny</div></div>
               {incGood > 0 && <div className={cn('text-2xl font-bold font-mono', efficiencyColor(efficiency))}>{efficiency}%</div>}
             </div>
-            <div className="grid grid-cols-2 gap-4 mb-3" data-tutorial="report-counter-good">
+            <div className="grid grid-cols-2 gap-4 mb-3">
               <CounterInput label="Licznik dobrych (szt)" sublabel="Wyroby zgodne łącznie" value={counterGood} onChange={setCounterGood} prevValue={prevGood} color="text-green-400" placeholder="np. 4256" />
               <CounterInput label="Licznik odrzutu (szt)" sublabel="Odrzut łącznie" value={counterReject} onChange={setCounterReject} prevValue={prevReject} color="text-red-400" placeholder="np. 328" />
             </div>
@@ -446,7 +457,7 @@ export default function OperatorReport() {
                 </div>
               </div>
             )}
-            <div className="grid grid-cols-3 gap-4" data-tutorial="report-counter-times">
+            <div className="grid grid-cols-3 gap-4">
               <TimeInput label="Czas pracy" sublabel="Maszyna produkuje" value={counterRuntime} onChange={setCounterRuntime} prevValue={prevRuntime} color="text-green-400" />
               <TimeInput label="Czas gotowości" sublabel="Maszyna stoi, gotowa" value={counterReady} onChange={setCounterReady} prevValue={prevReady} color="text-amber-400" />
               <TimeInput label="Czas alarmu" sublabel="Maszyna zatrzymana" value={counterAlarm} onChange={setCounterAlarm} prevValue={prevAlarm} color="text-red-400" />
@@ -557,7 +568,7 @@ export default function OperatorReport() {
             </div>
           )}
 
-          <button onClick={handleSave} disabled={saving} data-tutorial="report-save-btn"
+          <button onClick={handleSave} disabled={saving}
             className={cn('btn w-full py-4 text-base font-bold', saved ? 'bg-green-500 text-white' : 'btn-primary')}>
             {saving ? 'Zapisywanie...' : saved ? '✓ Zapisano!' : '💾 Zapisz raport godzinowy'}
           </button>
