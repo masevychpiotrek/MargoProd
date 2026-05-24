@@ -5,6 +5,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
+import RobotAssistant from '@/components/shared/RobotAssistant'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -255,6 +256,7 @@ export default function AppLayout() {
           </div>
         </AlertProvider>
       </main>
+      <RobotAssistant />
 
       {/* Modal wylogowania */}
       {showLogoutModal && (
