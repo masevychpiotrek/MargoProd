@@ -76,25 +76,17 @@ export const useShiftStore = create<ShiftState>()(
 
         set({ isLoading: true })
         const endedAt = new Date().toISOString()
-        const { data, error } = await supabase
+        const { error } = await supabase
           .from('shifts')
           .update({ ended_at: endedAt })
           .eq('id', activeShift.id)
-          .is('ended_at', null)
-          .select('id, ended_at')
-          .maybeSingle()
 
         if (error) {
           set({ isLoading: false })
           return { error: error.message }
         }
 
-        if (!data?.ended_at) {
-          set({ isLoading: false })
-          return { error: 'Nie udało się zakończyć zmiany w bazie. Odśwież stronę i spróbuj ponownie.' }
-        }
-
-        await logAudit('shift_end', 'shifts', activeShift.id)
+        logAudit('shift_end', 'shifts', activeShift.id, undefined, { ended_at: endedAt }).catch(() => undefined)
         set({ activeShift: null, activeMachine: null, isLoading: false })
         return { error: null }
       },
