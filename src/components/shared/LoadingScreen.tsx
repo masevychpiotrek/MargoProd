@@ -124,7 +124,7 @@ export default function LoadingScreen({ onLogin, autoExitMs }: LoadingScreenProp
   return (
     <div
       ref={containerRef}
-      style={{ position: 'fixed', inset: 0, background: '#080c10', overflow: 'hidden' }}
+      style={{ position: 'fixed', inset: 0, background: '#080c10', overflow: 'hidden', zIndex: 99999 }}
     />
   )
 }
