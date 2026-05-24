@@ -313,7 +313,7 @@ export default function OperatorReport() {
                     const isDisabled = isReported || isFuture || isTooOld
                     return (
                       <option key={h} value={h} disabled={isDisabled}>
-                        {formatHourBlock(h)}{isReported ? ' ✓ wpisano' : isFuture ? ' (przyszłość)' : isTooOld ? ' (za dawno)' : ''}
+                        {formatHourBlock(h)}{isReported ? ' ✓' : ''}
                       </option>
                     )
                   })
