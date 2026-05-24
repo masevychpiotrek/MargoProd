@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react'
+import React, { useEffect, useRef } from 'react'
 
 interface LoadingScreenProps {
   onLogin?: () => void
@@ -67,8 +67,9 @@ const HTML = `
     </div>
     <div class="created" id="created">Created by <span>Masevych</span></div>
   </div>
+  <div id="clickHint" style="position:fixed;bottom:12vh;left:0;right:0;text-align:center;font-family:'Orbitron',sans-serif;font-size:.55rem;letter-spacing:.25em;color:rgba(212,168,37,.35);text-transform:uppercase;pointer-events:none;transition:opacity 1s;">KLIKNIJ ABY WŁĄCZYĆ DŹWIĘK</div>
   <div id="phaseLabel" style="position:fixed;top:8px;right:12px;font-size:.54rem;letter-spacing:.16em;color:rgba(212,168,37,.25);text-transform:uppercase;pointer-events:none;font-family:'Rajdhani',sans-serif;"></div>
-  <button id="loginBtn">ZALOGUJ</button>
+  <button id="loginBtn">▶ URUCHOM SYSTEM</button>
   <div class="corner c-tl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-tr"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-bl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
@@ -120,6 +121,75 @@ export default function LoadingScreen({ onLogin, autoExitMs }: LoadingScreenProp
       if (document.head.contains(link)) document.head.removeChild(link)
     }
   }, [onLogin])
+
+  const [started, setStarted] = React.useState(false)
+
+  const handleStart = () => {
+    setStarted(true)
+    // Odblokuj audio
+    try {
+      const AC = new (window.AudioContext || (window as any).webkitAudioContext)()
+      AC.resume()
+    } catch(e) {}
+  }
+
+  if (!started) {
+    return (
+      <div style={{
+        position: 'fixed', inset: 0, background: '#080c10',
+        display: 'flex', flexDirection: 'column',
+        alignItems: 'center', justifyContent: 'center',
+        zIndex: 99999, cursor: 'pointer'
+      }} onClick={handleStart}>
+        {/* Logo */}
+        <svg width="64" height="64" viewBox="0 0 22 22" fill="none" style={{marginBottom: '24px'}}>
+          <path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.2" fill="none"/>
+          <path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.6" opacity="0.25"/>
+          <circle cx="11" cy="11" r="2.5" fill="#c9a84c"/>
+        </svg>
+        <div style={{
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: 'clamp(1.6rem,5vw,2.6rem)',
+          fontWeight: 900,
+          color: '#D4A825',
+          letterSpacing: '.1em',
+          textShadow: '0 0 40px rgba(212,168,37,.8)',
+          marginBottom: '8px'
+        }}>MargoLine</div>
+        <div style={{
+          fontSize: '.7rem',
+          color: 'rgba(232,223,200,.4)',
+          letterSpacing: '.22em',
+          textTransform: 'uppercase',
+          marginBottom: '48px'
+        }}>System Monitorowania Produkcji</div>
+        <button style={{
+          background: 'rgba(212,168,37,.1)',
+          border: '1.5px solid rgba(212,168,37,.6)',
+          color: '#D4A825',
+          fontFamily: "'Orbitron', sans-serif",
+          fontSize: '.8rem',
+          fontWeight: 700,
+          letterSpacing: '.22em',
+          textTransform: 'uppercase',
+          padding: '14px 36px',
+          borderRadius: '4px',
+          cursor: 'pointer',
+          animation: 'pulse-btn 2s ease-in-out infinite',
+          boxShadow: '0 0 22px rgba(212,168,37,.25)'
+        }}>
+          ▶ URUCHOM SYSTEM
+        </button>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
+          @keyframes pulse-btn {
+            0%,100% { box-shadow: 0 0 22px rgba(212,168,37,.25); }
+            50% { box-shadow: 0 0 40px rgba(212,168,37,.55); }
+          }
+        `}</style>
+      </div>
+    )
+  }
 
   return (
     <div
