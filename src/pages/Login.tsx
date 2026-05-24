@@ -4,6 +4,7 @@ import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuthStore } from '@/stores/authStore'
+import LoadingScreen from '@/components/shared/LoadingScreen'
 
 const schema = z.object({
   email: z.string().email('Podaj prawidłowy adres e-mail'),
@@ -23,6 +24,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn, isLoading } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
+  const [showAnimation, setShowAnimation] = useState(false)
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
@@ -35,7 +37,18 @@ export default function LoginPage() {
       setServerError(error)
       return
     }
+    // Logowanie udane — pokaż animację
+    setShowAnimation(true)
+  }
+
+  // Po 14 sekundach automatycznie przejdź do dashboardu
+  const handleAnimationLogin = () => {
     navigate('/operator')
+  }
+
+  // Jeśli zalogowany i animacja aktywna — pokaż LoadingScreen
+  if (showAnimation) {
+    return <LoadingScreen onLogin={handleAnimationLogin} autoExitMs={14000} />
   }
 
   return (
@@ -43,14 +56,12 @@ export default function LoginPage() {
       background: 'radial-gradient(ellipse at 50% 0%, rgba(201,168,76,0.13) 0%, #0d1117 55%)',
       backgroundColor: '#0d1117'
     }}>
-      {/* Delikatna siatka w tle */}
       <div className="absolute inset-0 pointer-events-none" style={{
         backgroundImage: 'linear-gradient(rgba(201,168,76,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(201,168,76,0.04) 1px, transparent 1px)',
         backgroundSize: '32px 32px'
       }} />
 
       <div className="w-full max-w-md relative z-10">
-        {/* Logo */}
         <div className="text-center mb-8">
           <div className="inline-flex items-center justify-center w-16 h-16 rounded-2xl mb-4 shadow-lg" style={{
             background: '#161c26',
@@ -70,7 +81,6 @@ export default function LoginPage() {
           <p className="text-sm" style={{ color: '#6b7f99' }}>System Monitorowania Produkcji</p>
         </div>
 
-        {/* Card */}
         <div className="rounded-2xl p-8 shadow-2xl" style={{
           background: 'rgba(22,28,38,0.9)',
           border: '1px solid rgba(201,168,76,0.15)',
@@ -92,10 +102,7 @@ export default function LoginPage() {
                 autoComplete="email"
                 placeholder="twoje.imie@margomed.pl"
                 className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
-                style={{
-                  background: '#0d1117',
-                  border: '1px solid #263145',
-                }}
+                style={{ background: '#0d1117', border: '1px solid #263145' }}
                 onFocus={e => e.target.style.borderColor = '#c9a84c'}
                 onBlur={e => e.target.style.borderColor = '#263145'}
               />
@@ -114,10 +121,7 @@ export default function LoginPage() {
                 autoComplete="current-password"
                 placeholder="••••••••••"
                 className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
-                style={{
-                  background: '#0d1117',
-                  border: '1px solid #263145',
-                }}
+                style={{ background: '#0d1117', border: '1px solid #263145' }}
                 onFocus={e => e.target.style.borderColor = '#c9a84c'}
                 onBlur={e => e.target.style.borderColor = '#263145'}
               />
