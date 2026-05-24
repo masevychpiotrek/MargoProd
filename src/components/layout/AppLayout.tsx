@@ -5,7 +5,6 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
-import LoadingScreen from '@/components/shared/LoadingScreen'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -62,7 +61,6 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
-  const [showLoading, setShowLoading] = useState(false)
 
   useEffect(() => {
     // Show loading animation only on first mount
@@ -133,7 +131,6 @@ export default function AppLayout() {
 
   return (
     <div className="flex min-h-screen bg-navy-900 text-white">
-      {showLoading && <LoadingScreen onComplete={() => setShowLoading(false)} />}
       {/* Mobile overlay backdrop - only on mobile */}
       {sidebarOpen && (
         <div
