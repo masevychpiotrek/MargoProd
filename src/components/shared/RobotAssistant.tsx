@@ -28,24 +28,47 @@ function getPageHint(pathname: string, hasShift: boolean) {
 
 function answerFor(text: string, hasShift: boolean) {
   const q = text.toLowerCase()
-  if (q.includes('raport') || q.includes('wynik')) {
+  const has = (...words: string[]) => words.some(w => q.includes(w))
+
+  if (has('pomoc', 'help', 'umiesz', 'potrafisz', 'co robisz')) {
+    return 'Moge pilnowac logiki raportu, przypominac zasady zmian, tlumaczyc bledy, podpowiadac co kliknac i lapac podejrzane ruchy kursora. Z baza nie klocę sie bez dowodow.'
+  }
+  if (has('raport', 'wynik')) {
     return 'Raport wpisujesz za konkretny przedzial z listy, nawet jesli robisz to pozniej. Liczniki podajesz jako stan calkowity, nie sam przyrost.'
   }
-  if (q.includes('czas') || q.includes('godzin')) {
+  if (has('czas', 'godzin', 'minut', '01:00', '60')) {
     return 'Czasy w raporcie powinny dac razem 01:00: praca + gotowosc + alarm. Przy zakonczeniu zlecenia wpisujesz realny czas od ostatniego raportu.'
   }
-  if (q.includes('zmian')) {
+  if (has('zmian', 'start', 'rozpocz')) {
     return hasShift
       ? 'Masz juz aktywna zmiane. Drugi raz tej samej zmiany na tej maszynie nie uruchomisz.'
       : 'Zmiane uruchamiasz raz dla maszyny, daty i typu zmiany. Jak juz istnieje, system ja zablokuje.'
   }
-  if (q.includes('licznik')) {
+  if (has('licznik', 'narast', 'spad', 'mniejsz')) {
     return 'Liczniki sa narastajace. Nowy wpis nie moze byc mniejszy od poprzedniego, bo wtedy przyrost wyszedlby ujemny.'
   }
-  if (q.includes('zlecen')) {
+  if (has('zlecen', 'order', 'produkc')) {
     return 'Zlecenie mozesz wybrac istniejace albo utworzyc nowe. Gdy startujesz nowe, poprzednie aktywne powinno zostac zapauzowane.'
   }
-  return 'Brzmi jak sprawa do sprawdzenia. Najprosciej: podaj mi, na jakim ekranie jestes i co kliknales, a podpowiem nastepny krok.'
+  if (has('target', 'norm', 'wydajn', 'efektyw')) {
+    return 'Target liczymy wzgledem maszyny. Jesli wynik jest ponizej targetu, najlepiej dopisac konkretna przyczyne: material, alarm, przezbrojenie, jakosc albo brak obsady.'
+  }
+  if (has('blad', 'error', 'nie dziala', 'problem', 'glupot')) {
+    return 'Najpierw sprawdz trzy rzeczy: czy wybrano dobra zmiane, czy przedzial godziny nie byl juz wpisany i czy liczniki nie cofnely sie wzgledem poprzedniego raportu.'
+  }
+  if (has('alarm', 'awaria', 'przestoj', 'stoi')) {
+    return 'Jesli maszyna stala, wpisz czas w gotowosci albo alarmie. Gdy postoj ma znaczenie, dodaj zdarzenie przestojowe z kategoria i opisem.'
+  }
+  if (has('noc', 'nocna', 'iii', '22', '23')) {
+    return 'Zmiana nocna idzie w kolejnosci 22, 23, 00, 01, 02, 03, 04, 05. Nie sortuj jej w glowie po numerach, bo 00 jest po 23.'
+  }
+  if (has('usun', 'cofn', 'poprawic', 'edytowac')) {
+    return 'Jesli raport trzeba poprawic po zapisie, najlepiej zrobic to przez widok historii albo panel kierownika, zeby zostal slad kto i co zmienil.'
+  }
+  if (has('czesc', 'hej', 'siema', 'dzieki')) {
+    return 'No czesc. Ja tu chodze, patrze i udaje, ze mam kontrole nad chaosem. Technicznie: mam.'
+  }
+  return 'Nietypowe pytanie. Podaj mi ekran, maszyne albo komunikat bledu, a odpowiem konkretniej. Ogolna zasada: najpierw zmiana, potem zlecenie, potem raport za przedzial.'
 }
 
 export default function RobotAssistant() {
@@ -54,13 +77,25 @@ export default function RobotAssistant() {
   const { profile } = useAuthStore()
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
+  const [pos, setPos] = useState(() => ({
+    x: Math.max(96, window.innerWidth - 140),
+    y: Math.max(120, window.innerHeight - 140)
+  }))
   const [mouse, setMouse] = useState({ x: 0, y: 0, near: false, caught: false })
   const [quip, setQuip] = useState('Pilnuje produkcji.')
   const [idle, setIdle] = useState(0)
+  const posRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
+  const targetRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
+  const mouseRef = useRef({ x: 0, y: 0, near: false, caught: false })
+  const openRef = useRef(false)
   const catchTimer = useRef<number | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([
     { from: 'bot', text: 'Czuwam. Kliknij mnie, gdy operator robi cos podejrzanego albo gdy trzeba szybko przypomniec zasady.' }
   ])
+
+  useEffect(() => {
+    openRef.current = open
+  }, [open])
 
   useEffect(() => {
     const quips = [
@@ -72,15 +107,18 @@ export default function RobotAssistant() {
     ]
 
     const onMove = (event: PointerEvent) => {
-      const robotX = window.innerWidth - 68
-      const robotY = window.innerHeight - 68
+      const current = posRef.current
+      const robotX = current.x + 48
+      const robotY = current.y + 54
       const dx = event.clientX - robotX
       const dy = event.clientY - robotY
       const distance = Math.hypot(dx, dy)
       const near = distance < 170
       const caught = distance < 62
 
-      setMouse({ x: dx, y: dy, near, caught })
+      const nextMouse = { x: dx, y: dy, near, caught }
+      mouseRef.current = nextMouse
+      setMouse(nextMouse)
 
       if (near && !catchTimer.current) {
         setQuip(quips[Math.floor(Math.random() * quips.length)])
@@ -99,8 +137,52 @@ export default function RobotAssistant() {
   }, [])
 
   useEffect(() => {
-    const id = window.setInterval(() => setIdle(v => v + 1), 90)
-    return () => window.clearInterval(id)
+    const pickTarget = () => {
+      const margin = 88
+      targetRef.current = {
+        x: margin + Math.random() * Math.max(1, window.innerWidth - margin * 2),
+        y: margin + Math.random() * Math.max(1, window.innerHeight - margin * 2)
+      }
+    }
+
+    const moveId = window.setInterval(() => {
+      setIdle(v => v + 1)
+      setPos(prev => {
+        if (openRef.current) return prev
+        const margin = 74
+        const target = mouseRef.current.near
+          ? {
+              x: Math.max(margin, Math.min(window.innerWidth - margin, prev.x + mouseRef.current.x * 0.04)),
+              y: Math.max(margin, Math.min(window.innerHeight - margin, prev.y + mouseRef.current.y * 0.04))
+            }
+          : targetRef.current
+        const next = {
+          x: prev.x + (target.x - prev.x) * 0.045,
+          y: prev.y + (target.y - prev.y) * 0.045
+        }
+        if (Math.hypot(targetRef.current.x - next.x, targetRef.current.y - next.y) < 18 && !mouseRef.current.near) pickTarget()
+        posRef.current = next
+        return next
+      })
+    }, 70)
+
+    const targetId = window.setInterval(pickTarget, 4200)
+    const resize = () => {
+      setPos(prev => ({
+        x: Math.min(prev.x, window.innerWidth - 80),
+        y: Math.min(prev.y, window.innerHeight - 80)
+      }))
+      posRef.current = {
+        x: Math.min(posRef.current.x, window.innerWidth - 80),
+        y: Math.min(posRef.current.y, window.innerHeight - 80)
+      }
+    }
+    window.addEventListener('resize', resize)
+    return () => {
+      window.clearInterval(moveId)
+      window.clearInterval(targetId)
+      window.removeEventListener('resize', resize)
+    }
   }, [])
 
   const pageHint = useMemo(
@@ -122,7 +204,10 @@ export default function RobotAssistant() {
   const quickActions = [
     { label: 'Raport', text: 'Jak wpisac raport?' },
     { label: 'Czasy', text: 'Jak wpisac czasy?' },
-    { label: 'Zmiana', text: 'Czy moge zaczac zmiane drugi raz?' }
+    { label: 'Zmiana', text: 'Czy moge zaczac zmiane drugi raz?' },
+    { label: 'Awaria', text: 'Co wpisac przy awarii?' },
+    { label: 'Target', text: 'Co jesli wynik jest pod targetem?' },
+    { label: 'Pomoc', text: 'Co potrafisz?' }
   ]
 
   const eyeX = Math.max(-3, Math.min(3, mouse.x / 36))
@@ -139,7 +224,10 @@ export default function RobotAssistant() {
   const bodyTilt = mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
 
   return (
-    <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
+    <div
+      className="fixed z-50 flex flex-col items-end gap-3 transition-[left,top] duration-75 ease-linear"
+      style={{ left: pos.x, top: pos.y }}
+    >
       {open && (
         <div className="w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-brand/30 bg-navy-800 shadow-2xl shadow-black/40 animate-slide-in">
           <div className="border-b border-navy-700 bg-navy-900/70 p-4">
@@ -177,7 +265,7 @@ export default function RobotAssistant() {
           </div>
 
           <div className="border-t border-navy-700 p-3">
-            <div className="mb-3 flex gap-2">
+            <div className="mb-3 flex flex-wrap gap-2">
               {quickActions.map(a => (
                 <button key={a.label} onClick={() => send(a.text)} className="rounded-lg border border-navy-600 bg-navy-900 px-3 py-1.5 text-xs font-bold text-navy-200 hover:border-brand hover:text-brand">
                   {a.label}
@@ -212,19 +300,19 @@ export default function RobotAssistant() {
         aria-label="Otworz asystenta"
       >
         <span
-          className="absolute bottom-4 left-5 h-2 w-10 origin-right rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform"
+          className="absolute bottom-4 left-5 h-2 w-10 origin-right rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform before:absolute before:-left-1 before:-top-1 before:h-4 before:w-4 before:rounded-full before:bg-navy-800 before:border before:border-brand/40"
           style={{ transform: `rotate(${leftArm}deg)` }}
         />
         <span
-          className="absolute bottom-4 right-5 h-2 w-10 origin-left rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform"
+          className="absolute bottom-4 right-5 h-2 w-10 origin-left rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform before:absolute before:-right-1 before:-top-1 before:h-4 before:w-4 before:rounded-full before:bg-navy-800 before:border before:border-brand/40"
           style={{ transform: `rotate(${rightArm}deg)` }}
         />
         {mouse.near && (
           <span
             className="pointer-events-none fixed h-8 w-8 rounded-full border-2 border-dashed border-brand/70 transition-transform"
             style={{
-              left: `calc(100vw - 68px + ${mouse.x}px - 16px)`,
-              top: `calc(100vh - 68px + ${mouse.y}px - 16px)`,
+              left: `${pos.x + 48 + mouse.x - 16}px`,
+              top: `${pos.y + 54 + mouse.y - 16}px`,
               transform: mouse.caught ? 'scale(0.7)' : 'scale(1)'
             }}
           />
@@ -232,11 +320,13 @@ export default function RobotAssistant() {
 
         <span className="absolute bottom-0 left-1/2 h-3 w-16 -translate-x-1/2 rounded-full bg-black/30 blur-[2px]" style={{ transform: `translateX(-50%) scale(${1 + idleHop / 18}, ${1 - idleHop / 22})` }} />
 
+        <span className="absolute inset-x-2 bottom-2 top-2 rounded-[1.35rem] bg-brand/10 blur-xl" />
+
         <span className="absolute left-1/2 top-0 h-4 w-px -translate-x-1/2 bg-brand" />
         <span className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1 rounded-full bg-brand shadow-md shadow-brand/60" />
 
         <span className={cn(
-          'absolute left-1/2 top-3 h-12 w-16 -translate-x-1/2 rounded-2xl border bg-navy-800 shadow-xl shadow-black/40 transition-colors',
+          'absolute left-1/2 top-3 h-12 w-16 -translate-x-1/2 rounded-2xl border bg-[linear-gradient(145deg,#243b63,#0f1a2e_62%,#070d1a)] shadow-xl shadow-black/40 transition-colors',
           mouse.caught ? 'border-green-400' : mouse.near ? 'border-brand' : 'border-brand/50'
         )}>
           <span className="absolute inset-x-3 top-2 h-6 rounded-xl bg-navy-950 border border-cyan-300/20" />
@@ -251,13 +341,13 @@ export default function RobotAssistant() {
           <span className="absolute -right-1 top-5 h-3 w-1.5 rounded-r bg-brand/70" />
         </span>
 
-        <span className="absolute bottom-5 left-1/2 h-9 w-12 -translate-x-1/2 rounded-xl border border-brand/30 bg-navy-900 shadow-lg shadow-black/30">
+        <span className="absolute bottom-5 left-1/2 h-9 w-12 -translate-x-1/2 rounded-xl border border-brand/30 bg-[linear-gradient(180deg,#1a2d4a,#0f1a2e)] shadow-lg shadow-black/30">
           <span className="absolute left-3 top-2 h-2 w-2 rounded-full bg-brand/70" />
           <span className="absolute right-3 top-2 h-2 w-2 rounded-full bg-brand/70" />
           <span className="absolute bottom-2 left-1/2 h-1 w-7 -translate-x-1/2 rounded bg-navy-700" />
         </span>
-        <span className="absolute bottom-1 left-8 h-5 w-3 rounded-b bg-brand/80 transition-transform" style={{ transform: `rotate(${leftFoot}deg)` }} />
-        <span className="absolute bottom-1 right-8 h-5 w-3 rounded-b bg-brand/80 transition-transform" style={{ transform: `rotate(${rightFoot}deg)` }} />
+        <span className="absolute bottom-1 left-8 h-5 w-3 rounded-b bg-brand/80 transition-transform after:absolute after:-bottom-1 after:-left-1 after:h-1.5 after:w-5 after:rounded-full after:bg-brand" style={{ transform: `rotate(${leftFoot}deg)` }} />
+        <span className="absolute bottom-1 right-8 h-5 w-3 rounded-b bg-brand/80 transition-transform after:absolute after:-bottom-1 after:-right-1 after:h-1.5 after:w-5 after:rounded-full after:bg-brand" style={{ transform: `rotate(${rightFoot}deg)` }} />
         {!open && <span className="absolute left-3 top-2 h-3 w-3 rounded-full bg-green-400 ring-4 ring-navy-900" />}
       </button>
     </div>
