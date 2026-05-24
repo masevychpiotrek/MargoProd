@@ -20,6 +20,40 @@ function getShiftHours(shiftType?: ShiftType) {
   return shiftType ? SHIFT_HOURS[shiftType] : Array.from({ length: 24 }, (_, h) => h)
 }
 
+function getRobotHint(errors: string[]) {
+  const first = errors[0]?.toLowerCase() ?? ''
+  if (first.includes('suma')) return 'Czasy musza dac razem 01:00. Policz: praca + gotowosc + alarm, a ja puszcze raport dalej.'
+  if (first.includes('target')) return 'Produkcja jest pod targetem. Dopisz krotko dlaczego, zeby kierownik nie musial zgadywac.'
+  if (first.includes('istnieje')) return 'Ten przedzial jest juz zapisany. Wybierz kolejna godzine z listy.'
+  if (first.includes('male')) return 'Liczniki sa narastajace. Nowy stan nie moze byc mniejszy od poprzedniego.'
+  if (first.includes('wpisz')) return 'Brakuje mi kilku pol. Uzupelnij je po kolei, a przestane marudzic.'
+  return 'Cos mi tu nie pasuje. Zerknij na liste ponizej i popraw dane przed zapisem.'
+}
+
+function ValidationRobot({ errors }: { errors: string[] }) {
+  return (
+    <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-4 mb-3 flex gap-4 items-start animate-fade-in">
+      <div className="relative shrink-0 mt-1">
+        <div className="absolute -top-2 left-1/2 h-2 w-px bg-amber-300/80" />
+        <div className="absolute -top-3 left-1/2 -translate-x-1/2 h-2 w-2 rounded-full bg-amber-300 shadow-sm shadow-amber-300/60" />
+        <div className="w-14 h-12 rounded-xl bg-navy-900 border border-amber-400/50 shadow-inner shadow-amber-500/10 flex flex-col items-center justify-center gap-1">
+          <div className="flex gap-2">
+            <span className="w-2 h-2 rounded-full bg-cyan-300 shadow-sm shadow-cyan-300/80 animate-pulse" />
+            <span className="w-2 h-2 rounded-full bg-cyan-300 shadow-sm shadow-cyan-300/80 animate-pulse" />
+          </div>
+          <div className="w-5 h-1 rounded-full bg-amber-300/80" />
+        </div>
+        <div className="mx-auto mt-1 w-8 h-3 rounded-b-lg bg-navy-900 border-x border-b border-amber-400/40" />
+      </div>
+      <div className="min-w-0">
+        <div className="text-amber-300 font-bold text-sm">Robokontroler mowi: chwila, chwila.</div>
+        <div className="text-sm text-amber-100 mt-1">{getRobotHint(errors)}</div>
+        {errors.length > 1 && <div className="text-xs text-amber-300/80 mt-2">Widze {errors.length} rzeczy do poprawy.</div>}
+      </div>
+    </div>
+  )
+}
+
 interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
 interface ProductionOrder {
   id: string; order_number: string; machine_id: string
@@ -610,6 +644,7 @@ export default function OperatorReport() {
 
           {errors.length > 0 && (
             <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+              <ValidationRobot errors={errors} />
               <div className="font-bold text-red-400 mb-2 text-sm">Popraw błędy:</div>
               {errors.map((e,i) => <div key={i} className="text-red-300 text-sm">• {e}</div>)}
             </div>
