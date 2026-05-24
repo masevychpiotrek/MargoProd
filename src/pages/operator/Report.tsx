@@ -313,25 +313,27 @@ export default function OperatorReport() {
                     const alreadyReported = reported.includes(h)
 
                     // Czy godzina już minęła (uwzględnia zmianę nocną)
+                    // Czy godzina już minęła — uwzględnia zmianę nocną
                     let hasPassed: boolean
                     if (activeShift?.shift_type === 'III') {
                       // Nocna: 22,23,0,1,2,3,4,5
                       if (h >= 22) hasPassed = currentHour >= 22 ? currentHour > h : true
-                      else hasPassed = currentHour < 6 ? currentHour > h : true
+                      else hasPassed = currentHour >= 0 && currentHour < 22 ? true : currentHour > h
                     } else {
-                      hasPassed = currentHour > h
+                      // Dzienna: jeśli aktualna godzina przekroczyła koniec zmiany — wszystkie godziny minęły
+                      const shiftEnd = activeShift?.shift_type === 'I' ? 14 : 22
+                      hasPassed = currentHour >= shiftEnd ? true : currentHour > h
                     }
 
-                    // Pierwsza godzina zmiany zawsze dostępna (operator mógł zacząć później)
+                    // Pierwsza godzina zmiany zawsze dostępna
                     const isFirstHour = idx === 0
 
-                    // Kolejność — poprzednia godzina musi być wpisana
+                    // Kolejność — poprzednia godzina musi być wpisana (lub to pierwsza)
                     const prevHour = idx > 0 ? hours[idx - 1] : null
                     const prevReported = prevHour === null || reported.includes(prevHour)
 
-                    // W trybie testowym — odblokuj wszystkie minione godziny
                     const isDisabled = alreadyReported ||
-                      (!TEST_MODE && !hasPassed && !isFirstHour) ||
+                      (!hasPassed && !isFirstHour) ||
                       (!isFirstHour && !prevReported)
 
                     return (
