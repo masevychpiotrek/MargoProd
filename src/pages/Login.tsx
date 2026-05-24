@@ -24,7 +24,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn, isLoading } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
-  const [showAnimation, setShowAnimation] = useState(false)
+  const [showForm, setShowForm] = useState(false)
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
@@ -37,18 +37,12 @@ export default function LoginPage() {
       setServerError(error)
       return
     }
-    // Logowanie udane — pokaż animację
-    setShowAnimation(true)
-  }
-
-  // Po 14 sekundach automatycznie przejdź do dashboardu
-  const handleAnimationLogin = () => {
     navigate('/operator')
   }
 
-  // Jeśli zalogowany i animacja aktywna — pokaż LoadingScreen
-  if (showAnimation) {
-    return <LoadingScreen onLogin={handleAnimationLogin} autoExitMs={14000} />
+  // Najpierw animacja — po 14s pojawia się formularz
+  if (!showForm) {
+    return <LoadingScreen onLogin={() => setShowForm(true)} autoExitMs={14000} />
   }
 
   return (
