@@ -85,7 +85,7 @@ export const useShiftStore = create<ShiftState>()(
 
       loadActiveShift: async () => {
         const profile = useAuthStore.getState().profile
-        if (!profile) {
+        if (!profile || profile.role !== 'operator') {
           set({ activeShift: null, activeMachine: null })
           return
         }

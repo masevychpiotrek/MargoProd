@@ -3,16 +3,23 @@ import { useNavigate } from 'react-router-dom'
 import { AlertPopup, NotificationBanner } from '@/components/shared/AlertPopup'
 import { useAlertEngine, requestNotificationPermission } from '@/hooks/useAlertEngine'
 import { useShiftStore } from '@/stores/shiftStore'
+import { useAuthStore } from '@/stores/authStore'
 
 export function AlertProvider({ children }: { children: React.ReactNode }) {
   const navigate = useNavigate()
   const { activeShift } = useShiftStore()
+  const { profile } = useAuthStore()
   const [popupHour, setPopupHour] = useState<number | null>(null)
   const [showBanner, setShowBanner] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
+  const alertsEnabled = profile?.role === 'operator' && !!activeShift
 
   // Show notification permission banner after 5s if not granted
   useEffect(() => {
+    if (!alertsEnabled) {
+      setShowBanner(false)
+      return
+    }
     if (bannerDismissed) return
     const timer = setTimeout(() => {
       if ('Notification' in window && Notification.permission === 'default') {
@@ -20,7 +27,11 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       }
     }, 5000)
     return () => clearTimeout(timer)
-  }, [bannerDismissed])
+  }, [alertsEnabled, bannerDismissed])
+
+  useEffect(() => {
+    if (!alertsEnabled) setPopupHour(null)
+  }, [alertsEnabled])
 
   const handleShowPopup = useCallback((hour: number) => {
     setPopupHour(hour)
@@ -48,7 +59,7 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       {children}
 
       {/* Fullscreen alert popup */}
-      {popupHour !== null && activeShift && (
+      {alertsEnabled && popupHour !== null && (
         <AlertPopup
           hour={popupHour}
           onDismiss={() => setPopupHour(null)}
@@ -57,7 +68,7 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
       )}
 
       {/* Notification permission banner */}
-      {showBanner && (
+      {alertsEnabled && showBanner && (
         <NotificationBanner
           onAllow={handleAllowNotifications}
           onDismiss={() => { setShowBanner(false); setBannerDismissed(true) }}

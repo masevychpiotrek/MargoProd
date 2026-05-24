@@ -72,13 +72,13 @@ export default function AppLayout() {
   }, [])
 
   useEffect(() => {
-    if (profile?.id) loadActiveShift()
-  }, [profile?.id, loadActiveShift])
+    loadActiveShift()
+  }, [profile?.id, profile?.role, loadActiveShift])
 
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
     : NAV_OPERATOR
-  const visibleActiveShift = shiftLoading ? null : activeShift
+  const visibleActiveShift = profile?.role === 'operator' && !shiftLoading ? activeShift : null
   const visibleActiveMachine = visibleActiveShift ? activeMachine : null
 
   const handleSignOut = async () => {

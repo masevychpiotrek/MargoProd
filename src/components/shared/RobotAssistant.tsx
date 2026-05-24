@@ -75,6 +75,7 @@ export default function RobotAssistant() {
   const location = useLocation()
   const { activeShift, activeMachine } = useShiftStore()
   const { profile } = useAuthStore()
+  const operatorHasShift = profile?.role === 'operator' && !!activeShift
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [pos, setPos] = useState(() => ({
@@ -186,8 +187,8 @@ export default function RobotAssistant() {
   }, [])
 
   const pageHint = useMemo(
-    () => getPageHint(location.pathname, Boolean(activeShift)),
-    [location.pathname, activeShift]
+    () => getPageHint(location.pathname, operatorHasShift),
+    [location.pathname, operatorHasShift]
   )
 
   const send = (text: string) => {
@@ -196,7 +197,7 @@ export default function RobotAssistant() {
     setMessages(prev => [
       ...prev,
       { from: 'user', text: clean },
-      { from: 'bot', text: answerFor(clean, Boolean(activeShift)) }
+      { from: 'bot', text: answerFor(clean, operatorHasShift) }
     ])
     setInput('')
   }
@@ -222,6 +223,8 @@ export default function RobotAssistant() {
   const leftFoot = Math.sin(idle / 5) * 10
   const rightFoot = Math.cos(idle / 5) * 10
   const bodyTilt = mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
+  const panelLeft = Math.min(Math.max(16, pos.x - 300), window.innerWidth - Math.min(380, window.innerWidth - 32) - 16)
+  const panelTop = Math.min(Math.max(16, pos.y - 24), window.innerHeight - Math.min(560, window.innerHeight - 32) - 16)
 
   return (
     <div
@@ -229,8 +232,11 @@ export default function RobotAssistant() {
       style={{ left: pos.x, top: pos.y }}
     >
       {open && (
-        <div className="w-[min(360px,calc(100vw-2rem))] overflow-hidden rounded-2xl border border-brand/30 bg-navy-800 shadow-2xl shadow-black/40 animate-slide-in">
-          <div className="border-b border-navy-700 bg-navy-900/70 p-4">
+        <div
+          className="fixed flex w-[min(380px,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-2xl border border-brand/30 bg-navy-800 shadow-2xl shadow-black/40 animate-fade-in"
+          style={{ left: panelLeft, top: panelTop }}
+        >
+          <div className="shrink-0 border-b border-navy-700 bg-navy-900/70 p-4">
             <div className="flex items-center gap-3">
               <div className="relative h-12 w-14 shrink-0">
                 <div className="absolute left-1/2 top-0 h-3 w-px -translate-x-1/2 bg-brand" />
@@ -246,7 +252,7 @@ export default function RobotAssistant() {
               <div className="min-w-0">
                 <div className="text-sm font-bold text-white">Robokontroler</div>
                 <div className="truncate text-xs text-navy-400">
-                  {activeMachine ? `${activeMachine.name} - zmiana ${activeShift?.shift_type}` : profile?.role ?? 'asystent'}
+                  {operatorHasShift ? `${activeMachine?.name} - zmiana ${activeShift?.shift_type}` : profile?.role ?? 'asystent'}
                 </div>
               </div>
               <button onClick={() => setOpen(false)} className="ml-auto rounded-lg px-2 py-1 text-navy-400 hover:bg-navy-700 hover:text-white">
@@ -256,7 +262,7 @@ export default function RobotAssistant() {
             <div className="mt-3 rounded-xl border border-brand/20 bg-brand/10 p-3 text-sm text-amber-100">{pageHint}</div>
           </div>
 
-          <div className="max-h-72 space-y-2 overflow-y-auto p-4">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
             {messages.slice(-6).map((m, i) => (
               <div key={i} className={cn('rounded-xl px-3 py-2 text-sm', m.from === 'bot' ? 'bg-navy-900 text-navy-100' : 'ml-8 bg-brand text-navy-950 font-semibold')}>
                 {m.text}
@@ -264,7 +270,7 @@ export default function RobotAssistant() {
             ))}
           </div>
 
-          <div className="border-t border-navy-700 p-3">
+          <div className="shrink-0 border-t border-navy-700 p-3">
             <div className="mb-3 flex flex-wrap gap-2">
               {quickActions.map(a => (
                 <button key={a.label} onClick={() => send(a.text)} className="rounded-lg border border-navy-600 bg-navy-900 px-3 py-1.5 text-xs font-bold text-navy-200 hover:border-brand hover:text-brand">

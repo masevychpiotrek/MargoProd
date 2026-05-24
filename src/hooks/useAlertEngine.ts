@@ -74,7 +74,7 @@ export function useAlertEngine(
   const reportKey = TEST_MODE ? Math.floor(now.getMinutes() / 3) : hour
 
   const checkIfReported = useCallback(async (key: number) => {
-    if (!activeShift || isReportedRef.current[key] !== undefined) return
+    if (profile?.role !== 'operator' || !activeShift || isReportedRef.current[key] !== undefined) return
     const { data } = await supabase
       .from('hourly_reports')
       .select('id')
@@ -90,7 +90,7 @@ export function useAlertEngine(
         overdueInterval.current = null
       }
     }
-  }, [activeShift, onHidePopup])
+  }, [activeShift, profile?.role, onHidePopup])
 
   useEffect(() => {
     if (reportKey !== lastCheckedRef.current) {
@@ -107,7 +107,17 @@ export function useAlertEngine(
   }, [reportKey])
 
   useEffect(() => {
-    if (!activeShift) return
+    const assignedToShift = !!activeShift && profile?.role === 'operator' &&
+      (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
+
+    if (!assignedToShift) {
+      onHidePopup()
+      if (overdueInterval.current) {
+        clearInterval(overdueInterval.current)
+        overdueInterval.current = null
+      }
+      return
+    }
 
     if (TEST_MODE) {
       // Ile sekund zostało do końca bloku 3-minutowego
@@ -180,7 +190,7 @@ export function useAlertEngine(
     }
 
     return () => {}
-  }, [minute, second, hour, now, activeShift, checkIfReported, onShowPopup, onHidePopup, reportKey])
+  }, [minute, second, hour, now, activeShift, profile?.id, profile?.role, checkIfReported, onShowPopup, onHidePopup, reportKey])
 
   useEffect(() => {
     return () => {
