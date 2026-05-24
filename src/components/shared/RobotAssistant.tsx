@@ -84,6 +84,7 @@ export default function RobotAssistant() {
   }))
   const [mouse, setMouse] = useState({ x: 0, y: 0, near: false, caught: false })
   const [quip, setQuip] = useState('Pilnuje produkcji.')
+  const [overdue, setOverdue] = useState(false)
   const [idle, setIdle] = useState(0)
   const posRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
   const targetRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
@@ -135,6 +136,24 @@ export default function RobotAssistant() {
       window.removeEventListener('pointermove', onMove)
       if (catchTimer.current) window.clearTimeout(catchTimer.current)
     }
+  }, [])
+
+  useEffect(() => {
+    const lines = [
+      'Raport sam sie nie wpisze. Ja tylko dramatyzuje.',
+      'Wyciagam tekturowa maczete do ciecia wymowek.',
+      'Spokojnie, to rekwizyt BHP. Ale raport ma byc.',
+      'Tik-tak. Liczniki czekaja, ja tez.',
+      'Operatorze, wynik na stol. Kultura musi byc.'
+    ]
+    const onOverdue = (event: Event) => {
+      const detail = (event as CustomEvent<{ active: boolean }>).detail
+      const active = !!detail?.active
+      setOverdue(active)
+      if (active) setQuip(lines[Math.floor(Math.random() * lines.length)])
+    }
+    window.addEventListener('margoprod:report-overdue', onOverdue)
+    return () => window.removeEventListener('margoprod:report-overdue', onOverdue)
   }, [])
 
   useEffect(() => {
@@ -218,11 +237,11 @@ export default function RobotAssistant() {
   const idleSway = Math.sin(idle / 11) * 3
   const leanX = mouse.near ? Math.max(-10, Math.min(10, mouse.x / 24)) : idleDriftX
   const leanY = mouse.near ? Math.max(-6, Math.min(6, mouse.y / 34)) : -idleHop
-  const leftArm = mouse.near ? -52 : -18 + Math.sin(idle / 7) * 10
-  const rightArm = mouse.near ? 52 : 18 + Math.cos(idle / 7) * 10
+  const leftArm = overdue ? -35 : mouse.near ? -52 : -18 + Math.sin(idle / 7) * 10
+  const rightArm = overdue ? -72 : mouse.near ? 52 : 18 + Math.cos(idle / 7) * 10
   const leftFoot = Math.sin(idle / 5) * 10
   const rightFoot = Math.cos(idle / 5) * 10
-  const bodyTilt = mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
+  const bodyTilt = overdue ? Math.sin(idle / 3) * 4 : mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
   const panelLeft = Math.min(Math.max(16, pos.x - 300), window.innerWidth - Math.min(380, window.innerWidth - 32) - 16)
   const panelTop = Math.min(Math.max(16, pos.y - 24), window.innerHeight - Math.min(560, window.innerHeight - 32) - 16)
 
@@ -289,6 +308,7 @@ export default function RobotAssistant() {
       {!open && (
         <div className={cn(
           'pointer-events-none max-w-56 rounded-2xl border px-3 py-2 text-xs font-bold shadow-lg transition-all',
+          overdue ? 'translate-y-0 opacity-100 border-red-400/50 bg-red-950/90 text-red-100' :
           mouse.near ? 'translate-y-0 opacity-100 border-brand/40 bg-navy-800 text-amber-100' : 'translate-y-2 opacity-0 border-navy-700 bg-navy-800 text-navy-300'
         )}>
           {quip}
@@ -300,7 +320,7 @@ export default function RobotAssistant() {
         onPointerEnter={() => setQuip('Ha! Myslales, ze mnie ominiesz?')}
         className={cn(
           'group relative h-24 w-24 overflow-visible rounded-3xl transition-all hover:scale-105 focus:outline-none',
-          mouse.caught ? 'scale-105' : ''
+          overdue ? 'animate-pulse' : mouse.caught ? 'scale-105' : ''
         )}
         style={{ transform: `translate(${leanX}px, ${leanY}px) rotate(${bodyTilt}deg) ${mouse.caught ? 'scale(1.05)' : ''}` }}
         aria-label="Otworz asystenta"
@@ -313,6 +333,16 @@ export default function RobotAssistant() {
           className="absolute bottom-4 right-5 h-2 w-10 origin-left rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform before:absolute before:-right-1 before:-top-1 before:h-4 before:w-4 before:rounded-full before:bg-navy-800 before:border before:border-brand/40"
           style={{ transform: `rotate(${rightArm}deg)` }}
         />
+        {overdue && (
+          <span
+            className="absolute -right-8 top-0 h-3 w-16 origin-left rounded-r-full border border-red-200/70 bg-[linear-gradient(90deg,#d1d5db,#f8fafc_45%,#ef4444)] shadow-lg shadow-red-500/20"
+            style={{ transform: `rotate(${-36 + Math.sin(idle / 3) * 7}deg)` }}
+            title="Tekturowa maczeta BHP do cięcia wymówek"
+          >
+            <span className="absolute -left-4 top-0 h-3 w-5 rounded bg-brand" />
+            <span className="absolute right-2 top-1 h-1 w-2 rounded-full bg-red-400" />
+          </span>
+        )}
         {mouse.near && (
           <span
             className="pointer-events-none fixed h-8 w-8 rounded-full border-2 border-dashed border-brand/70 transition-transform"
@@ -333,16 +363,16 @@ export default function RobotAssistant() {
 
         <span className={cn(
           'absolute left-1/2 top-3 h-12 w-16 -translate-x-1/2 rounded-2xl border bg-[linear-gradient(145deg,#243b63,#0f1a2e_62%,#070d1a)] shadow-xl shadow-black/40 transition-colors',
-          mouse.caught ? 'border-green-400' : mouse.near ? 'border-brand' : 'border-brand/50'
+          overdue ? 'border-red-400 shadow-red-500/20' : mouse.caught ? 'border-green-400' : mouse.near ? 'border-brand' : 'border-brand/50'
         )}>
-          <span className="absolute inset-x-3 top-2 h-6 rounded-xl bg-navy-950 border border-cyan-300/20" />
-          <span className="absolute left-5 top-4 h-3 w-3 rounded-full bg-cyan-300 shadow-md shadow-cyan-300/80">
+          <span className={cn('absolute inset-x-3 top-2 h-6 rounded-xl border', overdue ? 'bg-red-950 border-red-300/30' : 'bg-navy-950 border-cyan-300/20')} />
+          <span className={cn('absolute left-5 top-4 h-3 w-3 rounded-full shadow-md', overdue ? 'bg-red-300 shadow-red-300/80' : 'bg-cyan-300 shadow-cyan-300/80')}>
             <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-navy-950" style={{ transform: `translate(${eyeX}px, ${eyeY}px)` }} />
           </span>
-          <span className="absolute right-5 top-4 h-3 w-3 rounded-full bg-cyan-300 shadow-md shadow-cyan-300/80">
+          <span className={cn('absolute right-5 top-4 h-3 w-3 rounded-full shadow-md', overdue ? 'bg-red-300 shadow-red-300/80' : 'bg-cyan-300 shadow-cyan-300/80')}>
             <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-navy-950" style={{ transform: `translate(${eyeX}px, ${eyeY}px)` }} />
           </span>
-          <span className={cn('absolute left-1/2 top-8 block h-1.5 -translate-x-1/2 rounded-full bg-brand transition-all', mouse.caught ? 'w-4' : mouse.near ? 'w-8' : 'w-6')} />
+          <span className={cn('absolute left-1/2 top-8 block h-1.5 -translate-x-1/2 rounded-full transition-all', overdue ? 'w-9 bg-red-300' : mouse.caught ? 'w-4 bg-brand' : mouse.near ? 'w-8 bg-brand' : 'w-6 bg-brand')} />
           <span className="absolute -left-1 top-5 h-3 w-1.5 rounded-l bg-brand/70" />
           <span className="absolute -right-1 top-5 h-3 w-1.5 rounded-r bg-brand/70" />
         </span>

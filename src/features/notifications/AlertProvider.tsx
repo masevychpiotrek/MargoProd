@@ -12,7 +12,8 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   const [popupHour, setPopupHour] = useState<number | null>(null)
   const [showBanner, setShowBanner] = useState(false)
   const [bannerDismissed, setBannerDismissed] = useState(false)
-  const alertsEnabled = profile?.role === 'operator' && !!activeShift
+  const alertsEnabled = profile?.role === 'operator' && !!activeShift &&
+    (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
 
   // Show notification permission banner after 5s if not granted
   useEffect(() => {
@@ -32,6 +33,12 @@ export function AlertProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (!alertsEnabled) setPopupHour(null)
   }, [alertsEnabled])
+
+  useEffect(() => {
+    window.dispatchEvent(new CustomEvent('margoprod:report-overdue', {
+      detail: { active: alertsEnabled && popupHour !== null, hour: popupHour }
+    }))
+  }, [alertsEnabled, popupHour])
 
   const handleShowPopup = useCallback((hour: number) => {
     setPopupHour(hour)
