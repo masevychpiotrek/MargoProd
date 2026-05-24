@@ -18,8 +18,8 @@ export function useClock() {
     date: now.toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long' }),
     dateISO: now.toISOString().split('T')[0],
     hour: now.getHours(),
-    // W trybie testowym "godzina" = minuta (każda minuta = nowa godzina)
-    minute: TEST_MODE ? now.getSeconds() : now.getMinutes(),
+    // W trybie testowym "minuta" = sekundy w bloku 3-minutowym
+    minute: TEST_MODE ? Math.floor(now.getMinutes() % 3 * 60 + now.getSeconds()) : now.getMinutes(),
     second: now.getSeconds()
   }
 }
@@ -29,8 +29,10 @@ export function useCurrentHourBlock() {
   const { now } = useClock()
   if (TEST_MODE) {
     const h = String(now.getHours()).padStart(2, '0')
-    const m1 = String(now.getMinutes()).padStart(2, '0')
-    const m2 = String((now.getMinutes() + 1) % 60).padStart(2, '0')
+    const blockStart = Math.floor(now.getMinutes() / 3) * 3
+    const blockEnd = blockStart + 3
+    const m1 = String(blockStart).padStart(2, '0')
+    const m2 = String(blockEnd % 60).padStart(2, '0')
     return `${h}:${m1}–${h}:${m2}`
   }
   const { hour } = useClock()
@@ -44,16 +46,17 @@ export function useHourCountdown() {
   const { now } = useClock()
 
   if (TEST_MODE) {
-    // Odliczanie do końca bieżącej minuty
-    const endOfMinute = new Date(now)
-    endOfMinute.setSeconds(59, 0)
-    const diff = Math.max(0, Math.floor((endOfMinute.getTime() - now.getTime()) / 1000))
+    // Odliczanie do końca bieżącego bloku 3-minutowego
+    const blockStart = Math.floor(now.getMinutes() / 3) * 3
+    const endOfBlock = new Date(now)
+    endOfBlock.setMinutes(blockStart + 3, 0, 0)
+    const diff = Math.max(0, Math.floor((endOfBlock.getTime() - now.getTime()) / 1000))
     const mins = Math.floor(diff / 60)
     const secs = diff % 60
     return {
       seconds: diff,
       display: `${String(mins).padStart(2, '0')}:${String(secs).padStart(2, '0')}`,
-      isUrgent: diff <= 10  // ostatnie 10 sekund
+      isUrgent: diff <= 20  // ostatnie 20 sekund
     }
   }
 

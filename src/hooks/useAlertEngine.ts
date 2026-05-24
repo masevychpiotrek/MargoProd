@@ -71,7 +71,7 @@ export function useAlertEngine(
   const overdueInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // W trybie testowym "godzina raportu" = minuta bieżąca
-  const reportKey = TEST_MODE ? now.getMinutes() : hour
+  const reportKey = TEST_MODE ? Math.floor(now.getMinutes() / 3) : hour
 
   const checkIfReported = useCallback(async (key: number) => {
     if (!activeShift || isReportedRef.current[key] !== undefined) return
@@ -110,21 +110,25 @@ export function useAlertEngine(
     if (!activeShift) return
 
     if (TEST_MODE) {
-      // Alert na ostatnie 10 sekund minuty
-      const secsLeft = 59 - second
+      // Ile sekund zostało do końca bloku 3-minutowego
+      const blockStart = Math.floor(now.getMinutes() / 3) * 3
+      const endOfBlock = new Date(now)
+      endOfBlock.setMinutes(blockStart + 3, 0, 0)
+      const secsLeft = Math.max(0, Math.floor((endOfBlock.getTime() - now.getTime()) / 1000))
 
-      if (secsLeft <= 10 && secsLeft !== lastAlertRef.current) {
+      if (secsLeft <= 20 && secsLeft !== lastAlertRef.current) {
         lastAlertRef.current = secsLeft
 
         checkIfReported(reportKey).then(() => {
           if (isReportedRef.current[reportKey]) return
 
-          if (secsLeft === 10) {
+          if (secsLeft === 20) {
             playAlertSound(false)
-            sendBrowserNotification('⏰ Za 10 sekund koniec minuty', `Wpisz wynik za minutę ${String(now.getMinutes()).padStart(2,'0')}`, false)
-          } else if (secsLeft === 0) {
+            const blockLabel = `${String(blockStart).padStart(2,'0')}–${String(blockStart+3).padStart(2,'0')}`
+            sendBrowserNotification('⏰ Za 20 sekund koniec bloku', `Wpisz wynik za blok ${blockLabel}`, false)
+          } else if (secsLeft <= 2) {
             playAlertSound(true)
-            sendBrowserNotification('🚨 CZAS NA WPIS!', `Minuta ${String(now.getMinutes()).padStart(2,'0')} minęła!`, true)
+            sendBrowserNotification('🚨 CZAS NA WPIS!', `Blok 3-minutowy minął!`, true)
             onShowPopup(reportKey)
 
             if (!overdueInterval.current) {
@@ -137,7 +141,7 @@ export function useAlertEngine(
                   overdueInterval.current = null
                   onHidePopup()
                 }
-              }, 10_000)
+              }, 15_000)
             }
           }
         })
