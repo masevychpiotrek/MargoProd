@@ -52,11 +52,11 @@ export default function OperatorDashboard() {
     ? Math.round(reports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / reports.length) : 0
 
   return (
-    <div className="space-y-5">
+    <div className="space-y-4 md:space-y-5">
       {/* Welcome */}
       <div>
-        <h1 className="text-2xl font-bold text-white">Witaj, {profile?.full_name?.split(' ')[0]}!</h1>
-        <p className="text-navy-400 mt-1">{date} · {time}</p>
+        <h1 className="text-xl sm:text-2xl font-bold text-white">Witaj, {profile?.full_name?.split(' ')[0]}!</h1>
+        <p className="text-sm sm:text-base text-navy-400 mt-1">{date} · {time}</p>
       </div>
 
       {/* No active shift */}
@@ -80,17 +80,17 @@ export default function OperatorDashboard() {
               ? 'bg-red-500/10 border-red-500/30 animate-pulse'
               : 'bg-amber-500/10 border-amber-500/30'
             )}>
-              <div className="flex items-center justify-between flex-wrap gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
-                  <div className={cn('font-bold text-lg', isUrgent ? 'text-red-400' : 'text-amber-400')}>
+                  <div className={cn('font-bold text-base sm:text-lg', isUrgent ? 'text-red-400' : 'text-amber-400')}>
                     {isUrgent ? '⚠ CZAS NA WPIS GODZINY!' : '⏰ Pamiętaj o wpisaniu wyniku'}
                   </div>
                   <div className="text-sm text-navy-300 mt-0.5">
                     Raport za godzinę <span className="font-bold text-white">{hourBlock}</span> nie został jeszcze wpisany
                   </div>
                 </div>
-                <div className="text-right">
-                  <div className={cn('text-3xl font-bold font-mono', isUrgent ? 'text-red-400' : 'text-white')}>
+                <div className="text-left sm:text-right">
+                  <div className={cn('text-2xl sm:text-3xl font-bold font-mono', isUrgent ? 'text-red-400' : 'text-white')}>
                     {countdown}
                   </div>
                   <div className="text-xs text-navy-400">do końca godziny</div>
@@ -124,7 +124,7 @@ export default function OperatorDashboard() {
           )}
 
           {/* KPI cards */}
-          <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3">
             <div className="kpi-card" style={{ '--before-bg': 'var(--brand)' } as React.CSSProperties}>
               <div className="kpi-label">Produkcja łącznie</div>
               <div className="kpi-value">{totalGood.toLocaleString('pl-PL')}</div>
@@ -149,12 +149,12 @@ export default function OperatorDashboard() {
 
           {/* Reports list */}
           <div className="card">
-            <div className="card-header">
-              <div>
+            <div className="card-header flex-col items-stretch gap-3 sm:flex-row sm:items-center">
+              <div className="min-w-0">
                 <div className="card-title">Raporty tej zmiany</div>
                 <div className="card-sub">{activeMachine?.name} · Zmiana {visibleActiveShift.shift_type}</div>
               </div>
-              <button onClick={() => navigate('/operator/report')} className="btn-primary text-xs py-1.5 px-3">
+              <button onClick={() => navigate('/operator/report')} className="btn-primary text-xs py-2 px-3 sm:py-1.5">
                 + Nowy raport
               </button>
             </div>
@@ -165,19 +165,21 @@ export default function OperatorDashboard() {
                 {reports.map(r => {
                   const eff = Number(r.efficiency_pct)
                   return (
-                    <div key={r.id} className="bg-navy-900 rounded-xl p-3 flex items-center gap-4">
-                      <div className="font-mono text-sm text-navy-400 w-24 flex-shrink-0">{r.hour_block}</div>
+                    <div key={r.id} className="bg-navy-900 rounded-xl p-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:gap-4">
+                      <div className="font-mono text-sm text-navy-400 sm:w-24 sm:flex-shrink-0">{r.hour_block}</div>
                       <div className="flex-1">
                         <div className="h-2 bg-navy-700 rounded-full overflow-hidden">
                           <div className={cn('h-full rounded-full', efficiencyBg(eff))}
                             style={{ width: `${Math.min(eff, 100)}%` }} />
                         </div>
                       </div>
-                      <div className="font-bold text-white font-mono w-20 text-right">
-                        {r.good_count.toLocaleString('pl-PL')} szt
-                      </div>
-                      <div className={cn('font-bold text-sm w-12 text-right', efficiencyColor(eff))}>
-                        {eff}%
+                      <div className="flex items-center justify-between gap-3 sm:contents">
+                        <div className="font-bold text-white font-mono sm:w-20 sm:text-right">
+                          {r.good_count.toLocaleString('pl-PL')} szt
+                        </div>
+                        <div className={cn('font-bold text-sm sm:w-12 sm:text-right', efficiencyColor(eff))}>
+                          {eff}%
+                        </div>
                       </div>
                     </div>
                   )

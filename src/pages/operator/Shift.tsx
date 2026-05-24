@@ -167,10 +167,10 @@ export default function OperatorShift() {
   // ── ACTIVE SHIFT VIEW ────────────────────────────────────────────────────
   if (activeShift && activeMachine) {
     return (
-      <div className="max-w-2xl mx-auto">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-white">Moja zmiana</h1>
-          <p className="text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
+      <div className="mx-auto w-full max-w-2xl">
+        <div className="mb-4 sm:mb-6">
+          <h1 className="text-xl sm:text-2xl font-bold text-white">Moja zmiana</h1>
+          <p className="text-sm sm:text-base text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
         </div>
 
         {/* Ostrzeżenie przy kończeniu */}
@@ -188,7 +188,7 @@ export default function OperatorShift() {
                 ))}
               </div>
               <p className="text-navy-400 text-xs mb-5">Czy na pewno chcesz zakończyć zmianę bez wpisania tych wyników?</p>
-              <div className="flex gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row">
                 <button onClick={() => setShowEndWarning(false)} className="btn-primary flex-1 py-3">
                   Wróć i wpisz wyniki
                 </button>
@@ -205,7 +205,7 @@ export default function OperatorShift() {
             <div className="w-3 h-3 rounded-full bg-green-400 animate-pulse" />
             <span className="text-green-400 font-semibold text-sm">Zmiana aktywna</span>
           </div>
-          <div className="grid grid-cols-2 gap-4 mb-6">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 sm:gap-4 mb-6">
             <div className="bg-navy-900 rounded-xl p-4">
               <div className="label">Maszyna</div>
               <div className="text-xl font-bold text-white">{activeMachine.name}</div>
@@ -227,7 +227,7 @@ export default function OperatorShift() {
               </div>
             </div>
           </div>
-          <div className="flex gap-3">
+          <div className="flex flex-col gap-3 sm:flex-row">
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">
               ✏️ Wpisz wynik godziny
             </button>
@@ -242,17 +242,17 @@ export default function OperatorShift() {
 
   // ── START SHIFT VIEW ─────────────────────────────────────────────────────
   return (
-    <div className="max-w-lg mx-auto">
-      <div className="mb-6">
-        <h1 className="text-2xl font-bold text-white">Rozpocznij zmianę</h1>
-        <p className="text-navy-400 mt-1">Wybierz maszynę, zmianę i zlecenie</p>
+    <div className="mx-auto w-full max-w-2xl">
+      <div className="mb-4 sm:mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold text-white">Rozpocznij zmianę</h1>
+        <p className="text-sm sm:text-base text-navy-400 mt-1">Wybierz maszynę, zmianę i zlecenie</p>
       </div>
       <div className="card space-y-5">
 
         {/* Maszyna */}
         <div>
           <label className="label">Maszyna</label>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             {machines.map(m => (
               <button key={m.id} onClick={() => setSelectedMachine(m.id)}
                 className={cn('p-4 rounded-xl border-2 text-left transition-all',
@@ -267,7 +267,7 @@ export default function OperatorShift() {
         {/* Zmiana */}
         <div>
           <label className="label">Zmiana</label>
-          <div className="grid grid-cols-3 gap-2">
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
             {(['I','II','III'] as ShiftType[]).map(s => (
               <button key={s} onClick={() => setSelectedShift(s)}
                 className={cn('p-3 rounded-xl border-2 text-center transition-all',
@@ -292,7 +292,7 @@ export default function OperatorShift() {
                       <button key={o.id} onClick={() => setSelectedOrderId(o.id)}
                         className={cn('w-full p-3 rounded-xl border-2 text-left transition-all',
                           selectedOrderId === o.id ? 'border-brand bg-brand/10' : 'border-navy-600 bg-navy-900 hover:border-navy-500')}>
-                        <div className="flex items-center justify-between">
+                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                           <div>
                             <div className="font-bold font-mono text-white">{o.order_number}</div>
                             {o.assortment && <div className="text-xs text-brand mt-0.5">{o.assortment.name}</div>}
@@ -301,7 +301,7 @@ export default function OperatorShift() {
                               {o.target_qty > 0 && ` / ${o.target_qty.toLocaleString('pl-PL')} szt`}
                             </div>
                           </div>
-                          <span className={cn('text-xs font-bold', o.status === 'active' ? 'text-green-400' : 'text-amber-400')}>
+                          <span className={cn('text-xs font-bold sm:text-right', o.status === 'active' ? 'text-green-400' : 'text-amber-400')}>
                             {o.status === 'active' ? '● AKTYWNE' : '⏸ ZAPAUZOWANE'}
                           </span>
                         </div>

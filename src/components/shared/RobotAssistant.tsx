@@ -71,11 +71,19 @@ function answerFor(text: string, hasShift: boolean) {
   return 'Nietypowe pytanie. Podaj mi ekran, maszyne albo komunikat bledu, a odpowiem konkretniej. Ogolna zasada: najpierw zmiana, potem zlecenie, potem raport za przedzial.'
 }
 
+function compactPosition() {
+  return {
+    x: Math.max(12, window.innerWidth - 94),
+    y: Math.max(84, window.innerHeight - 118)
+  }
+}
+
 export default function RobotAssistant() {
   const location = useLocation()
   const { activeShift, activeMachine } = useShiftStore()
   const { profile } = useAuthStore()
   const operatorHasShift = profile?.role === 'operator' && !!activeShift
+  const [isCompact, setIsCompact] = useState(() => window.innerWidth < 768)
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [pos, setPos] = useState(() => ({
@@ -109,6 +117,7 @@ export default function RobotAssistant() {
     ]
 
     const onMove = (event: PointerEvent) => {
+      if (isCompact) return
       const current = posRef.current
       const robotX = current.x + 48
       const robotY = current.y + 54
@@ -136,7 +145,7 @@ export default function RobotAssistant() {
       window.removeEventListener('pointermove', onMove)
       if (catchTimer.current) window.clearTimeout(catchTimer.current)
     }
-  }, [])
+  }, [isCompact])
 
   useEffect(() => {
     const lines = [
@@ -158,6 +167,10 @@ export default function RobotAssistant() {
 
   useEffect(() => {
     const pickTarget = () => {
+      if (isCompact) {
+        targetRef.current = compactPosition()
+        return
+      }
       const margin = 88
       targetRef.current = {
         x: margin + Math.random() * Math.max(1, window.innerWidth - margin * 2),
@@ -168,6 +181,11 @@ export default function RobotAssistant() {
     const moveId = window.setInterval(() => {
       setIdle(v => v + 1)
       setPos(prev => {
+        if (isCompact) {
+          const next = compactPosition()
+          posRef.current = next
+          return next
+        }
         if (openRef.current) return prev
         const margin = 74
         const target = mouseRef.current.near
@@ -188,22 +206,25 @@ export default function RobotAssistant() {
 
     const targetId = window.setInterval(pickTarget, 4200)
     const resize = () => {
-      setPos(prev => ({
-        x: Math.min(prev.x, window.innerWidth - 80),
-        y: Math.min(prev.y, window.innerHeight - 80)
-      }))
-      posRef.current = {
-        x: Math.min(posRef.current.x, window.innerWidth - 80),
-        y: Math.min(posRef.current.y, window.innerHeight - 80)
-      }
+      const compact = window.innerWidth < 768
+      setIsCompact(compact)
+      const next = compact
+        ? compactPosition()
+        : {
+            x: Math.min(posRef.current.x, window.innerWidth - 80),
+            y: Math.min(posRef.current.y, window.innerHeight - 80)
+          }
+      setPos(next)
+      posRef.current = next
     }
     window.addEventListener('resize', resize)
+    resize()
     return () => {
       window.clearInterval(moveId)
       window.clearInterval(targetId)
       window.removeEventListener('resize', resize)
     }
-  }, [])
+  }, [isCompact])
 
   const pageHint = useMemo(
     () => getPageHint(location.pathname, operatorHasShift),
@@ -232,9 +253,9 @@ export default function RobotAssistant() {
 
   const eyeX = Math.max(-3, Math.min(3, mouse.x / 36))
   const eyeY = Math.max(-2, Math.min(2, mouse.y / 46))
-  const idleDriftX = Math.sin(idle / 15) * 7 + Math.sin(idle / 39) * 4
-  const idleHop = Math.abs(Math.sin(idle / 8)) * 5
-  const idleSway = Math.sin(idle / 11) * 3
+  const idleDriftX = isCompact ? 0 : Math.sin(idle / 15) * 7 + Math.sin(idle / 39) * 4
+  const idleHop = isCompact ? Math.abs(Math.sin(idle / 12)) * 2 : Math.abs(Math.sin(idle / 8)) * 5
+  const idleSway = isCompact ? 0 : Math.sin(idle / 11) * 3
   const leanX = mouse.near ? Math.max(-10, Math.min(10, mouse.x / 24)) : idleDriftX
   const leanY = mouse.near ? Math.max(-6, Math.min(6, mouse.y / 34)) : -idleHop
   const leftArm = overdue ? -35 : mouse.near ? -52 : -18 + Math.sin(idle / 7) * 10
@@ -242,20 +263,22 @@ export default function RobotAssistant() {
   const leftFoot = Math.sin(idle / 5) * 10
   const rightFoot = Math.cos(idle / 5) * 10
   const bodyTilt = overdue ? Math.sin(idle / 3) * 4 : mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
-  const panelLeft = Math.min(Math.max(16, pos.x - 300), window.innerWidth - Math.min(380, window.innerWidth - 32) - 16)
-  const panelTop = Math.min(Math.max(16, pos.y - 24), window.innerHeight - Math.min(560, window.innerHeight - 32) - 16)
+  const panelWidth = isCompact ? window.innerWidth - 24 : Math.min(380, window.innerWidth - 32)
+  const panelHeight = isCompact ? Math.min(520, window.innerHeight - 96) : Math.min(560, window.innerHeight - 32)
+  const panelLeft = isCompact ? 12 : Math.min(Math.max(16, pos.x - 300), window.innerWidth - panelWidth - 16)
+  const panelTop = isCompact ? Math.max(12, window.innerHeight - panelHeight - 88) : Math.min(Math.max(16, pos.y - 24), window.innerHeight - panelHeight - 16)
 
   return (
     <div
-      className="fixed z-50 flex flex-col items-end gap-3 transition-[left,top] duration-75 ease-linear"
+      className="fixed z-50 flex flex-col items-end gap-2 sm:gap-3 transition-[left,top] duration-75 ease-linear"
       style={{ left: pos.x, top: pos.y }}
     >
       {open && (
         <div
-          className="fixed flex w-[min(380px,calc(100vw-2rem))] max-h-[calc(100vh-2rem)] flex-col overflow-hidden rounded-2xl border border-brand/30 bg-navy-800 shadow-2xl shadow-black/40 animate-fade-in"
-          style={{ left: panelLeft, top: panelTop }}
+          className="fixed flex flex-col overflow-hidden rounded-2xl border border-brand/30 bg-navy-800 shadow-2xl shadow-black/40 animate-fade-in"
+          style={{ left: panelLeft, top: panelTop, width: panelWidth, maxHeight: panelHeight }}
         >
-          <div className="shrink-0 border-b border-navy-700 bg-navy-900/70 p-4">
+          <div className="shrink-0 border-b border-navy-700 bg-navy-900/70 p-3 sm:p-4">
             <div className="flex items-center gap-3">
               <div className="relative h-12 w-14 shrink-0">
                 <div className="absolute left-1/2 top-0 h-3 w-px -translate-x-1/2 bg-brand" />
@@ -281,7 +304,7 @@ export default function RobotAssistant() {
             <div className="mt-3 rounded-xl border border-brand/20 bg-brand/10 p-3 text-sm text-amber-100">{pageHint}</div>
           </div>
 
-          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-4">
+          <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3 sm:p-4">
             {messages.slice(-6).map((m, i) => (
               <div key={i} className={cn('rounded-xl px-3 py-2 text-sm', m.from === 'bot' ? 'bg-navy-900 text-navy-100' : 'ml-8 bg-brand text-navy-950 font-semibold')}>
                 {m.text}
@@ -305,7 +328,7 @@ export default function RobotAssistant() {
         </div>
       )}
 
-      {!open && (
+      {!open && !isCompact && (
         <div className={cn(
           'pointer-events-none max-w-56 rounded-2xl border px-3 py-2 text-xs font-bold shadow-lg transition-all',
           overdue ? 'translate-y-0 opacity-100 border-red-400/50 bg-red-950/90 text-red-100' :
@@ -319,7 +342,7 @@ export default function RobotAssistant() {
         onClick={() => setOpen(v => !v)}
         onPointerEnter={() => setQuip('Ha! Myslales, ze mnie ominiesz?')}
         className={cn(
-          'group relative h-24 w-24 overflow-visible rounded-3xl transition-all hover:scale-105 focus:outline-none',
+          'group relative h-20 w-20 overflow-visible rounded-3xl transition-all hover:scale-105 focus:outline-none sm:h-24 sm:w-24',
           overdue ? 'animate-pulse' : mouse.caught ? 'scale-105' : ''
         )}
         style={{ transform: `translate(${leanX}px, ${leanY}px) rotate(${bodyTilt}deg) ${mouse.caught ? 'scale(1.05)' : ''}` }}

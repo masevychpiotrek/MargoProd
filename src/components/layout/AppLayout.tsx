@@ -150,7 +150,7 @@ export default function AppLayout() {
         'bg-navy-800 border-r border-navy-700 flex flex-col transition-all duration-300 h-screen overflow-hidden flex-shrink-0',
         'fixed md:sticky top-0',
         sidebarOpen ? 'z-40 translate-x-0' : 'md:translate-x-0 -translate-x-full md:z-auto',
-        sidebarOpen ? 'w-64 translate-x-0' : 'w-0 md:w-16 -translate-x-full md:translate-x-0'
+        sidebarOpen ? 'w-[min(18rem,86vw)] md:w-64 translate-x-0' : 'w-0 md:w-16 -translate-x-full md:translate-x-0'
       )}>
         {/* Brand */}
         <div className="p-4 border-b border-navy-700 flex-shrink-0">
@@ -245,8 +245,8 @@ export default function AppLayout() {
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
-        <div className="bg-navy-800/80 backdrop-blur border-b border-navy-700 px-6 py-3 flex items-center gap-4 sticky top-0 z-10">
-          <button onClick={() => setSidebarOpen(v => !v)} className="text-navy-400 hover:text-white transition-colors">
+        <div className="bg-navy-800/80 backdrop-blur border-b border-navy-700 px-3 py-3 sm:px-4 md:px-6 flex items-center gap-3 sm:gap-4 sticky top-0 z-10">
+          <button onClick={() => setSidebarOpen(v => !v)} className="rounded-lg p-2 -ml-2 text-navy-400 hover:bg-navy-700 hover:text-white transition-colors">
             <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
               <line x1="3" y1="6" x2="19" y2="6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
               <line x1="3" y1="11" x2="19" y2="11" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -257,7 +257,7 @@ export default function AppLayout() {
           <div className="text-xs text-navy-400 font-mono">{time}</div>
         </div>
         <AlertProvider>
-          <div className="flex-1 p-6">
+          <div className="flex-1 p-3 sm:p-4 md:p-6">
             <Outlet />
           </div>
         </AlertProvider>
