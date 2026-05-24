@@ -24,7 +24,7 @@ export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn, isLoading } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
-  const [showForm, setShowForm] = useState(false)
+  const [showForm, setShowForm] = useState(() => !!sessionStorage.getItem('ml-intro-shown'))
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
@@ -42,7 +42,10 @@ export default function LoginPage() {
 
   // Najpierw animacja — po 14s pojawia się formularz
   if (!showForm) {
-    return <LoadingScreen onLogin={() => setShowForm(true)} />
+    return <LoadingScreen onLogin={() => {
+      sessionStorage.setItem('ml-intro-shown', '1')
+      setShowForm(true)
+    }} />
   }
 
   return (
