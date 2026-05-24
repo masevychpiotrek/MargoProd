@@ -737,7 +737,7 @@ function tick(){
     if(colT===18){document.getElementById('readyWrap').classList.add('show');document.getElementById('sf').style.width='100%';sndFanfare();}
     if(colT===20){document.getElementById('created').classList.add('show');}
     if(colT===30){ const cb=window.__mlOnLogin; if(cb) cb(); }
-    if(colT>35)phase='done';
+    if(colT>80)phase='done';
   }else if(phase==='done'){
     hexDot=1+.058*Math.sin(Date.now()*.0028);
     if(Math.random()<.018)sparks(CX+rand(-HR(),HR()),CY+rand(-HR(),HR()),2,'#D4A825',.18);
