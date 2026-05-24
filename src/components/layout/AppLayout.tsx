@@ -57,7 +57,7 @@ const NAV_ADMIN = [
 
 export default function AppLayout() {
   const { profile, signOut, isLoading } = useAuthStore()
-  const { activeShift, activeMachine } = useShiftStore()
+  const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
   const { time, date } = useClock()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
@@ -71,12 +71,18 @@ export default function AppLayout() {
     }
   }, [])
 
+  useEffect(() => {
+    if (profile?.id) loadActiveShift()
+  }, [profile?.id, loadActiveShift])
+
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
     : NAV_OPERATOR
+  const visibleActiveShift = shiftLoading ? null : activeShift
+  const visibleActiveMachine = visibleActiveShift ? activeMachine : null
 
   const handleSignOut = async () => {
-    if (activeShift && profile?.role === 'operator') {
+    if (visibleActiveShift && profile?.role === 'operator') {
       setShowLogoutModal(true)
       return
     }
@@ -162,10 +168,10 @@ export default function AppLayout() {
         </div>
 
         {/* Active shift */}
-        {sidebarOpen && activeShift && (
+        {sidebarOpen && visibleActiveShift && (
           <div className="px-4 py-3 border-b border-navy-700 bg-brand/5 flex-shrink-0">
-            <div className="text-xs font-bold text-brand uppercase tracking-wider mb-1">{activeMachine?.name}</div>
-            <div className="text-xs text-navy-300">Zmiana {activeShift.shift_type} · {profile?.full_name}</div>
+            <div className="text-xs font-bold text-brand uppercase tracking-wider mb-1">{visibleActiveMachine?.name}</div>
+            <div className="text-xs text-navy-300">Zmiana {visibleActiveShift.shift_type} · {profile?.full_name}</div>
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               <span className="text-xs text-green-400">Zmiana aktywna</span>
@@ -221,7 +227,7 @@ export default function AppLayout() {
             onClick={handleSignOut}
             className={cn(
               'w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all border',
-              activeShift
+              visibleActiveShift
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
                 : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
             )}
@@ -232,7 +238,7 @@ export default function AppLayout() {
               <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
             {sidebarOpen && (
-              <span>{activeShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}</span>
+              <span>{visibleActiveShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}</span>
             )}
           </button>
         </div>
@@ -271,7 +277,7 @@ export default function AppLayout() {
               </div>
               <div>
                 <div className="font-bold text-white">Aktywna zmiana produkcyjna</div>
-                <div className="text-xs text-amber-400">{activeMachine?.name} · Zmiana {activeShift?.shift_type}</div>
+                <div className="text-xs text-amber-400">{visibleActiveMachine?.name} · Zmiana {visibleActiveShift?.shift_type}</div>
               </div>
             </div>
             <p className="text-sm text-navy-300 mb-2">

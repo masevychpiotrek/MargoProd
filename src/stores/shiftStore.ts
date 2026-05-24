@@ -85,44 +85,47 @@ export const useShiftStore = create<ShiftState>()(
 
       loadActiveShift: async () => {
         const profile = useAuthStore.getState().profile
-        if (!profile) return
+        if (!profile) {
+          set({ activeShift: null, activeMachine: null })
+          return
+        }
 
+        set({ isLoading: true })
         const today = new Date().toISOString().split('T')[0]
 
-        // Szukaj jako operator_1
-        const { data: asOp1 } = await supabase
-          .from('shifts')
-          .select('*, machine:machines(*)')
-          .eq('operator_1_id', profile.id)
-          .eq('shift_date', today)
-          .is('ended_at', null)
-          .maybeSingle()
+        try {
+          // Szukaj jako operator_1
+          const { data: asOp1 } = await supabase
+            .from('shifts')
+            .select('*, machine:machines(*)')
+            .eq('operator_1_id', profile.id)
+            .eq('shift_date', today)
+            .is('ended_at', null)
+            .maybeSingle()
 
-        if (asOp1) {
-          set({ activeShift: asOp1, activeMachine: asOp1.machine as Machine })
-          return
-        }
+          if (asOp1) {
+            set({ activeShift: asOp1, activeMachine: asOp1.machine as Machine })
+            return
+          }
 
-        // Szukaj jako operator_2
-        const { data: asOp2 } = await supabase
-          .from('shifts')
-          .select('*, machine:machines(*)')
-          .eq('operator_2_id', profile.id)
-          .eq('shift_date', today)
-          .is('ended_at', null)
-          .maybeSingle()
+          // Szukaj jako operator_2
+          const { data: asOp2 } = await supabase
+            .from('shifts')
+            .select('*, machine:machines(*)')
+            .eq('operator_2_id', profile.id)
+            .eq('shift_date', today)
+            .is('ended_at', null)
+            .maybeSingle()
 
-        if (asOp2) {
-          set({ activeShift: asOp2, activeMachine: asOp2.machine as Machine })
-          return
-        }
+          if (asOp2) {
+            set({ activeShift: asOp2, activeMachine: asOp2.machine as Machine })
+            return
+          }
 
-        // Żadna aktywna zmiana nie znaleziona w bazie —
-        // jeśli store trzymał zmianę (np. zamkniętą automatycznie przez system),
-        // wyczyść go żeby UI pokazało poprawny stan
-        const { activeShift } = get()
-        if (activeShift) {
+          // Brak aktywnej zmiany w bazie: wyczyść stan zapamiętany w przeglądarce.
           set({ activeShift: null, activeMachine: null })
+        } finally {
+          set({ isLoading: false })
         }
       }
     }),
