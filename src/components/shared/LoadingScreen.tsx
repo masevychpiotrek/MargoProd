@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 
 interface LoadingScreenProps {
   onLogin?: () => void
+  autoExitMs?: number
 }
 
 const STYLES = `
@@ -74,7 +75,7 @@ const HTML = `
   <div class="corner c-br"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
 `
 
-export default function LoadingScreen({ onLogin }: LoadingScreenProps) {
+export default function LoadingScreen({ onLogin, autoExitMs }: LoadingScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -104,8 +105,17 @@ export default function LoadingScreen({ onLogin }: LoadingScreenProps) {
     script.async = true
     container.appendChild(script)
 
+    // Auto-exit timer
+    let timer: ReturnType<typeof setTimeout> | null = null
+    if (autoExitMs) {
+      timer = setTimeout(() => {
+        if (onLogin) onLogin()
+      }, autoExitMs)
+    }
+
     return () => {
       ;(window as any).__mlOnLogin = null
+      if (timer) clearTimeout(timer)
       if (document.head.contains(style)) document.head.removeChild(style)
       if (document.head.contains(link)) document.head.removeChild(link)
     }
