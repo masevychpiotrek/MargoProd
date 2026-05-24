@@ -32,19 +32,16 @@ export const useShiftStore = create<ShiftState>()(
           // Sprawdź czy zmiana już istnieje
           const { data: existing } = await supabase
             .from('shifts')
-            .select('*')
+            .select('id')
             .eq('machine_id', machineId)
             .eq('shift_date', today)
             .eq('shift_type', shiftType)
-            .is('ended_at', null)
+            .order('started_at', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
           if (existing) {
-            // Wznów istniejącą zmianę
-            const { data: machine } = await supabase
-              .from('machines').select('*').eq('id', machineId).single()
-            set({ activeShift: existing, activeMachine: machine })
-            return { error: null }
+            return { error: 'Ta zmiana juz istnieje na tej maszynie. Nie mozna uruchomic jej drugi raz.' }
           }
 
           // Utwórz nową zmianę
