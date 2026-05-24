@@ -86,6 +86,20 @@ export const useShiftStore = create<ShiftState>()(
           return { error: error.message }
         }
 
+        const { data: savedShift, error: verifyError } = await supabase
+          .from('shifts')
+          .select('id, ended_at')
+          .eq('id', activeShift.id)
+          .single()
+
+        if (verifyError || !savedShift?.ended_at) {
+          set({ isLoading: false })
+          return {
+            error: verifyError?.message ??
+              'Baza nie zapisała zakończenia zmiany. Sprawdź politykę UPDATE dla tabeli shifts.'
+          }
+        }
+
         logAudit('shift_end', 'shifts', activeShift.id, undefined, { ended_at: endedAt }).catch(() => undefined)
         set({ activeShift: null, activeMachine: null, isLoading: false })
         return { error: null }
