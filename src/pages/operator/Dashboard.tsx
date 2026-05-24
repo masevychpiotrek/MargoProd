@@ -5,15 +5,20 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useCurrentHourBlock, useClock } from '@/hooks/useClock'
 import { efficiencyColor, efficiencyBg, formatHourBlock, cn } from '@/lib/utils'
-import type { HourlyReport } from '@/types/database'
+import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 2100
+const SHIFT_HOURS: Record<ShiftType, number[]> = {
+  I:   [6,7,8,9,10,11,12,13],
+  II:  [14,15,16,17,18,19,20,21],
+  III: [22,23,0,1,2,3,4,5]
+}
 
 export default function OperatorDashboard() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
-  const { activeShift, activeMachine } = useShiftStore()
-  const { display: countdown, isUrgent, seconds } = useHourCountdown()
+  const { activeShift, activeMachine, isLoading: shiftLoading } = useShiftStore()
+  const { display: countdown, isUrgent } = useHourCountdown()
   const hourBlock = useCurrentHourBlock()
   const { hour, time, date } = useClock()
   const [reports, setReports] = useState<HourlyReport[]>([])
@@ -36,7 +41,11 @@ export default function OperatorDashboard() {
     if (data) setReports(data as HourlyReport[])
   }
 
-  const currentHourReported = reports.some(r => r.hour_start === hour)
+  const shiftHours = activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : []
+  const currentHourBelongsToShift = shiftHours.includes(hour)
+  const currentHourReported = currentHourBelongsToShift && reports.some(r => r.hour_start === hour)
+  const showCurrentHourReminder = currentHourBelongsToShift && !currentHourReported
+  const visibleActiveShift = shiftLoading ? null : activeShift
   const totalGood = reports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = reports.reduce((s, r) => s + r.reject_count, 0)
   const avgEff = reports.length > 0
@@ -51,7 +60,7 @@ export default function OperatorDashboard() {
       </div>
 
       {/* No active shift */}
-      {!activeShift && (
+      {!visibleActiveShift && (
         <div className="card text-center py-10">
           <div className="text-5xl mb-4">🏭</div>
           <h2 className="text-xl font-bold text-white mb-2">Brak aktywnej zmiany</h2>
@@ -63,10 +72,10 @@ export default function OperatorDashboard() {
       )}
 
       {/* Active shift */}
-      {activeShift && (
+      {visibleActiveShift && (
         <>
           {/* Alert - report due */}
-          {!currentHourReported && (
+          {showCurrentHourReminder && (
             <div className={cn('rounded-2xl p-4 border', isUrgent
               ? 'bg-red-500/10 border-red-500/30 animate-pulse'
               : 'bg-amber-500/10 border-amber-500/30'
@@ -93,7 +102,7 @@ export default function OperatorDashboard() {
             </div>
           )}
 
-          {currentHourReported && (
+          {currentHourBelongsToShift && currentHourReported && (
             <div className="bg-green-500/10 border border-green-500/30 rounded-2xl p-4">
               <div className="flex items-center gap-3">
                 <span className="text-2xl">✅</span>
@@ -101,6 +110,15 @@ export default function OperatorDashboard() {
                   <div className="font-bold text-green-400">Raport za {hourBlock} wpisany</div>
                   <div className="text-sm text-navy-400">Następny raport za <span className="font-bold text-white font-mono">{countdown}</span></div>
                 </div>
+              </div>
+            </div>
+          )}
+
+          {!currentHourBelongsToShift && (
+            <div className="bg-navy-800 border border-amber-500/30 rounded-2xl p-4">
+              <div className="font-bold text-amber-400">Poza godzinami tej zmiany</div>
+              <div className="text-sm text-navy-300 mt-1">
+                Aktualna godzina {formatHourBlock(hour)} nie należy do zmiany {visibleActiveShift.shift_type}. Nie będę przypominać o raporcie za obcy przedział.
               </div>
             </div>
           )}
@@ -134,7 +152,7 @@ export default function OperatorDashboard() {
             <div className="card-header">
               <div>
                 <div className="card-title">Raporty tej zmiany</div>
-                <div className="card-sub">{activeMachine?.name} · Zmiana {activeShift.shift_type}</div>
+                <div className="card-sub">{activeMachine?.name} · Zmiana {visibleActiveShift.shift_type}</div>
               </div>
               <button onClick={() => navigate('/operator/report')} className="btn-primary text-xs py-1.5 px-3">
                 + Nowy raport

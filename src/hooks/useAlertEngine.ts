@@ -6,6 +6,11 @@ import { useAuthStore } from '@/stores/authStore'
 
 // TRYB TESTOWY — alert co minutę zamiast co godzinę
 const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
+const SHIFT_HOURS: Record<string, number[]> = {
+  I:   [6,7,8,9,10,11,12,13],
+  II:  [14,15,16,17,18,19,20,21],
+  III: [22,23,0,1,2,3,4,5]
+}
 
 let audioCtx: AudioContext | null = null
 
@@ -111,6 +116,16 @@ export function useAlertEngine(
       (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
 
     if (!assignedToShift) {
+      onHidePopup()
+      if (overdueInterval.current) {
+        clearInterval(overdueInterval.current)
+        overdueInterval.current = null
+      }
+      return
+    }
+
+    const shiftHours = SHIFT_HOURS[activeShift.shift_type] ?? []
+    if (!TEST_MODE && !shiftHours.includes(hour)) {
       onHidePopup()
       if (overdueInterval.current) {
         clearInterval(overdueInterval.current)
