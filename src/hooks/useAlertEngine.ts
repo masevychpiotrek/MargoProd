@@ -4,8 +4,8 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
-// Alert thresholds in seconds before hour end
-const ALERT_THRESHOLDS = [120, 60, 0] // 2 min, 1 min, on the hour
+// TRYB TESTOWY — alert co minutę zamiast co godzinę
+const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
 
 let audioCtx: AudioContext | null = null
 
@@ -21,9 +21,7 @@ export function playAlertSound(urgent = false) {
     const gainNode = ctx.createGain()
     oscillator.connect(gainNode)
     gainNode.connect(ctx.destination)
-
     if (urgent) {
-      // Aggressive beeping for overdue
       oscillator.frequency.setValueAtTime(880, ctx.currentTime)
       oscillator.frequency.setValueAtTime(440, ctx.currentTime + 0.1)
       oscillator.frequency.setValueAtTime(880, ctx.currentTime + 0.2)
@@ -32,7 +30,6 @@ export function playAlertSound(urgent = false) {
       oscillator.start(ctx.currentTime)
       oscillator.stop(ctx.currentTime + 0.4)
     } else {
-      // Gentle ping
       oscillator.frequency.setValueAtTime(660, ctx.currentTime)
       gainNode.gain.setValueAtTime(0.15, ctx.currentTime)
       gainNode.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3)
@@ -68,22 +65,24 @@ export function useAlertEngine(
   const { now, hour, minute, second } = useClock()
   const { activeShift } = useShiftStore()
   const { profile } = useAuthStore()
-  const lastAlertMinute = useRef<number>(-1)
-  const lastCheckedHour = useRef<number>(-1)
+  const lastAlertRef = useRef<number>(-1)
+  const lastCheckedRef = useRef<number>(-1)
   const isReportedRef = useRef<Record<number, boolean>>({})
   const overdueInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
-  // Check if current hour is reported
-  const checkIfReported = useCallback(async (h: number) => {
-    if (!activeShift || isReportedRef.current[h] !== undefined) return
+  // W trybie testowym "godzina raportu" = minuta bieżąca
+  const reportKey = TEST_MODE ? now.getMinutes() : hour
+
+  const checkIfReported = useCallback(async (key: number) => {
+    if (!activeShift || isReportedRef.current[key] !== undefined) return
     const { data } = await supabase
       .from('hourly_reports')
       .select('id')
       .eq('shift_id', activeShift.id)
-      .eq('hour_start', h)
+      .eq('hour_start', key)
       .is('deleted_at', null)
       .maybeSingle()
-    isReportedRef.current[h] = !!data
+    isReportedRef.current[key] = !!data
     if (data) {
       onHidePopup()
       if (overdueInterval.current) {
@@ -93,85 +92,98 @@ export function useAlertEngine(
     }
   }, [activeShift, onHidePopup])
 
-  // Reset reported cache when hour changes
   useEffect(() => {
-    if (hour !== lastCheckedHour.current) {
-      lastCheckedHour.current = hour
-      // Keep last 3 hours in cache, reset rest
+    if (reportKey !== lastCheckedRef.current) {
+      lastCheckedRef.current = reportKey
       const newCache: Record<number, boolean> = {}
       for (let i = 0; i < 3; i++) {
-        const h = (hour - i + 24) % 24
-        if (isReportedRef.current[h] !== undefined) {
-          newCache[h] = isReportedRef.current[h]
+        const k = (reportKey - i + 60) % 60
+        if (isReportedRef.current[k] !== undefined) {
+          newCache[k] = isReportedRef.current[k]
         }
       }
       isReportedRef.current = newCache
     }
-  }, [hour])
+  }, [reportKey])
 
   useEffect(() => {
     if (!activeShift) return
 
-    // Alert at 58:00 left (2 min before), 59:00 left (1 min before), 59:59 (on the hour)
-    const minutesLeft = 59 - minute
+    if (TEST_MODE) {
+      // Alert na ostatnie 10 sekund minuty
+      const secsLeft = 59 - second
 
-    if (minutesLeft <= 2 && minutesLeft !== lastAlertMinute.current) {
-      lastAlertMinute.current = minutesLeft
+      if (secsLeft <= 10 && secsLeft !== lastAlertRef.current) {
+        lastAlertRef.current = secsLeft
 
-      checkIfReported(hour).then(() => {
-        if (isReportedRef.current[hour]) return
+        checkIfReported(reportKey).then(() => {
+          if (isReportedRef.current[reportKey]) return
 
-        if (minutesLeft === 2) {
-          playAlertSound(false)
-          sendBrowserNotification(
-            '⏰ Za 2 minuty koniec godziny',
-            `Wpisz wynik za godzinę ${String(hour).padStart(2,'0')}:00–${String((hour+1)%24).padStart(2,'0')}:00`,
-            false
-          )
-        } else if (minutesLeft === 1) {
-          playAlertSound(false)
-          sendBrowserNotification(
-            '⚠ Za 1 minutę koniec godziny!',
-            `Jeszcze nie wpisałeś wyniku za tę godzinę!`,
-            false
-          )
-        } else if (minutesLeft === 0 && second >= 58) {
-          playAlertSound(true)
-          sendBrowserNotification(
-            '🚨 CZAS NA WPIS WYNIKÓW!',
-            `Godzina ${String(hour).padStart(2,'0')}:00 minęła — wpisz wynik natychmiast!`,
-            true
-          )
-          onShowPopup(hour)
+          if (secsLeft === 10) {
+            playAlertSound(false)
+            sendBrowserNotification('⏰ Za 10 sekund koniec minuty', `Wpisz wynik za minutę ${String(now.getMinutes()).padStart(2,'0')}`, false)
+          } else if (secsLeft === 0) {
+            playAlertSound(true)
+            sendBrowserNotification('🚨 CZAS NA WPIS!', `Minuta ${String(now.getMinutes()).padStart(2,'0')} minęła!`, true)
+            onShowPopup(reportKey)
 
-          // Start overdue interval - sound every 60s until reported
-          if (!overdueInterval.current) {
-            overdueInterval.current = setInterval(async () => {
-              await checkIfReported(hour)
-              if (!isReportedRef.current[hour]) {
-                playAlertSound(true)
-              } else {
-                if (overdueInterval.current) clearInterval(overdueInterval.current)
-                overdueInterval.current = null
-                onHidePopup()
-              }
-            }, 60_000)
+            if (!overdueInterval.current) {
+              overdueInterval.current = setInterval(async () => {
+                await checkIfReported(reportKey)
+                if (!isReportedRef.current[reportKey]) {
+                  playAlertSound(true)
+                } else {
+                  if (overdueInterval.current) clearInterval(overdueInterval.current)
+                  overdueInterval.current = null
+                  onHidePopup()
+                }
+              }, 10_000)
+            }
           }
-        }
-      })
+        })
+      }
+    } else {
+      // Tryb produkcyjny — co godzinę
+      const minutesLeft = 59 - minute
+      if (minutesLeft <= 2 && minutesLeft !== lastAlertRef.current) {
+        lastAlertRef.current = minutesLeft
+        checkIfReported(hour).then(() => {
+          if (isReportedRef.current[hour]) return
+          if (minutesLeft === 2) {
+            playAlertSound(false)
+            sendBrowserNotification('⏰ Za 2 minuty koniec godziny', `Wpisz wynik za godzinę ${String(hour).padStart(2,'0')}:00–${String((hour+1)%24).padStart(2,'00')}:00`, false)
+          } else if (minutesLeft === 1) {
+            playAlertSound(false)
+            sendBrowserNotification('⚠ Za 1 minutę koniec godziny!', `Jeszcze nie wpisałeś wyniku!`, false)
+          } else if (minutesLeft === 0 && second >= 58) {
+            playAlertSound(true)
+            sendBrowserNotification('🚨 CZAS NA WPIS WYNIKÓW!', `Godzina minęła — wpisz wynik natychmiast!`, true)
+            onShowPopup(hour)
+            if (!overdueInterval.current) {
+              overdueInterval.current = setInterval(async () => {
+                await checkIfReported(hour)
+                if (!isReportedRef.current[hour]) playAlertSound(true)
+                else {
+                  if (overdueInterval.current) clearInterval(overdueInterval.current)
+                  overdueInterval.current = null
+                  onHidePopup()
+                }
+              }, 60_000)
+            }
+          }
+        })
+      }
     }
 
     return () => {}
-  }, [minute, second, hour, activeShift, checkIfReported, onShowPopup, onHidePopup])
+  }, [minute, second, hour, now, activeShift, checkIfReported, onShowPopup, onHidePopup, reportKey])
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       if (overdueInterval.current) clearInterval(overdueInterval.current)
     }
   }, [])
 
-  // Mark as reported (called externally after saving)
   const markReported = useCallback((h: number) => {
     isReportedRef.current[h] = true
     onHidePopup()
