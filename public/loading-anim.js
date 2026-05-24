@@ -737,7 +737,7 @@ function tick(){
     if(colT===18){document.getElementById('readyWrap').classList.add('show');document.getElementById('sf').style.width='100%';sndFanfare();}
     if(colT===20){document.getElementById('created').classList.add('show');}
     // onLogin called at end of finale
-    if(colT>480){ phase='done'; const cb=window.__mlOnLogin; if(cb) setTimeout(cb,500); }
+    if(colT>300){ phase='done'; const cb=window.__mlOnLogin; if(cb) setTimeout(cb,500); }
   }else if(phase==='done'){
     hexDot=1+.058*Math.sin(Date.now()*.0028);
     if(Math.random()<.018)sparks(CX+rand(-HR(),HR()),CY+rand(-HR(),HR()),2,'#D4A825',.18);
