@@ -45,7 +45,13 @@ export default function OperatorDashboard() {
   const currentHourBelongsToShift = shiftHours.includes(hour)
   const currentHourReported = currentHourBelongsToShift && reports.some(r => r.hour_start === hour)
   const showCurrentHourReminder = currentHourBelongsToShift && !currentHourReported
-  const visibleActiveShift = shiftLoading ? null : activeShift
+  const visibleActiveShift = !shiftLoading &&
+    activeShift &&
+    !activeShift.ended_at &&
+    profile &&
+    (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
+      ? activeShift
+      : null
   const totalGood = reports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = reports.reduce((s, r) => s + r.reject_count, 0)
   const avgEff = reports.length > 0

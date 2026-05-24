@@ -10,7 +10,7 @@ interface ShiftState {
   isLoading: boolean
 
   startShift: (machineId: string, shiftType: ShiftType, operator2Id?: string) => Promise<{ error: string | null }>
-  endShift: () => Promise<void>
+  endShift: () => Promise<{ error: string | null }>
   loadActiveShift: () => Promise<void>
 }
 
@@ -19,7 +19,7 @@ export const useShiftStore = create<ShiftState>()(
     (set, get) => ({
       activeShift: null,
       activeMachine: null,
-      isLoading: false,
+      isLoading: true,
 
       startShift: async (machineId, shiftType, operator2Id) => {
         const profile = useAuthStore.getState().profile
@@ -72,21 +72,37 @@ export const useShiftStore = create<ShiftState>()(
 
       endShift: async () => {
         const { activeShift } = get()
-        if (!activeShift) return
+        if (!activeShift) return { error: null }
 
-        await supabase
+        set({ isLoading: true })
+        const endedAt = new Date().toISOString()
+        const { data, error } = await supabase
           .from('shifts')
-          .update({ ended_at: new Date().toISOString() })
+          .update({ ended_at: endedAt })
           .eq('id', activeShift.id)
+          .is('ended_at', null)
+          .select('id, ended_at')
+          .maybeSingle()
+
+        if (error) {
+          set({ isLoading: false })
+          return { error: error.message }
+        }
+
+        if (!data?.ended_at) {
+          set({ isLoading: false })
+          return { error: 'Nie udało się zakończyć zmiany w bazie. Odśwież stronę i spróbuj ponownie.' }
+        }
 
         await logAudit('shift_end', 'shifts', activeShift.id)
-        set({ activeShift: null, activeMachine: null })
+        set({ activeShift: null, activeMachine: null, isLoading: false })
+        return { error: null }
       },
 
       loadActiveShift: async () => {
         const profile = useAuthStore.getState().profile
         if (!profile || profile.role !== 'operator') {
-          set({ activeShift: null, activeMachine: null })
+          set({ activeShift: null, activeMachine: null, isLoading: false })
           return
         }
 

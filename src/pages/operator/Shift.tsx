@@ -161,11 +161,12 @@ export default function OperatorShift() {
 
   const handleEndConfirm = async () => {
     setShowEndWarning(false)
-    await endShift()
+    const { error: endError } = await endShift()
+    if (endError) setError('Nie udało się zakończyć zmiany: ' + endError)
   }
 
   // ── ACTIVE SHIFT VIEW ────────────────────────────────────────────────────
-  if (activeShift && activeMachine) {
+  if (activeShift && !activeShift.ended_at && activeMachine) {
     return (
       <div className="mx-auto w-full max-w-2xl">
         <div className="mb-4 sm:mb-6">

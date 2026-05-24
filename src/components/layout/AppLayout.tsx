@@ -78,7 +78,13 @@ export default function AppLayout() {
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
     : NAV_OPERATOR
-  const visibleActiveShift = profile?.role === 'operator' && !shiftLoading ? activeShift : null
+  const visibleActiveShift = profile?.role === 'operator' &&
+    !shiftLoading &&
+    activeShift &&
+    !activeShift.ended_at &&
+    (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
+      ? activeShift
+      : null
   const visibleActiveMachine = visibleActiveShift ? activeMachine : null
 
   const handleSignOut = async () => {

@@ -78,6 +78,40 @@ function compactPosition() {
   }
 }
 
+function edgeTarget() {
+  const margin = 96
+  const right = Math.max(margin, window.innerWidth - 132)
+  const left = window.innerWidth >= 768 ? 336 : margin
+  const bottom = Math.max(120, window.innerHeight - 160)
+  const top = 116
+  const spots = [
+    { x: right, y: top + Math.random() * Math.max(1, window.innerHeight * 0.28) },
+    { x: right, y: bottom },
+    { x: left + Math.random() * 80, y: bottom },
+    { x: right - Math.random() * 160, y: bottom }
+  ]
+  return spots[Math.floor(Math.random() * spots.length)]
+}
+
+function keepOffWorkArea(point: { x: number; y: number }) {
+  if (window.innerWidth < 768) return compactPosition()
+  const contentLeft = 320
+  const inWorkArea =
+    point.x > contentLeft + 180 &&
+    point.x < window.innerWidth - 260 &&
+    point.y > 118 &&
+    point.y < window.innerHeight - 190
+
+  if (!inWorkArea) {
+    return {
+      x: Math.max(contentLeft + 24, Math.min(window.innerWidth - 112, point.x)),
+      y: Math.max(96, Math.min(window.innerHeight - 128, point.y))
+    }
+  }
+
+  return edgeTarget()
+}
+
 export default function RobotAssistant() {
   const location = useLocation()
   const { activeShift, activeMachine } = useShiftStore()
@@ -88,14 +122,14 @@ export default function RobotAssistant() {
   const [input, setInput] = useState('')
   const [pos, setPos] = useState(() => ({
     x: Math.max(96, window.innerWidth - 140),
-    y: Math.max(120, window.innerHeight - 140)
+    y: Math.max(120, window.innerHeight - 160)
   }))
   const [mouse, setMouse] = useState({ x: 0, y: 0, near: false, caught: false })
   const [quip, setQuip] = useState('Pilnuje produkcji.')
   const [overdue, setOverdue] = useState(false)
   const [idle, setIdle] = useState(0)
-  const posRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
-  const targetRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 140) })
+  const posRef = useRef({ x: Math.max(96, window.innerWidth - 140), y: Math.max(120, window.innerHeight - 160) })
+  const targetRef = useRef(edgeTarget())
   const mouseRef = useRef({ x: 0, y: 0, near: false, caught: false })
   const openRef = useRef(false)
   const catchTimer = useRef<number | null>(null)
@@ -171,11 +205,7 @@ export default function RobotAssistant() {
         targetRef.current = compactPosition()
         return
       }
-      const margin = 88
-      targetRef.current = {
-        x: margin + Math.random() * Math.max(1, window.innerWidth - margin * 2),
-        y: margin + Math.random() * Math.max(1, window.innerHeight - margin * 2)
-      }
+      targetRef.current = edgeTarget()
     }
 
     const moveId = window.setInterval(() => {
@@ -187,17 +217,16 @@ export default function RobotAssistant() {
           return next
         }
         if (openRef.current) return prev
-        const margin = 74
         const target = mouseRef.current.near
-          ? {
-              x: Math.max(margin, Math.min(window.innerWidth - margin, prev.x + mouseRef.current.x * 0.04)),
-              y: Math.max(margin, Math.min(window.innerHeight - margin, prev.y + mouseRef.current.y * 0.04))
-            }
+          ? keepOffWorkArea({
+              x: prev.x + mouseRef.current.x * 0.025,
+              y: prev.y + mouseRef.current.y * 0.025
+            })
           : targetRef.current
-        const next = {
+        const next = keepOffWorkArea({
           x: prev.x + (target.x - prev.x) * 0.045,
           y: prev.y + (target.y - prev.y) * 0.045
-        }
+        })
         if (Math.hypot(targetRef.current.x - next.x, targetRef.current.y - next.y) < 18 && !mouseRef.current.near) pickTarget()
         posRef.current = next
         return next
@@ -210,10 +239,10 @@ export default function RobotAssistant() {
       setIsCompact(compact)
       const next = compact
         ? compactPosition()
-        : {
+        : keepOffWorkArea({
             x: Math.min(posRef.current.x, window.innerWidth - 80),
             y: Math.min(posRef.current.y, window.innerHeight - 80)
-          }
+          })
       setPos(next)
       posRef.current = next
     }
