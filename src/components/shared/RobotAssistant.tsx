@@ -56,6 +56,7 @@ export default function RobotAssistant() {
   const [input, setInput] = useState('')
   const [mouse, setMouse] = useState({ x: 0, y: 0, near: false, caught: false })
   const [quip, setQuip] = useState('Pilnuje produkcji.')
+  const [idle, setIdle] = useState(0)
   const catchTimer = useRef<number | null>(null)
   const [messages, setMessages] = useState<ChatMessage[]>([
     { from: 'bot', text: 'Czuwam. Kliknij mnie, gdy operator robi cos podejrzanego albo gdy trzeba szybko przypomniec zasady.' }
@@ -71,8 +72,8 @@ export default function RobotAssistant() {
     ]
 
     const onMove = (event: PointerEvent) => {
-      const robotX = window.innerWidth - 52
-      const robotY = window.innerHeight - 52
+      const robotX = window.innerWidth - 68
+      const robotY = window.innerHeight - 68
       const dx = event.clientX - robotX
       const dy = event.clientY - robotY
       const distance = Math.hypot(dx, dy)
@@ -97,6 +98,11 @@ export default function RobotAssistant() {
     }
   }, [])
 
+  useEffect(() => {
+    const id = window.setInterval(() => setIdle(v => v + 1), 90)
+    return () => window.clearInterval(id)
+  }, [])
+
   const pageHint = useMemo(
     () => getPageHint(location.pathname, Boolean(activeShift)),
     [location.pathname, activeShift]
@@ -119,12 +125,18 @@ export default function RobotAssistant() {
     { label: 'Zmiana', text: 'Czy moge zaczac zmiane drugi raz?' }
   ]
 
-  const eyeX = Math.max(-3, Math.min(3, mouse.x / 35))
-  const eyeY = Math.max(-2, Math.min(2, mouse.y / 45))
-  const leanX = Math.max(-8, Math.min(8, mouse.x / 25))
-  const leanY = Math.max(-5, Math.min(5, mouse.y / 35))
-  const leftArm = mouse.near ? -35 : -12
-  const rightArm = mouse.near ? 35 : 12
+  const eyeX = Math.max(-3, Math.min(3, mouse.x / 36))
+  const eyeY = Math.max(-2, Math.min(2, mouse.y / 46))
+  const idleDriftX = Math.sin(idle / 15) * 7 + Math.sin(idle / 39) * 4
+  const idleHop = Math.abs(Math.sin(idle / 8)) * 5
+  const idleSway = Math.sin(idle / 11) * 3
+  const leanX = mouse.near ? Math.max(-10, Math.min(10, mouse.x / 24)) : idleDriftX
+  const leanY = mouse.near ? Math.max(-6, Math.min(6, mouse.y / 34)) : -idleHop
+  const leftArm = mouse.near ? -52 : -18 + Math.sin(idle / 7) * 10
+  const rightArm = mouse.near ? 52 : 18 + Math.cos(idle / 7) * 10
+  const leftFoot = Math.sin(idle / 5) * 10
+  const rightFoot = Math.cos(idle / 5) * 10
+  const bodyTilt = mouse.caught ? 5 : mouse.near ? Math.max(-5, Math.min(5, mouse.x / 70)) : idleSway
 
   return (
     <div className="fixed bottom-5 right-5 z-50 flex flex-col items-end gap-3">
@@ -193,42 +205,60 @@ export default function RobotAssistant() {
         onClick={() => setOpen(v => !v)}
         onPointerEnter={() => setQuip('Ha! Myslales, ze mnie ominiesz?')}
         className={cn(
-          'group relative h-16 w-16 rounded-2xl border bg-navy-800 shadow-xl shadow-black/30 transition-all hover:border-brand',
-          mouse.caught ? 'border-green-400 rotate-2 scale-105' : mouse.near ? 'border-brand/70 -translate-y-1' : 'border-brand/40'
+          'group relative h-24 w-24 overflow-visible rounded-3xl transition-all hover:scale-105 focus:outline-none',
+          mouse.caught ? 'scale-105' : ''
         )}
-        style={{ transform: `translate(${leanX}px, ${leanY}px) ${mouse.caught ? 'rotate(2deg) scale(1.05)' : ''}` }}
+        style={{ transform: `translate(${leanX}px, ${leanY}px) rotate(${bodyTilt}deg) ${mouse.caught ? 'scale(1.05)' : ''}` }}
         aria-label="Otworz asystenta"
       >
         <span
-          className="absolute left-1 top-8 h-2 w-8 origin-right rounded-full bg-brand/80 transition-transform"
+          className="absolute bottom-4 left-5 h-2 w-10 origin-right rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform"
           style={{ transform: `rotate(${leftArm}deg)` }}
         />
         <span
-          className="absolute right-1 top-8 h-2 w-8 origin-left rounded-full bg-brand/80 transition-transform"
+          className="absolute bottom-4 right-5 h-2 w-10 origin-left rounded-full bg-brand/80 shadow-md shadow-black/30 transition-transform"
           style={{ transform: `rotate(${rightArm}deg)` }}
         />
         {mouse.near && (
           <span
             className="pointer-events-none fixed h-8 w-8 rounded-full border-2 border-dashed border-brand/70 transition-transform"
             style={{
-              left: `calc(100vw - 52px + ${mouse.x}px - 16px)`,
-              top: `calc(100vh - 52px + ${mouse.y}px - 16px)`,
+              left: `calc(100vw - 68px + ${mouse.x}px - 16px)`,
+              top: `calc(100vh - 68px + ${mouse.y}px - 16px)`,
               transform: mouse.caught ? 'scale(0.7)' : 'scale(1)'
             }}
           />
         )}
-        <span className="absolute -top-2 left-1/2 h-3 w-px -translate-x-1/2 bg-brand" />
-        <span className="absolute -top-3 left-1/2 h-2 w-2 -translate-x-1/2 rounded-full bg-brand shadow shadow-brand/60" />
-        <span className="mx-auto mt-4 flex justify-center gap-2">
-          <span className="relative h-3 w-3 rounded-full bg-cyan-300 shadow shadow-cyan-300/80">
+
+        <span className="absolute bottom-0 left-1/2 h-3 w-16 -translate-x-1/2 rounded-full bg-black/30 blur-[2px]" style={{ transform: `translateX(-50%) scale(${1 + idleHop / 18}, ${1 - idleHop / 22})` }} />
+
+        <span className="absolute left-1/2 top-0 h-4 w-px -translate-x-1/2 bg-brand" />
+        <span className="absolute left-1/2 top-0 h-3 w-3 -translate-x-1/2 -translate-y-1 rounded-full bg-brand shadow-md shadow-brand/60" />
+
+        <span className={cn(
+          'absolute left-1/2 top-3 h-12 w-16 -translate-x-1/2 rounded-2xl border bg-navy-800 shadow-xl shadow-black/40 transition-colors',
+          mouse.caught ? 'border-green-400' : mouse.near ? 'border-brand' : 'border-brand/50'
+        )}>
+          <span className="absolute inset-x-3 top-2 h-6 rounded-xl bg-navy-950 border border-cyan-300/20" />
+          <span className="absolute left-5 top-4 h-3 w-3 rounded-full bg-cyan-300 shadow-md shadow-cyan-300/80">
             <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-navy-950" style={{ transform: `translate(${eyeX}px, ${eyeY}px)` }} />
           </span>
-          <span className="relative h-3 w-3 rounded-full bg-cyan-300 shadow shadow-cyan-300/80">
+          <span className="absolute right-5 top-4 h-3 w-3 rounded-full bg-cyan-300 shadow-md shadow-cyan-300/80">
             <span className="absolute left-1 top-1 h-1.5 w-1.5 rounded-full bg-navy-950" style={{ transform: `translate(${eyeX}px, ${eyeY}px)` }} />
           </span>
+          <span className={cn('absolute left-1/2 top-8 block h-1.5 -translate-x-1/2 rounded-full bg-brand transition-all', mouse.caught ? 'w-4' : mouse.near ? 'w-8' : 'w-6')} />
+          <span className="absolute -left-1 top-5 h-3 w-1.5 rounded-l bg-brand/70" />
+          <span className="absolute -right-1 top-5 h-3 w-1.5 rounded-r bg-brand/70" />
         </span>
-        <span className={cn('mx-auto mt-2 block h-1.5 rounded-full bg-brand transition-all', mouse.caught ? 'w-4' : mouse.near ? 'w-8' : 'w-7')} />
-        {!open && <span className="absolute -left-1 -top-1 h-3 w-3 rounded-full bg-green-400 ring-4 ring-navy-900" />}
+
+        <span className="absolute bottom-5 left-1/2 h-9 w-12 -translate-x-1/2 rounded-xl border border-brand/30 bg-navy-900 shadow-lg shadow-black/30">
+          <span className="absolute left-3 top-2 h-2 w-2 rounded-full bg-brand/70" />
+          <span className="absolute right-3 top-2 h-2 w-2 rounded-full bg-brand/70" />
+          <span className="absolute bottom-2 left-1/2 h-1 w-7 -translate-x-1/2 rounded bg-navy-700" />
+        </span>
+        <span className="absolute bottom-1 left-8 h-5 w-3 rounded-b bg-brand/80 transition-transform" style={{ transform: `rotate(${leftFoot}deg)` }} />
+        <span className="absolute bottom-1 right-8 h-5 w-3 rounded-b bg-brand/80 transition-transform" style={{ transform: `rotate(${rightFoot}deg)` }} />
+        {!open && <span className="absolute left-3 top-2 h-3 w-3 rounded-full bg-green-400 ring-4 ring-navy-900" />}
       </button>
     </div>
   )
