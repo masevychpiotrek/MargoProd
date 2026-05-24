@@ -9,6 +9,7 @@ import { TimeInput, parseHHMM, minsToHHMM } from '@/components/shared/FormContro
 import type { HourlyReport, DowntimeCategory } from '@/types/database'
 
 const TARGET = 2100
+const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
 
 interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
 interface ProductionOrder {
@@ -161,7 +162,7 @@ export default function OperatorReport() {
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const machineRate = incRuntime > 0 ? Math.round(incGood / incRuntime * 60) : 0
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
-  const belowTarget = incGood > 0 && incGood < TARGET
+  const belowTarget = !TEST_MODE && incGood > 0 && incGood < TARGET
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
 
@@ -220,7 +221,7 @@ export default function OperatorReport() {
     if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy (HH:MM)')
     if (!counterReady)   errs.push('Wpisz stan licznika czasu gotowości (HH:MM)')
     if (!counterAlarm)   errs.push('Wpisz stan licznika czasu alarmu (HH:MM)')
-    if (allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
+    if (!TEST_MODE && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
     if (alreadyReported) errs.push(`Raport za ${formatHourBlock(selectedHour)} już istnieje`)
     if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie może maleć')
@@ -295,18 +296,27 @@ export default function OperatorReport() {
               </div>
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
                 {(() => {
+                  const reported = existingReports.map(r => r.hour_start)
                   const shiftHours: Record<string, number[]> = {
                     'I':   [6,7,8,9,10,11,12,13],
                     'II':  [14,15,16,17,18,19,20,21],
                     'III': [22,23,0,1,2,3,4,5]
                   }
                   const hours = activeShift ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h)) : Array.from({length:24},(_,h)=>h)
-                  const reported = existingReports.map(r => r.hour_start)
-                  return hours.map(h => (
-                    <option key={h} value={h} disabled={reported.includes(h)}>
-                      {formatHourBlock(h)}{reported.includes(h) ? ' ✓ wpisano' : ''}
-                    </option>
-                  ))
+                  const prevHour = (hour - 1 + 24) % 24
+                  const currentIdx = hours.indexOf(hour)
+                  const prevIdx = hours.indexOf(prevHour)
+                  return hours.map((h, idx) => {
+                    const isFuture = currentIdx >= 0 && idx > currentIdx
+                    const isTooOld = prevIdx >= 0 && currentIdx >= 0 && idx < prevIdx
+                    const isReported = reported.includes(h)
+                    const isDisabled = isReported || isFuture || isTooOld
+                    return (
+                      <option key={h} value={h} disabled={isDisabled}>
+                        {formatHourBlock(h)}{isReported ? ' ✓ wpisano' : isFuture ? ' (przyszłość)' : isTooOld ? ' (za dawno)' : ''}
+                      </option>
+                    )
+                  })
                 })()}
               </select>
             </div>
