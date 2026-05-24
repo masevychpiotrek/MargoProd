@@ -37,12 +37,12 @@ export default function LoginPage() {
       setServerError(error)
       return
     }
-    navigate('/operator')
+    navigate('/')
   }
 
   // Najpierw animacja — po 14s pojawia się formularz
   if (!showForm) {
-    return <LoadingScreen onLogin={() => setShowForm(true)} autoExitMs={20000} />
+    return <LoadingScreen onLogin={() => setShowForm(true)} />
   }
 
   return (
