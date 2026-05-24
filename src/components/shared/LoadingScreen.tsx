@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 
 interface LoadingScreenProps {
   onLogin?: () => void
@@ -67,9 +67,8 @@ const HTML = `
     </div>
     <div class="created" id="created">Created by <span>Masevych</span></div>
   </div>
-  <div id="clickHint" style="position:fixed;bottom:12vh;left:0;right:0;text-align:center;font-family:'Orbitron',sans-serif;font-size:.55rem;letter-spacing:.25em;color:rgba(212,168,37,.35);text-transform:uppercase;pointer-events:none;transition:opacity 1s;">KLIKNIJ ABY WŁĄCZYĆ DŹWIĘK</div>
   <div id="phaseLabel" style="position:fixed;top:8px;right:12px;font-size:.54rem;letter-spacing:.16em;color:rgba(212,168,37,.25);text-transform:uppercase;pointer-events:none;font-family:'Rajdhani',sans-serif;"></div>
-  <button id="loginBtn">▶ URUCHOM SYSTEM</button>
+  <button id="loginBtn">▶ ZALOGUJ DO SYSTEMU</button>
   <div class="corner c-tl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-tr"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-bl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
@@ -78,40 +77,35 @@ const HTML = `
 
 export default function LoadingScreen({ onLogin, autoExitMs }: LoadingScreenProps) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [started, setStarted] = useState(false)
 
+  // Animacja — odpala się tylko gdy started=true
   useEffect(() => {
+    if (!started) return
     const container = containerRef.current
     if (!container) return
 
-    // Google Fonts
     const link = document.createElement('link')
     link.rel = 'stylesheet'
     link.href = 'https://fonts.googleapis.com/css2?family=Rajdhani:wght@300;400;600;700&family=Orbitron:wght@400;700;900&display=swap'
     document.head.appendChild(link)
 
-    // Styles
     const style = document.createElement('style')
     style.textContent = STYLES
     document.head.appendChild(style)
 
-    // HTML
     container.innerHTML = HTML
 
-    // Expose callback
     ;(window as any).__mlOnLogin = onLogin ?? null
 
-    // Load animation as external script
     const script = document.createElement('script')
     script.src = '/loading-anim.js'
     script.async = true
     container.appendChild(script)
 
-    // Auto-exit timer
     let timer: ReturnType<typeof setTimeout> | null = null
     if (autoExitMs) {
-      timer = setTimeout(() => {
-        if (onLogin) onLogin()
-      }, autoExitMs)
+      timer = setTimeout(() => { if (onLogin) onLogin() }, autoExitMs)
     }
 
     return () => {
@@ -120,77 +114,105 @@ export default function LoadingScreen({ onLogin, autoExitMs }: LoadingScreenProp
       if (document.head.contains(style)) document.head.removeChild(style)
       if (document.head.contains(link)) document.head.removeChild(link)
     }
-  }, [onLogin])
+  }, [started, onLogin])
 
-  const [started, setStarted] = React.useState(false)
-
-  const handleStart = () => {
-    setStarted(true)
-    // Odblokuj audio
-    try {
-      const AC = new (window.AudioContext || (window as any).webkitAudioContext)()
-      AC.resume()
-    } catch(e) {}
-  }
-
+  // Ekran startowy przed animacją
   if (!started) {
     return (
       <div style={{
-        position: 'fixed', inset: 0, background: '#080c10',
+        position: 'fixed', inset: 0,
+        background: '#080c10',
         display: 'flex', flexDirection: 'column',
         alignItems: 'center', justifyContent: 'center',
-        zIndex: 99999, cursor: 'pointer'
-      }} onClick={handleStart}>
-        {/* Logo */}
-        <svg width="64" height="64" viewBox="0 0 22 22" fill="none" style={{marginBottom: '24px'}}>
-          <path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.2" fill="none"/>
-          <path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.6" opacity="0.25"/>
+        zIndex: 99999
+      }}>
+        <style>{`
+          @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
+          @keyframes pulse-glow {
+            0%,100% { box-shadow: 0 0 22px rgba(212,168,37,.25); }
+            50% { box-shadow: 0 0 45px rgba(212,168,37,.6), 0 0 80px rgba(212,168,37,.2); }
+          }
+          @keyframes fade-in-up {
+            from { opacity:0; transform:translateY(20px); }
+            to { opacity:1; transform:translateY(0); }
+          }
+        `}</style>
+
+        {/* Siatka w tle */}
+        <div style={{
+          position: 'absolute', inset: 0, pointerEvents: 'none',
+          backgroundImage: 'linear-gradient(rgba(212,168,37,.04) 1px, transparent 1px), linear-gradient(90deg, rgba(212,168,37,.04) 1px, transparent 1px)',
+          backgroundSize: '32px 32px'
+        }} />
+
+        {/* Logo sześciokąt */}
+        <svg width="72" height="72" viewBox="0 0 22 22" fill="none"
+          style={{ marginBottom: '20px', animation: 'fade-in-up .8s ease forwards' }}>
+          <path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z"
+            stroke="#c9a84c" strokeWidth="1.2" fill="none"/>
+          <path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15"
+            stroke="#c9a84c" strokeWidth="0.5" opacity="0.25"/>
           <circle cx="11" cy="11" r="2.5" fill="#c9a84c"/>
         </svg>
+
+        {/* Nazwa */}
         <div style={{
           fontFamily: "'Orbitron', sans-serif",
-          fontSize: 'clamp(1.6rem,5vw,2.6rem)',
+          fontSize: 'clamp(1.8rem,5vw,2.8rem)',
           fontWeight: 900,
           color: '#D4A825',
           letterSpacing: '.1em',
-          textShadow: '0 0 40px rgba(212,168,37,.8)',
-          marginBottom: '8px'
+          textShadow: '0 0 40px rgba(212,168,37,.7)',
+          marginBottom: '6px',
+          animation: 'fade-in-up .8s .1s ease both'
         }}>MargoLine</div>
+
         <div style={{
-          fontSize: '.7rem',
-          color: 'rgba(232,223,200,.4)',
-          letterSpacing: '.22em',
+          fontSize: '.65rem',
+          color: 'rgba(232,223,200,.35)',
+          letterSpacing: '.25em',
           textTransform: 'uppercase',
-          marginBottom: '48px'
+          marginBottom: '52px',
+          animation: 'fade-in-up .8s .2s ease both'
         }}>System Monitorowania Produkcji</div>
-        <button style={{
-          background: 'rgba(212,168,37,.1)',
-          border: '1.5px solid rgba(212,168,37,.6)',
-          color: '#D4A825',
-          fontFamily: "'Orbitron', sans-serif",
-          fontSize: '.8rem',
-          fontWeight: 700,
-          letterSpacing: '.22em',
-          textTransform: 'uppercase',
-          padding: '14px 36px',
-          borderRadius: '4px',
-          cursor: 'pointer',
-          animation: 'pulse-btn 2s ease-in-out infinite',
-          boxShadow: '0 0 22px rgba(212,168,37,.25)'
-        }}>
+
+        {/* Przycisk */}
+        <button
+          onClick={() => setStarted(true)}
+          style={{
+            background: 'rgba(212,168,37,.08)',
+            border: '1.5px solid rgba(212,168,37,.65)',
+            color: '#D4A825',
+            fontFamily: "'Orbitron', sans-serif",
+            fontSize: '.78rem',
+            fontWeight: 700,
+            letterSpacing: '.22em',
+            textTransform: 'uppercase',
+            padding: '14px 40px',
+            borderRadius: '4px',
+            cursor: 'pointer',
+            animation: 'fade-in-up .8s .4s ease both, pulse-glow 2.2s 1.2s ease-in-out infinite',
+          }}
+        >
           ▶ URUCHOM SYSTEM
         </button>
-        <style>{`
-          @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&display=swap');
-          @keyframes pulse-btn {
-            0%,100% { box-shadow: 0 0 22px rgba(212,168,37,.25); }
-            50% { box-shadow: 0 0 40px rgba(212,168,37,.55); }
-          }
-        `}</style>
+
+        {/* Narożniki */}
+        {[
+          { style: { top: 14, left: 14 } },
+          { style: { top: 14, right: 14, transform: 'scaleX(-1)' } },
+          { style: { bottom: 14, left: 14, transform: 'scaleY(-1)' } },
+          { style: { bottom: 14, right: 14, transform: 'scale(-1)' } },
+        ].map((c, i) => (
+          <div key={i} style={{ position: 'fixed', width: 28, height: 28, opacity: .25, ...c.style }}>
+            <svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" strokeWidth="1.8"/></svg>
+          </div>
+        ))}
       </div>
     )
   }
 
+  // Animacja
   return (
     <div
       ref={containerRef}
