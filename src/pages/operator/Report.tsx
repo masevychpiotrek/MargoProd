@@ -6,10 +6,19 @@ import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
 import { TimeInput, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
-import type { HourlyReport, DowntimeCategory } from '@/types/database'
+import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database'
 
 const TARGET = 2100
 const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
+const SHIFT_HOURS: Record<ShiftType, number[]> = {
+  I:   [6,7,8,9,10,11,12,13],
+  II:  [14,15,16,17,18,19,20,21],
+  III: [22,23,0,1,2,3,4,5]
+}
+
+function getShiftHours(shiftType?: ShiftType) {
+  return shiftType ? SHIFT_HOURS[shiftType] : Array.from({ length: 24 }, (_, h) => h)
+}
 
 interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
 interface ProductionOrder {
@@ -53,7 +62,9 @@ export default function OperatorReport() {
   const { profile } = useAuthStore()
   const { activeShift, activeMachine } = useShiftStore()
   const { display: countdown, isUrgent } = useHourCountdown()
-  const { hour, dateISO } = useClock()
+  const { hour } = useClock()
+  const shiftHours = getShiftHours(activeShift?.shift_type)
+  const activeTarget = activeMachine?.target_per_hour ?? TARGET
 
   const [counterGood,    setCounterGood]    = useState('')
   const [counterReject,  setCounterReject]  = useState('')
@@ -68,7 +79,7 @@ export default function OperatorReport() {
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [errors,  setErrors]  = useState<string[]>([])
-  const [selectedHour, setSelectedHour] = useState(hour)
+  const [selectedHour, setSelectedHour] = useState(() => shiftHours.includes(hour) ? hour : shiftHours[0])
 
   // Orders
   const [orders,         setOrders]         = useState<ProductionOrder[]>([])
@@ -92,7 +103,10 @@ export default function OperatorReport() {
     if (!activeShift) { navigate('/operator/shift'); return }
     loadReports(); loadOrders()
   }, [activeShift])
-  useEffect(() => { setSelectedHour(hour) }, [hour])
+  useEffect(() => {
+    const hoursForShift = getShiftHours(activeShift?.shift_type)
+    setSelectedHour(prev => hoursForShift.includes(prev) ? prev : hoursForShift[0])
+  }, [activeShift?.shift_type])
 
   const loadReports = async () => {
     if (!activeShift) return
@@ -137,7 +151,13 @@ export default function OperatorReport() {
   }
 
   // Prev report
-  const prevReport = [...existingReports].filter(r => r.hour_start < selectedHour).sort((a,b) => b.hour_start - a.hour_start)[0] as ReportExt | undefined
+  const getHourIndex = (h: number) => shiftHours.indexOf(h)
+  const selectedHourIndex = getHourIndex(selectedHour)
+  const orderedReports = [...existingReports]
+    .filter(r => getHourIndex(r.hour_start) !== -1)
+    .sort((a,b) => getHourIndex(a.hour_start) - getHourIndex(b.hour_start))
+  const previousReports = orderedReports.filter(r => getHourIndex(r.hour_start) < selectedHourIndex)
+  const prevReport = previousReports[previousReports.length - 1] as ReportExt | undefined
   const prevGood    = prevReport?.counter_good    ?? 0
   const prevReject  = prevReport?.counter_reject  ?? 0
   const prevRuntime = prevReport?.counter_runtime ?? 0
@@ -158,11 +178,11 @@ export default function OperatorReport() {
 
   const timeSum = incRuntime + incReady + incAlarm
   const allTimesFilled = counterRuntime !== '' && counterReady !== '' && counterAlarm !== ''
-  const efficiency  = incGood > 0 ? Math.round(incGood / TARGET * 100) : 0
+  const efficiency  = incGood > 0 ? Math.round(incGood / activeTarget * 100) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const machineRate = incRuntime > 0 ? Math.round(incGood / incRuntime * 60) : 0
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
-  const belowTarget = !TEST_MODE && incGood > 0 && incGood < TARGET
+  const belowTarget = !TEST_MODE && incGood > 0 && incGood < activeTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
 
@@ -173,7 +193,7 @@ export default function OperatorReport() {
     const curRt = parseHHMM(finishCounterRuntime)
     const curRd = parseHHMM(finishCounterReady)
     const curAl = parseHHMM(finishCounterAlarm)
-    const lastReport = [...existingReports].sort((a,b) => b.hour_start - a.hour_start)[0] as ReportExt | undefined
+    const lastReport = orderedReports[orderedReports.length - 1] as ReportExt | undefined
     const lastGood    = lastReport?.counter_good    ?? 0
     const lastReject  = lastReport?.counter_reject  ?? 0
     const lastRuntime = lastReport?.counter_runtime ?? 0
@@ -191,13 +211,13 @@ export default function OperatorReport() {
     const { error } = await supabase.from('hourly_reports').insert({
       shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
       hour_block: `${String(finishHour).padStart(2,'0')}:00–${String(finishHour).padStart(2,'00')}:${String(now.getMinutes()).padStart(2,'0')}`,
-      report_date: dateISO, hour_start: finishHour,
+      report_date: activeShift.shift_date, hour_start: finishHour,
       good_count: incG, reject_count: incRj, total_count: curG,
       counter_good: curG, counter_reject: curR,
       runtime_min: incRt, ready_min: incRd, alarm_min: incAl,
       downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
       counter_runtime: curRt, counter_ready: curRd, counter_alarm: curAl,
-      target: activeMachine?.target_per_hour ?? TARGET,
+      target: activeTarget,
       notes: finishNotes || 'Zakończenie zlecenia', status: 'submitted',
       order_id: activeOrderId, order_qty: incG
     })
@@ -241,13 +261,13 @@ export default function OperatorReport() {
       const orderQtyVal = parseInt(orderQty) || incGood
       const { data: report, error } = await supabase.from('hourly_reports').insert({
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
-        hour_block: formatHourBlock(selectedHour), report_date: dateISO, hour_start: selectedHour,
+        hour_block: formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
         good_count: incGood, reject_count: incReject, total_count: curGood,
         counter_good: curGood, counter_reject: curReject,
         runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
-        target: activeMachine?.target_per_hour ?? TARGET,
+        target: activeTarget,
         downtime_reason: downtimeReason || null, notes: notes || null, status: 'submitted',
         order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
       }).select().single()
@@ -297,17 +317,9 @@ export default function OperatorReport() {
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
                 {(() => {
                   const reported = existingReports.map(r => r.hour_start)
-                  const shiftHours: Record<string, number[]> = {
-                    'I':   [6,7,8,9,10,11,12,13],
-                    'II':  [14,15,16,17,18,19,20,21],
-                    'III': [22,23,0,1,2,3,4,5]
-                  }
-                  const hours = activeShift
-                    ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h))
-                    : Array.from({length:24},(_,h)=>h)
+                  const hours = shiftHours
                   const now = new Date()
                   const currentHour = now.getHours()
-                  const shiftStartHour = hours[0]
 
                   return hours.map((h, idx) => {
                     const alreadyReported = reported.includes(h)
