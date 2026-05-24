@@ -591,7 +591,7 @@ let armX=0,armY=0;
 let armMT=0,armSX=0,armSY=0,armTX=0,armTY=0,armSpd=0;
 let dwellT=0,colT=0,swapPhaseT=0;
 let paintIdx=0,paintT2=0;
-const PAINT_SPD=0.055;
+const PAINT_SPD=0.16;
 let parkX=0,parkY=0;
 
 function calcSpawn(i){
@@ -623,12 +623,12 @@ function setLabel(t){document.getElementById('phaseLabel').textContent=t;}
 
 function tick(){
   if(phase==='boot'){
-    bootT+=.035;bgAlpha=Math.min(1,bootT*.82);
+    bootT+=.09;bgAlpha=Math.min(1,bootT*.82);
     pieces.forEach(p=>{p.alpha=clamp(bootT*1.1-.2,0,1);});
     armX=BASE_X();armY=BASE_Y();
     if(bootT>=1.0){
       phase='move';subphase='toSpawn';
-      startMove(pieces[0].spx,pieces[0].spy,.055);
+      startMove(pieces[0].spx,pieces[0].spy,.14);
       setLabel('Pobieranie elementów');
     }
   }else if(phase==='move'){
@@ -655,28 +655,28 @@ function tick(){
   }else if(phase==='dwell'){
     dwellT++;
     if(subphase==='pickup'){
-      gripOpen=Math.max(0,1-dwellT/6);
+      gripOpen=Math.max(0,1-dwellT/3);
       if(dwellT===6)sndGrip();
       if(dwellT%6===0)sparks(armX,armY,1,'#cce4ff',.3);
     }
     if(subphase==='placed'){
       if(dwellT%5===0)sparks(armX,armY,2,'#D4A825',.3);
     }
-    if(dwellT>=10){
+    if(dwellT>=4){
       if(subphase==='pickup'){
         const p=pieces[curIdx];
-        startMove(p.mx,p.my,.05);
+        startMove(p.mx,p.my,.13);
         phase='carry';
       }else if(subphase==='placed'){
         curIdx++;
         if(curIdx>=6){
           setLabel('Powrót do bazy');
           gripOpen=1;
-          startMove(BASE_X(),BASE_Y(),.045);
+          startMove(BASE_X(),BASE_Y(),.12);
           phase='move';subphase='toBase';sndWhoosh();
         }else{
           gripOpen=1;
-          startMove(pieces[curIdx].spx,pieces[curIdx].spy,.055);
+          startMove(pieces[curIdx].spx,pieces[curIdx].spy,.14);
           phase='move';subphase='toSpawn';
         }
       }
@@ -700,14 +700,14 @@ function tick(){
   }else if(phase==='toolSwap'){
     swapPhaseT++;
     armX=BASE_X();armY=BASE_Y()-Math.min(W,H)*.05;
-    swapT=clamp(swapPhaseT/25,0,1);
-    if(swapPhaseT===3){sndToolSwap();sparks(armX,armY,10,'#D4A825',.9);}
-    if(swapPhaseT===14){toolMode='painter';sparks(armX,armY,12,'#D4A825',1.05);sndSpark();}
-    if(swapPhaseT>=28){
+    swapT=clamp(swapPhaseT/10,0,1);
+    if(swapPhaseT===2){sndToolSwap();sparks(armX,armY,10,'#D4A825',.9);}
+    if(swapPhaseT===6){toolMode='painter';sparks(armX,armY,12,'#D4A825',1.05);sndSpark();}
+    if(swapPhaseT>=12){
       swapping=false;
       hexFillAlpha=1;hexRing=1;hexDot=1;
       const pts=getHex();
-      startMove(pts[0].x,pts[0].y,.05);
+      startMove(pts[0].x,pts[0].y,.13);
       phase='move';subphase='toPaintStart';
     }
   }else if(phase==='paint'){
@@ -725,7 +725,7 @@ function tick(){
         stopPaintHiss();
         shockwave(CX,CY,'#D4A825');sparks(CX,CY,35,'#F0C84A',2.2);
         setLabel('Powrót do bazy');
-        startMove(parkX,parkY,.04);
+        startMove(parkX,parkY,.12);
         phase='move';subphase='toPark';
       }else{
         paintT2=0;sparks(armX,armY,7,'#D4A825',1.05);
@@ -733,11 +733,11 @@ function tick(){
     }
   }else if(phase==='finale'){
     colT++;
-    if(colT===22){['appName','badge','appSub'].forEach(id=>document.getElementById(id).classList.add('show'));}
-    if(colT===52){document.getElementById('readyWrap').classList.add('show');document.getElementById('sf').style.width='100%';sndFanfare();}
-    if(colT===55){document.getElementById('created').classList.add('show');}
-    if(colT===70){ const cb=window.__mlOnLogin; if(cb) cb(); }
-    if(colT>100)phase='done';
+    if(colT===8){['appName','badge','appSub'].forEach(id=>document.getElementById(id).classList.add('show'));}
+    if(colT===18){document.getElementById('readyWrap').classList.add('show');document.getElementById('sf').style.width='100%';sndFanfare();}
+    if(colT===20){document.getElementById('created').classList.add('show');}
+    if(colT===30){ const cb=window.__mlOnLogin; if(cb) cb(); }
+    if(colT>35)phase='done';
   }else if(phase==='done'){
     hexDot=1+.058*Math.sin(Date.now()*.0028);
     if(Math.random()<.018)sparks(CX+rand(-HR(),HR()),CY+rand(-HR(),HR()),2,'#D4A825',.18);
