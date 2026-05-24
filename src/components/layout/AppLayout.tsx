@@ -66,7 +66,6 @@ export default function AppLayout() {
     // Show loading animation only on first mount
     const shown = sessionStorage.getItem('ml_loaded')
     if (!shown) {
-      setShowLoading(true)
       sessionStorage.setItem('ml_loaded', '1')
     }
   }, [])
