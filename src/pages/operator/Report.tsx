@@ -302,18 +302,41 @@ export default function OperatorReport() {
                     'II':  [14,15,16,17,18,19,20,21],
                     'III': [22,23,0,1,2,3,4,5]
                   }
-                  const hours = activeShift ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h)) : Array.from({length:24},(_,h)=>h)
-                  const prevHour = (hour - 1 + 24) % 24
-                  const currentIdx = hours.indexOf(hour)
-                  const prevIdx = hours.indexOf(prevHour)
+                  const hours = activeShift
+                    ? (shiftHours[activeShift.shift_type] ?? Array.from({length:24},(_,h)=>h))
+                    : Array.from({length:24},(_,h)=>h)
+                  const now = new Date()
+                  const currentHour = now.getHours()
+                  const shiftStartHour = hours[0]
+
                   return hours.map((h, idx) => {
-                    const isFuture = currentIdx >= 0 && idx > currentIdx
-                    const isTooOld = prevIdx >= 0 && currentIdx >= 0 && idx < prevIdx
-                    const isReported = reported.includes(h)
-                    const isDisabled = isReported || isFuture || isTooOld
+                    const alreadyReported = reported.includes(h)
+
+                    // Czy godzina już minęła (uwzględnia zmianę nocną)
+                    let hasPassed: boolean
+                    if (activeShift?.shift_type === 'III') {
+                      // Nocna: 22,23,0,1,2,3,4,5
+                      if (h >= 22) hasPassed = currentHour >= 22 ? currentHour > h : true
+                      else hasPassed = currentHour < 6 ? currentHour > h : true
+                    } else {
+                      hasPassed = currentHour > h
+                    }
+
+                    // Pierwsza godzina zmiany zawsze dostępna (operator mógł zacząć później)
+                    const isFirstHour = idx === 0
+
+                    // Kolejność — poprzednia godzina musi być wpisana
+                    const prevHour = idx > 0 ? hours[idx - 1] : null
+                    const prevReported = prevHour === null || reported.includes(prevHour)
+
+                    // W trybie testowym — odblokuj wszystkie minione godziny
+                    const isDisabled = alreadyReported ||
+                      (!TEST_MODE && !hasPassed && !isFirstHour) ||
+                      (!isFirstHour && !prevReported)
+
                     return (
                       <option key={h} value={h} disabled={isDisabled}>
-                        {formatHourBlock(h)}{isReported ? ' ✓' : ''}
+                        {String(h).padStart(2,'0')}:00–{String((h+1)%24).padStart(2,'00')}:00{alreadyReported ? ' ✓' : ''}
                       </option>
                     )
                   })

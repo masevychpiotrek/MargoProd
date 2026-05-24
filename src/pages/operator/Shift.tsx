@@ -45,6 +45,9 @@ export default function OperatorShift() {
   // Ostrzeżenie przy kończeniu zmiany
   const [showEndWarning, setShowEndWarning] = useState(false)
   const [missingHours,   setMissingHours]   = useState<number[]>([])
+  // Ostrzeżenie o istniejącej zmianie z raportami
+  const [showExistingWarning, setShowExistingWarning] = useState(false)
+  const [existingReportCount, setExistingReportCount] = useState(0)
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
@@ -71,7 +74,9 @@ export default function OperatorShift() {
     if (data) setOrders(data as ProductionOrder[])
   }
 
-  const handleStart = async () => {
+  // Właściwy start — po potwierdzeniu
+  const doStart = async () => {
+    setShowExistingWarning(false)
     if (!selectedMachine) { setError('Wybierz maszynę'); return }
     if (!selectedOrderId && !showNewOrder) { setError('Wybierz zlecenie produkcyjne lub utwórz nowe'); return }
     if (showNewOrder && !newOrderNumber) { setError('Wpisz numer zlecenia'); return }
@@ -96,6 +101,34 @@ export default function OperatorShift() {
     const { error: shiftError } = await startShift(selectedMachine, selectedShift, selectedOp2 || undefined)
     if (shiftError) { setError(shiftError); return }
     navigate('/operator/report')
+  }
+
+  // Sprawdź przed startem czy zmiana z raportami już istnieje
+  const handleStart = async () => {
+    if (!selectedMachine) { setError('Wybierz maszynę'); return }
+    setError('')
+    const today = new Date().toISOString().split('T')[0]
+    const { data: existingShift } = await supabase
+      .from('shifts')
+      .select('id')
+      .eq('machine_id', selectedMachine)
+      .eq('shift_date', today)
+      .eq('shift_type', selectedShift)
+      .not('ended_at', 'is', null)
+      .maybeSingle()
+    if (existingShift) {
+      const { count } = await supabase
+        .from('hourly_reports')
+        .select('id', { count: 'exact', head: true })
+        .eq('shift_id', existingShift.id)
+        .is('deleted_at', null)
+      if ((count ?? 0) > 0) {
+        setExistingReportCount(count ?? 0)
+        setShowExistingWarning(true)
+        return
+      }
+    }
+    doStart()
   }
 
   // Sprawdź brakujące godziny przed zakończeniem zmiany
@@ -137,6 +170,24 @@ export default function OperatorShift() {
           <h1 className="text-2xl font-bold text-white">Moja zmiana</h1>
           <p className="text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
         </div>
+
+        {/* Ostrzeżenie o istniejącej zmianie z raportami */}
+        {showExistingWarning && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
+            <div className="bg-navy-800 border-2 border-amber-500/50 rounded-2xl p-6 w-full max-w-md">
+              <div className="text-3xl mb-3">⚠️</div>
+              <h2 className="text-xl font-bold text-amber-400 mb-2">Zmiana już istnieje!</h2>
+              <p className="text-navy-300 text-sm mb-4">
+                Zmiana {selectedShift} na tej maszynie była już dziś prowadzona i posiada <span className="font-bold text-white">{existingReportCount} raportów</span>.
+              </p>
+              <p className="text-navy-400 text-xs mb-5">Czy na pewno chcesz rozpocząć nową zmianę?</p>
+              <div className="flex gap-3">
+                <button onClick={() => setShowExistingWarning(false)} className="btn-primary flex-1 py-3">Anuluj</button>
+                <button onClick={doStart} className="btn-danger px-5 py-3 text-sm">Rozpocznij mimo to</button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Ostrzeżenie przy kończeniu */}
         {showEndWarning && (
