@@ -42,7 +42,7 @@ export default function LoginPage() {
 
   // Najpierw animacja — po 14s pojawia się formularz
   if (!showForm) {
-    return <LoadingScreen onLogin={() => setShowForm(true)} autoExitMs={14000} />
+    return <LoadingScreen onLogin={() => setShowForm(true)} autoExitMs={20000} />
   }
 
   return (

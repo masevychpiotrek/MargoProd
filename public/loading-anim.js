@@ -1,7 +1,11 @@
 const AC=new(window.AudioContext||window.webkitAudioContext)();
 function resumeAC(){if(AC.state==='suspended')AC.resume();}
 document.addEventListener('click',resumeAC,{once:true});
+document.addEventListener('keydown',resumeAC,{once:true});
+document.addEventListener('touchstart',resumeAC,{once:true});
 setTimeout(resumeAC,200);
+setTimeout(resumeAC,500);
+setTimeout(resumeAC,1000);
 
 function mkNoise(dur){
   const b=AC.createBuffer(1,Math.floor(AC.sampleRate*dur),AC.sampleRate);
