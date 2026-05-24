@@ -17,7 +17,7 @@ canvas{position:fixed;inset:0;display:block;}
 .badge.show{opacity:1;}
 .app-sub{font-size:clamp(.6rem,1.8vw,.82rem);color:rgba(232,223,200,.42);letter-spacing:.22em;text-transform:uppercase;opacity:0;transform:translateY(-8px);transition:opacity .6s .15s,transform .6s .15s;}
 .app-sub.show{opacity:1;transform:translateY(0);}
-#footer{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;padding-bottom:30vh;gap:10px;}
+#footer{position:absolute;bottom:0;left:0;right:0;display:flex;flex-direction:column;align-items:center;padding-bottom:52vh;gap:10px;}
 .ready-wrap{display:flex;flex-direction:column;align-items:center;gap:9px;opacity:0;transition:opacity .7s;}
 .ready-wrap.show{opacity:1;}
 .ready-line{display:flex;align-items:center;gap:12px;}
@@ -68,7 +68,7 @@ const HTML = `
     <div class="created" id="created">Created by <span>Masevych</span></div>
   </div>
   <div id="phaseLabel" style="position:fixed;top:8px;right:12px;font-size:.54rem;letter-spacing:.16em;color:rgba(212,168,37,.25);text-transform:uppercase;pointer-events:none;font-family:'Rajdhani',sans-serif;"></div>
-  <button id="loginBtn">▶ ZALOGUJ DO SYSTEMU</button>
+  
   <div class="corner c-tl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-tr"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>
   <div class="corner c-bl"><svg viewBox="0 0 28 28"><path d="M0 28L0 0L28 0" fill="none" stroke="#D4A825" stroke-width="1.8"/></svg></div>

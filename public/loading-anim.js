@@ -736,7 +736,7 @@ function tick(){
     if(colT===22){['appName','badge','appSub'].forEach(id=>document.getElementById(id).classList.add('show'));}
     if(colT===52){document.getElementById('readyWrap').classList.add('show');document.getElementById('sf').style.width='100%';sndFanfare();}
     if(colT===55){document.getElementById('created').classList.add('show');}
-    if(colT===70){const lb=document.getElementById('loginBtn');if(lb)lb.classList.add('show');}
+    if(colT===70){ const cb=window.__mlOnLogin; if(cb) cb(); }
     if(colT>100)phase='done';
   }else if(phase==='done'){
     hexDot=1+.058*Math.sin(Date.now()*.0028);
