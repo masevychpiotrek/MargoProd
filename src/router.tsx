@@ -10,6 +10,9 @@ const OperatorDashboard  = lazy(() => import('@/pages/operator/Dashboard'))
 const OperatorShift      = lazy(() => import('@/pages/operator/Shift'))
 const OperatorReport     = lazy(() => import('@/pages/operator/Report'))
 const OperatorHistory    = lazy(() => import('@/pages/operator/History'))
+const OperatorFailure    = lazy(() => import('@/pages/operator/Failure'))
+const OperatorTasks      = lazy(() => import('@/pages/operator/Tasks'))
+const OperatorPassword   = lazy(() => import('@/pages/operator/Password'))
 const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ManagerOrders      = lazy(() => import('@/pages/manager/Orders'))
@@ -72,6 +75,9 @@ const router = createBrowserRouter([
           { index: true, element: <Wrap><OperatorDashboard /></Wrap> },
           { path: 'shift',   element: <Wrap><OperatorShift /></Wrap> },
           { path: 'report',  element: <Wrap><OperatorReport /></Wrap> },
+          { path: 'failure', element: <Wrap><OperatorFailure /></Wrap> },
+          { path: 'tasks',   element: <Wrap><OperatorTasks /></Wrap> },
+          { path: 'password', element: <Wrap><OperatorPassword /></Wrap> },
           { path: 'history', element: <Wrap><OperatorHistory /></Wrap> }
         ]
       },

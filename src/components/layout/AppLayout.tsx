@@ -15,6 +15,9 @@ const Icons = {
   shift:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="9" stroke="currentColor" strokeWidth="1.5"/><path d="M11 6v5l3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   report:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M14 2H6a2 2 0 00-2 2v14a2 2 0 002 2h10a2 2 0 002-2V8l-4-6z" stroke="currentColor" strokeWidth="1.5"/><path d="M14 2v6h6M8 13h6M8 17h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   history:    (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M3 11a8 8 0 1016 0 8 8 0 00-16 0z" stroke="currentColor" strokeWidth="1.5"/><path d="M11 7v4l2.5 2.5" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  failure:    (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M11 3l9 16H2L11 3z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><path d="M11 8v5M11 16h.01" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round"/></svg>),
+  tasks:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="4" y="3" width="14" height="17" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M8 8l1.5 1.5L13 6M8 14l1.5 1.5L14 12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>),
+  password:   (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="4" y="10" width="14" height="10" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M7 10V7a4 4 0 018 0v3M11 14v2" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   live:       (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><circle cx="11" cy="11" r="3" fill="currentColor"/><circle cx="11" cy="11" r="6" stroke="currentColor" strokeWidth="1.5" opacity="0.5"/><circle cx="11" cy="11" r="9" stroke="currentColor" strokeWidth="1.5" opacity="0.25"/></svg>),
   orders:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M9 5H7a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2V7a2 2 0 00-2-2h-2" stroke="currentColor" strokeWidth="1.5"/><rect x="9" y="3" width="4" height="4" rx="1" stroke="currentColor" strokeWidth="1.5"/><path d="M8 12h6M8 16h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   plan:       (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="3" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M16 2v4M8 2v4M3 10h16M8 14h6M8 17h4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
@@ -33,6 +36,9 @@ const NAV_OPERATOR = [
   { to: '/operator',         label: 'Dashboard',    icon: Icons.dashboard, end: true },
   { to: '/operator/shift',   label: 'Moja zmiana',  icon: Icons.shift },
   { to: '/operator/report',  label: 'Wpisz wynik',  icon: Icons.report },
+  { to: '/operator/failure', label: 'Zgloś awarie', icon: Icons.failure },
+  { to: '/operator/tasks',   label: 'Zadania',      icon: Icons.tasks },
+  { to: '/operator/password', label: 'Zmien haslo',  icon: Icons.password },
   { to: '/operator/history', label: 'Historia',     icon: Icons.history }
 ]
 

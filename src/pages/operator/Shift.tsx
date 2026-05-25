@@ -3,8 +3,8 @@ import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { cn, getShiftAutoCloseAt, getShiftDateForStart, SHIFT_HOURS } from '@/lib/utils'
-import type { Machine, Profile, ShiftType } from '@/types/database'
+import { canEnterHourlyReport, cn, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
+import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
   id: string; order_number: string; target_qty: number
@@ -13,6 +13,10 @@ interface ProductionOrder {
   assortment?: { name: string }
 }
 interface Assortment { id: string; name: string; code: string }
+
+function minsToHHMM(mins: number): string {
+  return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
+}
 
 // Godziny poszczególnych zmian
 export default function OperatorShift() {
@@ -39,6 +43,7 @@ export default function OperatorShift() {
   // Ostrzeżenie przy kończeniu zmiany
   const [showEndWarning, setShowEndWarning] = useState(false)
   const [missingHours,   setMissingHours]   = useState<number[]>([])
+  const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
@@ -54,6 +59,38 @@ export default function OperatorShift() {
   useEffect(() => {
     if (selectedMachine) loadOrders(selectedMachine)
   }, [selectedMachine])
+
+  useEffect(() => {
+    if (!activeShift) return
+
+    loadShiftReports()
+    const channel = supabase
+      .channel(`operator-shift-summary-${activeShift.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'hourly_reports',
+        filter: `shift_id=eq.${activeShift.id}`
+      }, loadShiftReports)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [activeShift?.id])
+
+  const loadShiftReports = async () => {
+    if (!activeShift) return []
+    const { data } = await supabase
+      .from('hourly_reports')
+      .select('*')
+      .eq('shift_id', activeShift.id)
+      .is('deleted_at', null)
+      .order('hour_start')
+    const list = (data ?? []) as HourlyReport[]
+    setShiftReports(list)
+    return list
+  }
 
   const loadOrders = async (machineId: string) => {
     const { data } = await supabase
@@ -93,6 +130,11 @@ export default function OperatorShift() {
     }
     let orderId = selectedOrderId
     if (showNewOrder && newOrderNumber) {
+      await supabase
+        .from('production_orders')
+        .update({ status: 'paused', paused_at: new Date().toISOString() })
+        .eq('machine_id', selectedMachine)
+        .eq('status', 'active')
       const { data, error: orderError } = await supabase
         .from('production_orders').insert({
           order_number: newOrderNumber,
@@ -106,6 +148,12 @@ export default function OperatorShift() {
       if (orderError) { setError('Błąd tworzenia zlecenia: ' + orderError.message); return }
       orderId = data.id
     } else if (orderId) {
+      await supabase
+        .from('production_orders')
+        .update({ status: 'paused', paused_at: new Date().toISOString() })
+        .eq('machine_id', selectedMachine)
+        .eq('status', 'active')
+        .neq('id', orderId)
       await supabase.from('production_orders').update({ status: 'active', paused_at: null }).eq('id', orderId)
     }
     const { error: shiftError } = await startShift(selectedMachine, selectedShift, selectedOp2 || undefined)
@@ -130,21 +178,13 @@ export default function OperatorShift() {
   // Sprawdź brakujące godziny przed zakończeniem zmiany
   const handleEndRequest = async () => {
     if (!activeShift) return
-    const { data: reports } = await supabase
-      .from('hourly_reports')
-      .select('hour_start')
-      .eq('shift_id', activeShift.id)
-      .is('deleted_at', null)
-    const reportedHours = (reports ?? []).map((r: { hour_start: number }) => r.hour_start)
-    const currentHour = new Date().getHours()
+    const latestReports = await loadShiftReports()
+    const reportedHours = latestReports.map(r => r.hour_start)
     const shiftHours = SHIFT_HOURS[activeShift.shift_type as ShiftType]
     // Tylko godziny które już minęły
-    const missing = shiftHours.filter(h => {
-      const alreadyPassed = activeShift.shift_type === 'III'
-        ? true // uproszczenie dla nocnej
-        : h < currentHour
-      return alreadyPassed && !reportedHours.includes(h)
-    })
+    const missing = shiftHours.filter(h =>
+      canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h) && !reportedHours.includes(h)
+    )
     if (missing.length > 0) {
       setMissingHours(missing)
       setShowEndWarning(true)
@@ -160,6 +200,28 @@ export default function OperatorShift() {
   }
 
   // ── ACTIVE SHIFT VIEW ────────────────────────────────────────────────────
+  const activeShiftHours = activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : []
+  const reportedHours = shiftReports.map(r => r.hour_start)
+  const openHours = activeShift
+    ? activeShiftHours.filter(h => canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h))
+    : []
+  const missingOpenHours = activeShiftHours.filter(h => openHours.includes(h) && !reportedHours.includes(h))
+  const nextPendingHour = activeShiftHours.find(h => !reportedHours.includes(h))
+  const nextPendingOpenAt = activeShift && nextPendingHour !== undefined
+    ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, nextPendingHour)
+    : null
+  const totalGood = shiftReports.reduce((s, r) => s + r.good_count, 0)
+  const totalReject = shiftReports.reduce((s, r) => s + r.reject_count, 0)
+  const totalRuntime = shiftReports.reduce((s, r) => s + r.runtime_min, 0)
+  const avgEff = shiftReports.length
+    ? Math.round(shiftReports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / shiftReports.length)
+    : 0
+  const completePct = activeShiftHours.length
+    ? Math.round(shiftReports.length / activeShiftHours.length * 100)
+    : 0
+  const shiftEndAt = activeShift ? getShiftEndAt(activeShift.shift_date, activeShift.shift_type) : null
+  const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
+
   if (activeShift && !activeShift.ended_at && activeMachine) {
     return (
       <div className="mx-auto w-full max-w-2xl">
@@ -224,7 +286,7 @@ export default function OperatorShift() {
             <div className="bg-navy-900 rounded-xl p-4 sm:col-span-2">
               <div className="label">Automatyczne zamkniecie</div>
               <div className="text-base font-bold text-amber-300 font-mono">
-                {getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type).toLocaleString('pl-PL', {
+                {autoCloseAt?.toLocaleString('pl-PL', {
                   day: '2-digit',
                   month: '2-digit',
                   hour: '2-digit',
@@ -233,6 +295,53 @@ export default function OperatorShift() {
               </div>
               <div className="text-xs text-navy-400 mt-1">Koniec zmiany + 60 minut na uzupelnienie raportow</div>
             </div>
+          </div>
+          <div className="mb-6 rounded-xl border border-navy-700 bg-navy-900 p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <div>
+                <div className="text-sm font-bold text-white">Podsumowanie zmiany</div>
+                <div className="text-xs text-navy-400">
+                  Koniec produkcyjny: {shiftEndAt?.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })} · bufor do {autoCloseAt?.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
+                </div>
+              </div>
+              <div className={cn('text-sm font-bold', missingOpenHours.length ? 'text-amber-300' : 'text-green-400')}>
+                {shiftReports.length}/{activeShiftHours.length} raportow
+              </div>
+            </div>
+            <div className="h-2 rounded-full bg-navy-700">
+              <div className="h-full rounded-full bg-brand" style={{ width: `${completePct}%` }} />
+            </div>
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+              <div className="rounded-lg bg-navy-800 p-3">
+                <div className="text-xs text-navy-400">Dobre</div>
+                <div className="font-mono text-lg font-bold text-green-400">{totalGood.toLocaleString('pl-PL')}</div>
+              </div>
+              <div className="rounded-lg bg-navy-800 p-3">
+                <div className="text-xs text-navy-400">Odrzut</div>
+                <div className="font-mono text-lg font-bold text-red-400">{totalReject.toLocaleString('pl-PL')}</div>
+              </div>
+              <div className="rounded-lg bg-navy-800 p-3">
+                <div className="text-xs text-navy-400">Czas pracy</div>
+                <div className="font-mono text-lg font-bold text-cyan-300">{minsToHHMM(totalRuntime)}</div>
+              </div>
+              <div className="rounded-lg bg-navy-800 p-3">
+                <div className="text-xs text-navy-400">Srednia EPQ</div>
+                <div className="font-mono text-lg font-bold text-white">{avgEff}%</div>
+              </div>
+            </div>
+            {missingOpenHours.length > 0 ? (
+              <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
+                Brakuje otwartych blokow: {missingOpenHours.map(formatHourBlock).join(', ')}
+              </div>
+            ) : nextPendingHour !== undefined && nextPendingOpenAt ? (
+              <div className="mt-3 rounded-lg border border-navy-700 bg-navy-800 p-3 text-xs text-navy-300">
+                Nastepny blok {formatHourBlock(nextPendingHour)} bedzie dostepny od {nextPendingOpenAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}.
+              </div>
+            ) : (
+              <div className="mt-3 rounded-lg border border-green-500/30 bg-green-500/10 p-3 text-xs font-semibold text-green-300">
+                Wszystkie bloki zmiany sa uzupelnione.
+              </div>
+            )}
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">

@@ -1,0 +1,126 @@
+import { useState } from 'react'
+import { supabase, logAudit } from '@/lib/supabase'
+import { useAuthStore } from '@/stores/authStore'
+
+export default function OperatorPassword() {
+  const { user } = useAuthStore()
+  const [currentPassword, setCurrentPassword] = useState('')
+  const [newPassword, setNewPassword] = useState('')
+  const [confirmPassword, setConfirmPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
+  const [success, setSuccess] = useState('')
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setError('')
+    setSuccess('')
+
+    if (!user?.email) {
+      setError('Brak aktywnej sesji operatora')
+      return
+    }
+    if (!currentPassword) {
+      setError('Wpisz obecne haslo')
+      return
+    }
+    if (newPassword.length < 8) {
+      setError('Nowe haslo musi miec minimum 8 znakow')
+      return
+    }
+    if (newPassword !== confirmPassword) {
+      setError('Nowe haslo i potwierdzenie nie sa takie same')
+      return
+    }
+    if (currentPassword === newPassword) {
+      setError('Nowe haslo musi byc inne niz obecne')
+      return
+    }
+
+    setSaving(true)
+    try {
+      const { error: verifyError } = await supabase.auth.signInWithPassword({
+        email: user.email,
+        password: currentPassword
+      })
+      if (verifyError) {
+        setError('Obecne haslo jest nieprawidlowe')
+        return
+      }
+
+      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+      if (updateError) {
+        setError(updateError.message)
+        return
+      }
+
+      await logAudit('password_change')
+      setCurrentPassword('')
+      setNewPassword('')
+      setConfirmPassword('')
+      setSuccess('Haslo zostalo zmienione. Uzyj nowego hasla przy kolejnym logowaniu.')
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="mx-auto max-w-xl space-y-4">
+      <div>
+        <h1 className="text-2xl font-bold text-white">Zmien haslo</h1>
+        <p className="mt-1 text-navy-400">Aktualizacja hasla do konta operatora.</p>
+      </div>
+
+      <form onSubmit={handleSubmit} className="card space-y-4">
+        <div>
+          <label className="label">Obecne haslo</label>
+          <input
+            type="password"
+            value={currentPassword}
+            onChange={e => setCurrentPassword(e.target.value)}
+            autoComplete="current-password"
+            className="input"
+          />
+        </div>
+
+        <div>
+          <label className="label">Nowe haslo</label>
+          <input
+            type="password"
+            value={newPassword}
+            onChange={e => setNewPassword(e.target.value)}
+            autoComplete="new-password"
+            className="input"
+          />
+          <div className="mt-1 text-xs text-navy-500">Minimum 8 znakow.</div>
+        </div>
+
+        <div>
+          <label className="label">Powtorz nowe haslo</label>
+          <input
+            type="password"
+            value={confirmPassword}
+            onChange={e => setConfirmPassword(e.target.value)}
+            autoComplete="new-password"
+            className="input"
+          />
+        </div>
+
+        {error && (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+            {error}
+          </div>
+        )}
+        {success && (
+          <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+            {success}
+          </div>
+        )}
+
+        <button type="submit" disabled={saving} className="btn-primary w-full py-3 disabled:opacity-50">
+          {saving ? 'Zapisywanie...' : 'Zmien haslo'}
+        </button>
+      </form>
+    </div>
+  )
+}

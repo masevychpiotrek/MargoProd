@@ -217,7 +217,11 @@ export default function OperatorReport() {
   const handleCreateOrder = async () => {
     if (!newOrderNumber || !activeShift || !profile) return
     setSavingOrder(true)
-    if (activeOrderId) await supabase.from('production_orders').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', activeOrderId)
+    await supabase
+      .from('production_orders')
+      .update({ status: 'paused', paused_at: new Date().toISOString() })
+      .eq('machine_id', activeShift.machine_id)
+      .eq('status', 'active')
     const { data, error } = await supabase.from('production_orders').insert({
       order_number: newOrderNumber, machine_id: activeShift.machine_id,
       target_qty: parseInt(newOrderTarget) || 0, status: 'active',
@@ -231,7 +235,13 @@ export default function OperatorReport() {
     if (activeOrderId === id) setActiveOrderId(''); loadOrders()
   }
   const handleResumeOrder = async (id: string) => {
-    if (activeOrderId) await supabase.from('production_orders').update({ status: 'paused', paused_at: new Date().toISOString() }).eq('id', activeOrderId)
+    if (!activeShift) return
+    await supabase
+      .from('production_orders')
+      .update({ status: 'paused', paused_at: new Date().toISOString() })
+      .eq('machine_id', activeShift.machine_id)
+      .eq('status', 'active')
+      .neq('id', id)
     await supabase.from('production_orders').update({ status: 'active', paused_at: null }).eq('id', id)
     setActiveOrderId(id); loadOrders()
   }
