@@ -151,7 +151,7 @@ export const useShiftStore = create<ShiftState>()(
           // Szukaj jako operator_1
           const { data: asOp1 } = await supabase
             .from('shifts')
-            .select('*, machine:machines(*)')
+            .select('*, machine:machines(*), operator_1:profiles!operator_1_id(*), operator_2:profiles!operator_2_id(*)')
             .eq('operator_1_id', profile.id)
             .is('ended_at', null)
             .order('started_at', { ascending: false })
@@ -174,7 +174,7 @@ export const useShiftStore = create<ShiftState>()(
           // Szukaj jako operator_2
           const { data: asOp2 } = await supabase
             .from('shifts')
-            .select('*, machine:machines(*)')
+            .select('*, machine:machines(*), operator_1:profiles!operator_1_id(*), operator_2:profiles!operator_2_id(*)')
             .eq('operator_2_id', profile.id)
             .is('ended_at', null)
             .order('started_at', { ascending: false })

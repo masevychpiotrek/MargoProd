@@ -221,6 +221,8 @@ export default function OperatorShift() {
     : 0
   const shiftEndAt = activeShift ? getShiftEndAt(activeShift.shift_date, activeShift.shift_type) : null
   const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
+  const shiftOperator1 = activeShift?.operator_1?.full_name ?? profile?.full_name ?? 'Operator 1'
+  const shiftOperator2 = activeShift?.operator_2?.full_name ?? null
 
   if (activeShift && !activeShift.ended_at && activeMachine) {
     return (
@@ -273,9 +275,20 @@ export default function OperatorShift() {
               <div className="text-xl font-bold text-white">Zmiana {activeShift.shift_type}</div>
               <div className="text-xs text-navy-400 mt-1">{activeShift.shift_date}</div>
             </div>
-            <div className="bg-navy-900 rounded-xl p-4">
-              <div className="label">Operator</div>
-              <div className="text-base font-bold text-white">{profile?.full_name}</div>
+            <div className="bg-navy-900 rounded-xl p-4 sm:col-span-2">
+              <div className="label">Sklad zmiany</div>
+              <div className="grid gap-2 sm:grid-cols-2">
+                <div className="rounded-lg border border-navy-700 bg-navy-800 p-3">
+                  <div className="text-xs text-navy-400">Operator 1</div>
+                  <div className="mt-1 font-bold text-white">{shiftOperator1}</div>
+                </div>
+                <div className="rounded-lg border border-navy-700 bg-navy-800 p-3">
+                  <div className="text-xs text-navy-400">Operator 2</div>
+                  <div className={cn('mt-1 font-bold', shiftOperator2 ? 'text-white' : 'text-navy-500')}>
+                    {shiftOperator2 ?? 'Nie przypisano'}
+                  </div>
+                </div>
+              </div>
             </div>
             <div className="bg-navy-900 rounded-xl p-4">
               <div className="label">Start</div>

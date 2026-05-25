@@ -128,6 +128,9 @@ export default function AppLayout() {
       ? activeShift
       : null
   const visibleActiveMachine = visibleActiveShift ? activeMachine : null
+  const visibleShiftOperators = visibleActiveShift
+    ? [visibleActiveShift.operator_1?.full_name, visibleActiveShift.operator_2?.full_name].filter(Boolean).join(' / ')
+    : ''
 
   const handleSignOut = async () => {
     if (visibleActiveShift && profile?.role === 'operator') {
@@ -219,7 +222,7 @@ export default function AppLayout() {
         {sidebarOpen && visibleActiveShift && (
           <div className="px-4 py-3 border-b border-navy-700 bg-brand/5 flex-shrink-0">
             <div className="text-xs font-bold text-brand uppercase tracking-wider mb-1">{visibleActiveMachine?.name}</div>
-            <div className="text-xs text-navy-300">Zmiana {visibleActiveShift.shift_type} · {profile?.full_name}</div>
+            <div className="text-xs text-navy-300">Zmiana {visibleActiveShift.shift_type} · {visibleShiftOperators || profile?.full_name}</div>
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               <span className="text-xs text-green-400">Zmiana aktywna</span>
