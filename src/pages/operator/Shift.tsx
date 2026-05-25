@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { cn } from '@/lib/utils'
+import { cn, getShiftAutoCloseAt, getShiftDateForStart, SHIFT_HOURS } from '@/lib/utils'
 import type { Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -15,12 +15,6 @@ interface ProductionOrder {
 interface Assortment { id: string; name: string; code: string }
 
 // Godziny poszczególnych zmian
-const SHIFT_HOURS: Record<ShiftType, number[]> = {
-  'I':   [6,7,8,9,10,11,12,13],
-  'II':  [14,15,16,17,18,19,20,21],
-  'III': [22,23,0,1,2,3,4,5]
-}
-
 export default function OperatorShift() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
@@ -72,12 +66,12 @@ export default function OperatorShift() {
   }
 
   const findExistingShift = async () => {
-    const today = new Date().toISOString().split('T')[0]
+    const shiftDate = getShiftDateForStart(selectedShift)
     return supabase
       .from('shifts')
       .select('id, ended_at')
       .eq('machine_id', selectedMachine)
-      .eq('shift_date', today)
+      .eq('shift_date', shiftDate)
       .eq('shift_type', selectedShift)
       .order('started_at', { ascending: false })
       .limit(1)
@@ -226,6 +220,18 @@ export default function OperatorShift() {
               <div className="text-base font-bold text-white font-mono">
                 {new Date(activeShift.started_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
               </div>
+            </div>
+            <div className="bg-navy-900 rounded-xl p-4 sm:col-span-2">
+              <div className="label">Automatyczne zamkniecie</div>
+              <div className="text-base font-bold text-amber-300 font-mono">
+                {getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type).toLocaleString('pl-PL', {
+                  day: '2-digit',
+                  month: '2-digit',
+                  hour: '2-digit',
+                  minute: '2-digit'
+                })}
+              </div>
+              <div className="text-xs text-navy-400 mt-1">Koniec zmiany + 60 minut na uzupelnienie raportow</div>
             </div>
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">

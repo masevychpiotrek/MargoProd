@@ -5,15 +5,10 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useCurrentHourBlock, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { efficiencyColor, efficiencyBg, formatHourBlock, cn } from '@/lib/utils'
+import { efficiencyColor, efficiencyBg, formatHourBlock, cn, SHIFT_HOURS } from '@/lib/utils'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 2100
-const SHIFT_HOURS: Record<ShiftType, number[]> = {
-  I:   [6,7,8,9,10,11,12,13],
-  II:  [14,15,16,17,18,19,20,21],
-  III: [22,23,0,1,2,3,4,5]
-}
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 
 export default function OperatorDashboard() {

@@ -3,6 +3,7 @@ import { persist } from 'zustand/middleware'
 import type { Shift, ShiftType, Machine } from '@/types/database'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useAuthStore } from './authStore'
+import { getShiftAutoCloseAt, getShiftDateForStart, isShiftPastAutoClose } from '@/lib/utils'
 
 function sameShiftState(
   currentShift: Shift | null,
@@ -27,6 +28,22 @@ interface ShiftState {
   loadActiveShift: () => Promise<void>
 }
 
+async function autoCloseShiftIfExpired(shift: Shift): Promise<boolean> {
+  if (shift.ended_at || !isShiftPastAutoClose(shift.shift_date, shift.shift_type)) return false
+
+  const endedAt = getShiftAutoCloseAt(shift.shift_date, shift.shift_type).toISOString()
+  const note = shift.notes ? `${shift.notes}\nAutozamkniecie po buforze 60 min` : 'Autozamkniecie po buforze 60 min'
+  const { error } = await supabase
+    .from('shifts')
+    .update({ ended_at: endedAt, notes: note })
+    .eq('id', shift.id)
+
+  if (error) return false
+
+  logAudit('shift_end', 'shifts', shift.id, undefined, { ended_at: endedAt, auto_closed: true }).catch(() => undefined)
+  return true
+}
+
 export const useShiftStore = create<ShiftState>()(
   persist(
     (set, get) => ({
@@ -40,14 +57,14 @@ export const useShiftStore = create<ShiftState>()(
 
         set({ isLoading: true })
         try {
-          const today = new Date().toISOString().split('T')[0]
+          const shiftDate = getShiftDateForStart(shiftType)
 
           // Sprawdź czy zmiana już istnieje
           const { data: existing } = await supabase
             .from('shifts')
             .select('id')
             .eq('machine_id', machineId)
-            .eq('shift_date', today)
+            .eq('shift_date', shiftDate)
             .eq('shift_type', shiftType)
             .order('started_at', { ascending: false })
             .limit(1)
@@ -65,7 +82,7 @@ export const useShiftStore = create<ShiftState>()(
               operator_1_id: profile.id,
               operator_2_id: operator2Id ?? null,
               shift_type: shiftType,
-              shift_date: today
+              shift_date: shiftDate
             })
             .select('*')
             .single()
@@ -130,19 +147,22 @@ export const useShiftStore = create<ShiftState>()(
 
         const initialState = get()
         if (initialState.isLoading && !initialState.activeShift) set({ isLoading: true })
-        const today = new Date().toISOString().split('T')[0]
-
         try {
           // Szukaj jako operator_1
           const { data: asOp1 } = await supabase
             .from('shifts')
             .select('*, machine:machines(*)')
             .eq('operator_1_id', profile.id)
-            .eq('shift_date', today)
             .is('ended_at', null)
+            .order('started_at', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
           if (asOp1) {
+            if (await autoCloseShiftIfExpired(asOp1 as Shift)) {
+              set({ activeShift: null, activeMachine: null, isLoading: false })
+              return
+            }
             const machine = asOp1.machine as Machine
             const state = get()
             if (!sameShiftState(state.activeShift, asOp1, state.activeMachine, machine) || state.isLoading) {
@@ -156,11 +176,16 @@ export const useShiftStore = create<ShiftState>()(
             .from('shifts')
             .select('*, machine:machines(*)')
             .eq('operator_2_id', profile.id)
-            .eq('shift_date', today)
             .is('ended_at', null)
+            .order('started_at', { ascending: false })
+            .limit(1)
             .maybeSingle()
 
           if (asOp2) {
+            if (await autoCloseShiftIfExpired(asOp2 as Shift)) {
+              set({ activeShift: null, activeMachine: null, isLoading: false })
+              return
+            }
             const machine = asOp2.machine as Machine
             const state = get()
             if (!sameShiftState(state.activeShift, asOp2, state.activeMachine, machine) || state.isLoading) {

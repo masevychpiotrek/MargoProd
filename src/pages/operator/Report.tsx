@@ -5,16 +5,11 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
+import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
 import { TimeInput, isValidHHMM, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
 import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database'
 
 const TARGET = 2100
-const SHIFT_HOURS: Record<ShiftType, number[]> = {
-  I:   [6,7,8,9,10,11,12,13],
-  II:  [14,15,16,17,18,19,20,21],
-  III: [22,23,0,1,2,3,4,5]
-}
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 
 function getShiftHours(shiftType?: ShiftType) {
@@ -275,6 +270,10 @@ export default function OperatorReport() {
   const belowTarget = !testMode && incGood > 0 && incGood < activeTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
+  const selectedReportOpenAt = activeShift && !testMode
+    ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
+    : null
+  const selectedReportCanBeEntered = !selectedReportOpenAt || new Date().getTime() >= selectedReportOpenAt.getTime()
   const lastReportForFinish = orderedReports[orderedReports.length - 1] as ReportExt | undefined
   const lastGood = lastReportForFinish?.counter_good ?? 0
   const lastReject = lastReportForFinish?.counter_reject ?? 0
@@ -348,6 +347,11 @@ export default function OperatorReport() {
     if (counterRuntime && !isValidHHMM(counterRuntime)) errs.push('Czas pracy wpisz w formacie HH:MM, z minutami 00-59')
     if (counterReady && !isValidHHMM(counterReady)) errs.push('Czas gotowości wpisz w formacie HH:MM, z minutami 00-59')
     if (counterAlarm && !isValidHHMM(counterAlarm)) errs.push('Czas alarmu wpisz w formacie HH:MM, z minutami 00-59')
+    if (!testMode && activeShift && isShiftPastAutoClose(activeShift.shift_date, activeShift.shift_type)) errs.push('Zmiana zostala automatycznie zamknieta po buforze 60 minut')
+    if (!testMode && activeShift && !canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, selectedHour)) {
+      const openAt = getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
+      errs.push(`Raport za ten blok mozna wpisac dopiero od ${openAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}`)
+    }
     if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
@@ -455,6 +459,7 @@ export default function OperatorReport() {
 
                     // Czy godzina już minęła (uwzględnia zmianę nocną)
                     // Czy godzina już minęła — uwzględnia zmianę nocną
+                    const canEnter = testMode || !activeShift || canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h, now)
                     let hasPassed: boolean
                     if (activeShift?.shift_type === 'III') {
                       // Nocna: 22,23,0,1,2,3,4,5
@@ -467,6 +472,7 @@ export default function OperatorReport() {
                     }
 
                     // Pierwsza godzina zmiany zawsze dostępna
+                    hasPassed = canEnter
                     const isFirstHour = idx === 0
 
                     // Kolejność — poprzednia godzina musi być wpisana (lub to pierwsza)
@@ -474,7 +480,7 @@ export default function OperatorReport() {
                     const prevReported = prevHour === null || reported.includes(prevHour)
 
                     const isDisabled = alreadyReported ||
-                      (!testMode && !hasPassed && !isFirstHour) ||
+                      (!testMode && !hasPassed) ||
                       (!testMode && !isFirstHour && !prevReported)
 
                     return (
@@ -486,6 +492,11 @@ export default function OperatorReport() {
                 })()}
               </select>
             </div>
+            {!selectedReportCanBeEntered && selectedReportOpenAt && (
+              <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-300">
+                Ten blok bedzie dostepny do wpisania od {selectedReportOpenAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}.
+              </div>
+            )}
           </div>
 
           {/* Zlecenia */}

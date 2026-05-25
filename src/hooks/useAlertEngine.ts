@@ -4,14 +4,9 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { useTestMode } from './useTestMode'
+import { SHIFT_HOURS } from '@/lib/utils'
 
 // TRYB TESTOWY — alert co minutę zamiast co godzinę
-const SHIFT_HOURS: Record<string, number[]> = {
-  I:   [6,7,8,9,10,11,12,13],
-  II:  [14,15,16,17,18,19,20,21],
-  III: [22,23,0,1,2,3,4,5]
-}
-
 let audioCtx: AudioContext | null = null
 
 function getAudioContext() {

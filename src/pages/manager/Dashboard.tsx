@@ -1,8 +1,8 @@
 import { useEffect, useState, useRef } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
-import { efficiencyColor, efficiencyBg, cn } from '@/lib/utils'
-import type { HourlyReport, Shift, Machine } from '@/types/database'
+import { efficiencyColor, efficiencyBg, cn, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
+import type { HourlyReport, Shift, Machine, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
@@ -86,7 +86,7 @@ export default function ManagerDashboard() {
 
     const [mRes, sRes, rRes, wRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
-      supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').eq('shift_date', dateISO).is('ended_at', null),
+      supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').is('ended_at', null),
       supabase
         .from('hourly_reports')
         .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type)')
@@ -98,7 +98,20 @@ export default function ManagerDashboard() {
     ])
 
     const mList = (mRes.data ?? []) as Machine[]
-    const sList = sRes.data ?? []
+    const sListRaw = (sRes.data ?? []) as MachineStatus['activeShift'][]
+    const staleShifts = sListRaw.filter((s): s is NonNullable<MachineStatus['activeShift']> =>
+      !!s && isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
+    )
+    if (staleShifts.length) {
+      await Promise.all(staleShifts.map(s => supabase
+        .from('shifts')
+        .update({ ended_at: getShiftAutoCloseAt(s.shift_date, s.shift_type as ShiftType).toISOString() })
+        .eq('id', s.id)
+      ))
+    }
+    const sList = sListRaw.filter((s): s is NonNullable<MachineStatus['activeShift']> =>
+      !!s && !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
+    )
     const rList = (rRes.data ?? []) as ReportWithContext[]
     const wList = (wRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
     setAllReports(rList)
@@ -106,7 +119,7 @@ export default function ManagerDashboard() {
 
     setMachines(mList.map(m => ({
       machine: m,
-      activeShift: (sList.find((s: Shift) => s.machine_id === m.id) ?? null) as MachineStatus['activeShift'],
+      activeShift: sList.find(s => s.machine_id === m.id) ?? null,
       todayReports: rList.filter(r => r.machine_id === m.id && r.report_date === dateISO)
     })))
     setLoading(false)
