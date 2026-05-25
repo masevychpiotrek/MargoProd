@@ -94,7 +94,7 @@ export const useAuthStore = create<AuthState>()(
 
       signOut: async () => {
         await logAudit('logout')
-        await supabase.auth.signOut()
+        await supabase.auth.signOut({ scope: 'local' })
         set({ user: null, session: null, profile: null, isInitialized: true })
       },
 

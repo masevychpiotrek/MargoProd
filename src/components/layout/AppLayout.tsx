@@ -2,10 +2,13 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet, useNavigate } from 'react-router-dom'
 import { useAuthStore } from '@/stores/authStore'
 import { useShiftStore } from '@/stores/shiftStore'
+import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import RobotAssistant from '@/components/shared/RobotAssistant'
+import type { Shift } from '@/types/database'
+import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -58,6 +61,7 @@ const NAV_ADMIN = [
 export default function AppLayout() {
   const { profile, signOut, isLoading } = useAuthStore()
   const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
+  const testMode = useTestMode()
   const { time, date } = useClock()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
@@ -74,6 +78,38 @@ export default function AppLayout() {
   useEffect(() => {
     loadActiveShift()
   }, [profile?.id, profile?.role, loadActiveShift])
+
+  useEffect(() => {
+    if (profile?.role !== 'operator') return
+
+    const refreshIfOwnShiftChanged = (record: Partial<Shift> | null) => {
+      if (!record) {
+        loadActiveShift()
+        return
+      }
+
+      const isOwnShift =
+        record.operator_1_id === profile.id ||
+        record.operator_2_id === profile.id ||
+        record.id === activeShift?.id
+
+      if (isOwnShift) loadActiveShift()
+    }
+
+    const channel = supabase
+      .channel(`operator-shifts-${profile.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, payload => {
+        refreshIfOwnShiftChanged((payload.new ?? payload.old ?? null) as Partial<Shift> | null)
+      })
+      .subscribe()
+
+    const fallback = window.setInterval(loadActiveShift, 15000)
+
+    return () => {
+      window.clearInterval(fallback)
+      supabase.removeChannel(channel)
+    }
+  }, [profile?.id, profile?.role, activeShift?.id, loadActiveShift])
 
   const navItems = profile?.role === 'admin' ? NAV_ADMIN
     : profile?.role === 'manager' ? NAV_MANAGER
@@ -260,6 +296,17 @@ export default function AppLayout() {
             </svg>
           </button>
           <div className="flex-1" />
+          <button
+            onClick={() => setTestModeEnabled(!testMode)}
+            className={cn(
+              'rounded-lg border px-3 py-2 text-xs font-bold transition-all',
+              testMode
+                ? 'border-amber-500/50 bg-amber-500/15 text-amber-300'
+                : 'border-navy-600 bg-navy-900 text-navy-400 hover:text-white'
+            )}
+          >
+            {testMode ? 'TEST' : 'PROD'}
+          </button>
           <div className="text-xs text-navy-400 font-mono">{time}</div>
         </div>
         <AlertProvider>

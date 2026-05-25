@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
+import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 
 interface ResetOption {
   id: string
@@ -63,7 +64,7 @@ const OPTIONS: ResetOption[] = [
 ]
 
 export default function AdminReset() {
-  const [testMode, setTestMode] = useState(() => localStorage.getItem('margoline-test-mode') === '1')
+  const testMode = useTestMode()
   const [selected,  setSelected]  = useState<string | null>(null)
   const [confirm,   setConfirm]   = useState('')
   const [loading,   setLoading]   = useState(false)
@@ -114,9 +115,7 @@ export default function AdminReset() {
           <button
             onClick={() => {
               const next = !testMode
-              setTestMode(next)
-              localStorage.setItem('margoline-test-mode', next ? '1' : '0')
-              window.location.reload()
+              setTestModeEnabled(next)
             }}
             className={cn(
               'px-5 py-2.5 rounded-xl font-bold text-sm transition-all border-2',

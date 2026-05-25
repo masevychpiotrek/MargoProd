@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react'
-
-// TRYB TESTOWY — zmień na false w produkcji
-const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
+import { useTestMode } from './useTestMode'
 
 export function useClock() {
+  const testMode = useTestMode()
   const [now, setNow] = useState(new Date())
 
   useEffect(() => {
@@ -19,15 +18,16 @@ export function useClock() {
     dateISO: now.toISOString().split('T')[0],
     hour: now.getHours(),
     // W trybie testowym "minuta" = sekundy w bloku 3-minutowym
-    minute: TEST_MODE ? Math.floor(now.getMinutes() % 3 * 60 + now.getSeconds()) : now.getMinutes(),
+    minute: testMode ? Math.floor(now.getMinutes() % 3 * 60 + now.getSeconds()) : now.getMinutes(),
     second: now.getSeconds()
   }
 }
 
 // W trybie testowym blok minutowy: "14:03–14:04"
 export function useCurrentHourBlock() {
+  const testMode = useTestMode()
   const { now } = useClock()
-  if (TEST_MODE) {
+  if (testMode) {
     const h = String(now.getHours()).padStart(2, '0')
     const blockStart = Math.floor(now.getMinutes() / 3) * 3
     const blockEnd = blockStart + 3
@@ -35,7 +35,7 @@ export function useCurrentHourBlock() {
     const m2 = String(blockEnd % 60).padStart(2, '0')
     return `${h}:${m1}–${h}:${m2}`
   }
-  const { hour } = useClock()
+  const hour = now.getHours()
   const hh = String(hour).padStart(2, '0')
   const hh2 = String((hour + 1) % 24).padStart(2, '0')
   return `${hh}:00–${hh2}:00`
@@ -43,9 +43,10 @@ export function useCurrentHourBlock() {
 
 // Countdown do końca minuty (tryb testowy) lub godziny
 export function useHourCountdown() {
+  const testMode = useTestMode()
   const { now } = useClock()
 
-  if (TEST_MODE) {
+  if (testMode) {
     // Odliczanie do końca bieżącego bloku 3-minutowego
     const blockStart = Math.floor(now.getMinutes() / 3) * 3
     const endOfBlock = new Date(now)

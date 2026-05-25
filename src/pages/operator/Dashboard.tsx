@@ -4,6 +4,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useCurrentHourBlock, useClock } from '@/hooks/useClock'
+import { useTestMode } from '@/hooks/useTestMode'
 import { efficiencyColor, efficiencyBg, formatHourBlock, cn } from '@/lib/utils'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
@@ -13,11 +14,13 @@ const SHIFT_HOURS: Record<ShiftType, number[]> = {
   II:  [14,15,16,17,18,19,20,21],
   III: [22,23,0,1,2,3,4,5]
 }
+const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 
 export default function OperatorDashboard() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
-  const { activeShift, activeMachine, isLoading: shiftLoading } = useShiftStore()
+  const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
+  const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
   const hourBlock = useCurrentHourBlock()
   const { hour, time, date } = useClock()
@@ -33,17 +36,51 @@ export default function OperatorDashboard() {
     if (activeShift) loadReports()
   }, [activeShift])
 
+  useEffect(() => {
+    if (!activeShift) return
+
+    const channel = supabase
+      .channel(`operator-dashboard-${activeShift.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'hourly_reports',
+        filter: `shift_id=eq.${activeShift.id}`
+      }, loadReports)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'shifts',
+        filter: `id=eq.${activeShift.id}`
+      }, loadActiveShift)
+      .subscribe()
+
+    const fallback = window.setInterval(() => {
+      loadReports()
+      loadActiveShift()
+    }, 15000)
+
+    return () => {
+      window.clearInterval(fallback)
+      supabase.removeChannel(channel)
+    }
+  }, [activeShift?.id, loadActiveShift])
+
   const loadReports = async () => {
     if (!activeShift) return
     const { data } = await supabase
       .from('hourly_reports').select('*')
       .eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
-    if (data) setReports(data as HourlyReport[])
+    if (data) {
+      const hours = testMode ? TEST_SLOTS : SHIFT_HOURS[activeShift.shift_type as ShiftType]
+      setReports((data as HourlyReport[]).sort((a, b) => hours.indexOf(a.hour_start) - hours.indexOf(b.hour_start)))
+    }
   }
 
-  const shiftHours = activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : []
-  const currentHourBelongsToShift = shiftHours.includes(hour)
-  const currentHourReported = currentHourBelongsToShift && reports.some(r => r.hour_start === hour)
+  const currentSlot = testMode ? Math.floor(new Date().getMinutes() / 3) : hour
+  const shiftHours = activeShift ? (testMode ? TEST_SLOTS : SHIFT_HOURS[activeShift.shift_type as ShiftType]) : []
+  const currentHourBelongsToShift = testMode || shiftHours.includes(hour)
+  const currentHourReported = currentHourBelongsToShift && reports.some(r => r.hour_start === currentSlot)
   const showCurrentHourReminder = currentHourBelongsToShift && !currentHourReported
   const visibleActiveShift = !shiftLoading &&
     activeShift &&

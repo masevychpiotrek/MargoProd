@@ -3,9 +3,9 @@ import { useClock } from './useClock'
 import { useShiftStore } from '@/stores/shiftStore'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import { useTestMode } from './useTestMode'
 
 // TRYB TESTOWY — alert co minutę zamiast co godzinę
-const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
 const SHIFT_HOURS: Record<string, number[]> = {
   I:   [6,7,8,9,10,11,12,13],
   II:  [14,15,16,17,18,19,20,21],
@@ -67,6 +67,7 @@ export function useAlertEngine(
   onShowPopup: (hour: number) => void,
   onHidePopup: () => void
 ) {
+  const testMode = useTestMode()
   const { now, hour, minute, second } = useClock()
   const { activeShift } = useShiftStore()
   const { profile } = useAuthStore()
@@ -76,7 +77,7 @@ export function useAlertEngine(
   const overdueInterval = useRef<ReturnType<typeof setInterval> | null>(null)
 
   // W trybie testowym "godzina raportu" = minuta bieżąca
-  const reportKey = TEST_MODE ? Math.floor(now.getMinutes() / 3) : hour
+  const reportKey = testMode ? Math.floor(now.getMinutes() / 3) : hour
 
   const checkIfReported = useCallback(async (key: number) => {
     if (profile?.role !== 'operator' || !activeShift || isReportedRef.current[key] !== undefined) return
@@ -125,7 +126,7 @@ export function useAlertEngine(
     }
 
     const shiftHours = SHIFT_HOURS[activeShift.shift_type] ?? []
-    if (!TEST_MODE && !shiftHours.includes(hour)) {
+    if (!testMode && !shiftHours.includes(hour)) {
       onHidePopup()
       if (overdueInterval.current) {
         clearInterval(overdueInterval.current)
@@ -134,7 +135,7 @@ export function useAlertEngine(
       return
     }
 
-    if (TEST_MODE) {
+    if (testMode) {
       // Ile sekund zostało do końca bloku 3-minutowego
       const blockStart = Math.floor(now.getMinutes() / 3) * 3
       const endOfBlock = new Date(now)
@@ -205,7 +206,7 @@ export function useAlertEngine(
     }
 
     return () => {}
-  }, [minute, second, hour, now, activeShift, profile?.id, profile?.role, checkIfReported, onShowPopup, onHidePopup, reportKey])
+  }, [minute, second, hour, now, activeShift, profile?.id, profile?.role, checkIfReported, onShowPopup, onHidePopup, reportKey, testMode])
 
   useEffect(() => {
     return () => {

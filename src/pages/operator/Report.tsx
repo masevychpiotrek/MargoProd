@@ -4,20 +4,27 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
+import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
 import { TimeInput, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
 import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database'
 
 const TARGET = 2100
-const TEST_MODE = localStorage.getItem('margoline-test-mode') === '1'
 const SHIFT_HOURS: Record<ShiftType, number[]> = {
   I:   [6,7,8,9,10,11,12,13],
   II:  [14,15,16,17,18,19,20,21],
   III: [22,23,0,1,2,3,4,5]
 }
+const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 
 function getShiftHours(shiftType?: ShiftType) {
   return shiftType ? SHIFT_HOURS[shiftType] : Array.from({ length: 24 }, (_, h) => h)
+}
+
+function formatTestBlock(slot: number) {
+  const start = slot * 3
+  const end = start + 3
+  return `Test ${String(Math.floor(start / 60)).padStart(2, '0')}:${String(start % 60).padStart(2, '0')}-${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`
 }
 
 function getRobotHint(errors: string[]) {
@@ -94,10 +101,11 @@ function CounterInput({ label, sublabel, value, onChange, prevValue, color = 'te
 export default function OperatorReport() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
-  const { activeShift, activeMachine } = useShiftStore()
+  const { activeShift, activeMachine, loadActiveShift } = useShiftStore()
+  const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
   const { hour } = useClock()
-  const shiftHours = getShiftHours(activeShift?.shift_type)
+  const shiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
   const activeTarget = activeMachine?.target_per_hour ?? TARGET
 
   const [counterGood,    setCounterGood]    = useState('')
@@ -113,7 +121,10 @@ export default function OperatorReport() {
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [errors,  setErrors]  = useState<string[]>([])
-  const [selectedHour, setSelectedHour] = useState(() => shiftHours.includes(hour) ? hour : shiftHours[0])
+  const [selectedHour, setSelectedHour] = useState(() => {
+    const currentSlot = testMode ? Math.floor(new Date().getMinutes() / 3) : hour
+    return shiftHours.includes(currentSlot) ? currentSlot : shiftHours[0]
+  })
 
   // Orders
   const [orders,         setOrders]         = useState<ProductionOrder[]>([])
@@ -137,15 +148,57 @@ export default function OperatorReport() {
     if (!activeShift) { navigate('/operator/shift'); return }
     loadReports(); loadOrders()
   }, [activeShift])
+
   useEffect(() => {
-    const hoursForShift = getShiftHours(activeShift?.shift_type)
-    setSelectedHour(prev => hoursForShift.includes(prev) ? prev : hoursForShift[0])
-  }, [activeShift?.shift_type])
+    if (!activeShift) return
+
+    const reloadShiftData = () => {
+      loadReports()
+      loadOrders()
+    }
+
+    const channel = supabase
+      .channel(`operator-report-${activeShift.id}`)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'hourly_reports',
+        filter: `shift_id=eq.${activeShift.id}`
+      }, reloadShiftData)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'production_orders',
+        filter: `machine_id=eq.${activeShift.machine_id}`
+      }, loadOrders)
+      .on('postgres_changes', {
+        event: '*',
+        schema: 'public',
+        table: 'shifts',
+        filter: `id=eq.${activeShift.id}`
+      }, loadActiveShift)
+      .subscribe()
+
+    const fallback = window.setInterval(reloadShiftData, 15000)
+
+    return () => {
+      window.clearInterval(fallback)
+      supabase.removeChannel(channel)
+    }
+  }, [activeShift?.id, activeShift?.machine_id, loadActiveShift])
+  useEffect(() => {
+    const hoursForShift = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
+    const currentSlot = testMode ? Math.floor(new Date().getMinutes() / 3) : hour
+    setSelectedHour(prev => hoursForShift.includes(prev) ? prev : (hoursForShift.includes(currentSlot) ? currentSlot : hoursForShift[0]))
+  }, [activeShift?.shift_type, hour, testMode])
 
   const loadReports = async () => {
     if (!activeShift) return
     const { data } = await supabase.from('hourly_reports').select('*').eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
-    if (data) setExistingReports(data as ReportExt[])
+    if (data) {
+      const hours = testMode ? TEST_SLOTS : getShiftHours(activeShift.shift_type)
+      setExistingReports((data as ReportExt[]).sort((a, b) => hours.indexOf(a.hour_start) - hours.indexOf(b.hour_start)))
+    }
   }
   const loadOrders = async () => {
     if (!activeShift) return
@@ -216,7 +269,7 @@ export default function OperatorReport() {
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const machineRate = incRuntime > 0 ? Math.round(incGood / incRuntime * 60) : 0
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
-  const belowTarget = !TEST_MODE && incGood > 0 && incGood < activeTarget
+  const belowTarget = !testMode && incGood > 0 && incGood < activeTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
 
@@ -275,9 +328,9 @@ export default function OperatorReport() {
     if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy (HH:MM)')
     if (!counterReady)   errs.push('Wpisz stan licznika czasu gotowości (HH:MM)')
     if (!counterAlarm)   errs.push('Wpisz stan licznika czasu alarmu (HH:MM)')
-    if (!TEST_MODE && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
+    if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
-    if (alreadyReported) errs.push(`Raport za ${formatHourBlock(selectedHour)} już istnieje`)
+    if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
     if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie może maleć')
     if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie może maleć')
     if (counterRuntime !== '' && prevRuntime > 0 && curRuntime < prevRuntime) errs.push('Licznik czasu pracy nie może maleć')
@@ -295,14 +348,14 @@ export default function OperatorReport() {
       const orderQtyVal = parseInt(orderQty) || incGood
       const { data: report, error } = await supabase.from('hourly_reports').insert({
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
-        hour_block: formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
+        hour_block: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
         good_count: incGood, reject_count: incReject, total_count: curGood,
         counter_good: curGood, counter_reject: curReject,
         runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
         target: activeTarget,
-        downtime_reason: downtimeReason || null, notes: notes || null, status: 'submitted',
+        downtime_reason: downtimeReason || (testMode && incGood < activeTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
         order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
       }).select().single()
       if (error) { setErrors([error.message]); return }
@@ -327,6 +380,11 @@ export default function OperatorReport() {
         <div>
           <h1 className="text-2xl font-bold text-white">Wpisz wynik godziny</h1>
           <p className="text-navy-400 mt-1">{activeMachine?.name} · Zmiana {activeShift.shift_type}</p>
+          {testMode && (
+            <div className="mt-2 inline-flex rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
+              Tryb testowy: szybkie wpisy do analizy
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className={cn('text-3xl font-bold font-mono', isUrgent ? 'text-red-400' : 'text-white')}>{countdown}</div>
@@ -379,12 +437,12 @@ export default function OperatorReport() {
                     const prevReported = prevHour === null || reported.includes(prevHour)
 
                     const isDisabled = alreadyReported ||
-                      (!hasPassed && !isFirstHour) ||
-                      (!isFirstHour && !prevReported)
+                      (!testMode && !hasPassed && !isFirstHour) ||
+                      (!testMode && !isFirstHour && !prevReported)
 
                     return (
                       <option key={h} value={h} disabled={isDisabled}>
-                        {String(h).padStart(2,'0')}:00–{String((h+1)%24).padStart(2,'00')}:00{alreadyReported ? ' ✓' : ''}
+                        {testMode ? formatTestBlock(h) : `${String(h).padStart(2,'0')}:00–${String((h+1)%24).padStart(2,'00')}:00`}{alreadyReported ? ' ✓' : ''}
                       </option>
                     )
                   })
@@ -516,10 +574,10 @@ export default function OperatorReport() {
           {/* Liczniki czasów HH:MM */}
           <div className="card">
             <div className="card-header">
-              <div><div className="card-title">Liczniki czasów pracy</div><div className="card-sub">Format HH:MM — przyrost musi sumować się do 01:00</div></div>
+              <div><div className="card-title">Liczniki czasów pracy</div><div className="card-sub">{testMode ? 'Tryb testowy — przyrost może mieć dowolną długość' : 'Format HH:MM — przyrost musi sumować się do 01:00'}</div></div>
               {allTimesFilled && (
-                <div className={cn('font-bold font-mono text-lg', timeSum === 60 ? 'text-green-400' : timeSum > 60 ? 'text-red-400' : 'text-amber-400')}>
-                  {minsToHHMM(timeSum)} / 01:00
+                <div className={cn('font-bold font-mono text-lg', testMode || timeSum === 60 ? 'text-green-400' : timeSum > 60 ? 'text-red-400' : 'text-amber-400')}>
+                  {minsToHHMM(timeSum)}{testMode ? '' : ' / 01:00'}
                 </div>
               )}
             </div>
@@ -534,7 +592,7 @@ export default function OperatorReport() {
                   <span className="text-green-400">● Praca: {minsToHHMM(incRuntime)}</span>
                   <span className="text-amber-400">● Gotowość: {minsToHHMM(incReady)}</span>
                   <span className="text-red-400">● Alarm: {minsToHHMM(incAlarm)}</span>
-                  {timeSum === 60 && <span className="text-green-400 ml-auto">✓ OK</span>}
+                  {(testMode || timeSum === 60) && <span className="text-green-400 ml-auto">✓ OK</span>}
                 </div>
               </div>
             )}
