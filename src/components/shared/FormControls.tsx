@@ -3,7 +3,15 @@ import { cn } from '@/lib/utils'
 // ── parseHHMM / minsToHHMM ────────────────────────────────────────────────
 export function parseHHMM(val: string): number {
   const m = val.match(/^(\d{1,3}):(\d{2})$/)
-  return m ? parseInt(m[1]) * 60 + parseInt(m[2]) : 0
+  if (!m) return 0
+  const minutes = parseInt(m[2])
+  if (minutes > 59) return 0
+  return parseInt(m[1]) * 60 + minutes
+}
+
+export function isValidHHMM(val: string): boolean {
+  const m = val.match(/^(\d{1,3}):(\d{2})$/)
+  return !!m && parseInt(m[2]) <= 59
 }
 export function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`
@@ -17,21 +25,22 @@ interface TimeInputProps {
   onChange: (v: string) => void
   prevValue?: number
   color?: string
+  compact?: boolean
 }
 
-export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, color = 'text-white' }: TimeInputProps) {
+export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, color = 'text-white', compact = false }: TimeInputProps) {
   const cur       = parseHHMM(value)
   const increment = value && cur >= prevValue ? cur - prevValue : 0
   const hasError  = value !== '' && cur < prevValue && prevValue > 0
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     let v = e.target.value.replace(/[^0-9]/g, '') // tylko cyfry
-    if (v.length > 4) v = v.slice(0, 4)
+    if (v.length > 5) v = v.slice(0, 5)
     // Formatuj jako HH:MM
     if (v.length <= 2) {
       onChange(v)
     } else {
-      onChange(v.slice(0,2) + ':' + v.slice(2))
+      onChange(v.slice(0, -2) + ':' + v.slice(-2))
     }
   }
 
@@ -40,13 +49,12 @@ export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, col
     const raw = e.target.value.replace(/[^0-9]/g, '')
     if (raw.length === 1) onChange('0' + raw + ':00')
     else if (raw.length === 2) onChange(raw + ':00')
-    else if (raw.length === 3) onChange('0' + raw[0] + ':' + raw.slice(1))
-    else if (raw.length === 4) onChange(raw.slice(0,2) + ':' + raw.slice(2))
+    else if (raw.length > 2) onChange(raw.slice(0, -2) + ':' + raw.slice(-2))
   }
 
   return (
     <div>
-      <label className="label">{label}</label>
+      {label && <label className="label">{label}</label>}
       {sublabel && <div className="text-xs text-navy-500 mb-1.5">{sublabel}</div>}
       <input
         type="text"
@@ -56,9 +64,10 @@ export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, col
         onChange={handleChange}
         onBlur={handleBlur}
         placeholder="00:00"
-        maxLength={5}
+        maxLength={6}
         className={cn(
-          'input text-2xl font-bold font-mono py-4 text-center tracking-widest',
+          'input font-bold font-mono text-center',
+          compact ? 'text-lg py-3' : 'text-2xl py-4 tracking-widest',
           hasError ? 'border-red-500/60' : ''
         )}
       />

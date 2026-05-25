@@ -6,7 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn } from '@/lib/utils'
-import { TimeInput, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
+import { TimeInput, isValidHHMM, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
 import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database'
 
 const TARGET = 2100
@@ -192,6 +192,14 @@ export default function OperatorReport() {
     setSelectedHour(prev => hoursForShift.includes(prev) ? prev : (hoursForShift.includes(currentSlot) ? currentSlot : hoursForShift[0]))
   }, [activeShift?.shift_type, hour, testMode])
 
+  useEffect(() => {
+    const reported = existingReports.map(r => r.hour_start)
+    if (!reported.includes(selectedHour)) return
+
+    const nextOpenHour = shiftHours.find(h => !reported.includes(h))
+    if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
+  }, [activeShift?.shift_type, existingReports, selectedHour, testMode])
+
   const loadReports = async () => {
     if (!activeShift) return
     const { data } = await supabase.from('hourly_reports').select('*').eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
@@ -204,9 +212,10 @@ export default function OperatorReport() {
     if (!activeShift) return
     const { data } = await supabase.from('production_orders').select('*').eq('machine_id', activeShift.machine_id).in('status', ['active','paused']).order('created_at', { ascending: false })
     if (data) {
-      setOrders(data as ProductionOrder[])
-      const active = (data as ProductionOrder[]).find(o => o.status === 'active')
-      if (active) setActiveOrderId(active.id)
+      const list = data as ProductionOrder[]
+      setOrders(list)
+      const active = list.find(o => o.status === 'active')
+      setActiveOrderId(current => active ? active.id : (list.some(o => o.id === current) ? current : ''))
     }
   }
 
@@ -266,6 +275,12 @@ export default function OperatorReport() {
   const belowTarget = !testMode && incGood > 0 && incGood < activeTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const activeOrder = orders.find(o => o.id === activeOrderId)
+  const lastReportForFinish = orderedReports[orderedReports.length - 1] as ReportExt | undefined
+  const lastGood = lastReportForFinish?.counter_good ?? 0
+  const lastReject = lastReportForFinish?.counter_reject ?? 0
+  const lastRuntime = lastReportForFinish?.counter_runtime ?? 0
+  const lastReady = lastReportForFinish?.counter_ready ?? 0
+  const lastAlarm = lastReportForFinish?.counter_alarm ?? 0
 
   const handleFinishOrder = async () => {
     if (!activeShift || !profile || !activeOrderId) return
@@ -274,18 +289,25 @@ export default function OperatorReport() {
     const curRt = parseHHMM(finishCounterRuntime)
     const curRd = parseHHMM(finishCounterReady)
     const curAl = parseHHMM(finishCounterAlarm)
-    const lastReport = orderedReports[orderedReports.length - 1] as ReportExt | undefined
-    const lastGood    = lastReport?.counter_good    ?? 0
-    const lastReject  = lastReport?.counter_reject  ?? 0
-    const lastRuntime = lastReport?.counter_runtime ?? 0
-    const lastReady   = lastReport?.counter_ready   ?? 0
-    const lastAlarm   = lastReport?.counter_alarm   ?? 0
     const incG  = Math.max(0, curG  - lastGood)
     const incRj = Math.max(0, curR  - lastReject)
     const incRt = Math.max(0, curRt - lastRuntime)
     const incRd = Math.max(0, curRd - lastReady)
     const incAl = Math.max(0, curAl - lastAlarm)
-    if (!finishCounterGood) { setErrors(['Wpisz stan licznika dobrych sztuk']); return }
+    const finishErrors: string[] = []
+    if (!finishCounterGood) finishErrors.push('Wpisz stan licznika dobrych sztuk')
+    if (!finishCounterRuntime) finishErrors.push('Wpisz stan licznika czasu pracy (HH:MM)')
+    if (!finishCounterReady) finishErrors.push('Wpisz stan licznika czasu gotowosci (HH:MM)')
+    if (!finishCounterAlarm) finishErrors.push('Wpisz stan licznika czasu alarmu (HH:MM)')
+    if (finishCounterRuntime && !isValidHHMM(finishCounterRuntime)) finishErrors.push('Czas pracy wpisz w formacie HH:MM, z minutami 00-59')
+    if (finishCounterReady && !isValidHHMM(finishCounterReady)) finishErrors.push('Czas gotowosci wpisz w formacie HH:MM, z minutami 00-59')
+    if (finishCounterAlarm && !isValidHHMM(finishCounterAlarm)) finishErrors.push('Czas alarmu wpisz w formacie HH:MM, z minutami 00-59')
+    if (finishCounterGood !== '' && lastGood > 0 && curG < lastGood) finishErrors.push('Licznik dobrych nie moze malec')
+    if (finishCounterReject !== '' && lastReject > 0 && curR < lastReject) finishErrors.push('Licznik odrzutu nie moze malec')
+    if (finishCounterRuntime !== '' && lastRuntime > 0 && curRt < lastRuntime) finishErrors.push('Licznik czasu pracy nie moze malec')
+    if (finishCounterReady !== '' && lastReady > 0 && curRd < lastReady) finishErrors.push('Licznik czasu gotowosci nie moze malec')
+    if (finishCounterAlarm !== '' && lastAlarm > 0 && curAl < lastAlarm) finishErrors.push('Licznik czasu alarmu nie moze malec')
+    if (finishErrors.length) { setErrors(finishErrors); return }
     setSavingFinish(true)
     const now = new Date()
     const finishHour = now.getHours()
@@ -318,13 +340,20 @@ export default function OperatorReport() {
 
   const validate = (): string[] => {
     const errs: string[] = []
+    const orderQtyVal = parseInt(orderQty) || incGood
     if (!counterGood)    errs.push('Wpisz stan licznika dobrych sztuk')
     if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy (HH:MM)')
     if (!counterReady)   errs.push('Wpisz stan licznika czasu gotowości (HH:MM)')
     if (!counterAlarm)   errs.push('Wpisz stan licznika czasu alarmu (HH:MM)')
+    if (counterRuntime && !isValidHHMM(counterRuntime)) errs.push('Czas pracy wpisz w formacie HH:MM, z minutami 00-59')
+    if (counterReady && !isValidHHMM(counterReady)) errs.push('Czas gotowości wpisz w formacie HH:MM, z minutami 00-59')
+    if (counterAlarm && !isValidHHMM(counterAlarm)) errs.push('Czas alarmu wpisz w formacie HH:MM, z minutami 00-59')
+    if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
+    if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie mogą być większe niż przyrost dobrych sztuk')
+    if (downtimes.some(d => d.duration_min <= 0)) errs.push('Zdarzenie przestojowe musi mieć czas większy od 0 min')
     if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie może maleć')
     if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie może maleć')
     if (counterRuntime !== '' && prevRuntime > 0 && curRuntime < prevRuntime) errs.push('Licznik czasu pracy nie może maleć')
@@ -340,6 +369,18 @@ export default function OperatorReport() {
     setSaving(true); setErrors([])
     try {
       const orderQtyVal = parseInt(orderQty) || incGood
+      const { data: currentReports } = await supabase
+        .from('hourly_reports')
+        .select('id')
+        .eq('shift_id', activeShift.id)
+        .eq('hour_start', selectedHour)
+        .is('deleted_at', null)
+        .maybeSingle()
+      if (currentReports) {
+        setErrors([`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} został już zapisany na innym urządzeniu`])
+        await loadReports()
+        return
+      }
       const { data: report, error } = await supabase.from('hourly_reports').insert({
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
         hour_block: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
@@ -362,6 +403,8 @@ export default function OperatorReport() {
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setCounterGood(''); setCounterReject(''); setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
       setDowntimeReason(''); setNotes(''); setDowntimes([]); setOrderQty('')
+      const nextOpenHour = shiftHours.find(h => h !== selectedHour && !existingReports.some(r => r.hour_start === h))
+      if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
       loadReports(); loadOrders()
     } finally { setSaving(false) }
   }
@@ -475,7 +518,16 @@ export default function OperatorReport() {
                 </div>
               </div>
             ) : (
-              <div className="text-center py-3 text-navy-500 text-sm mb-2">Brak aktywnego zlecenia</div>
+              <div className={cn(
+                'text-center py-3 text-sm mb-2 rounded-xl border',
+                testMode
+                  ? 'text-navy-500 border-navy-700 bg-navy-900/60'
+                  : 'text-amber-300 border-amber-500/30 bg-amber-500/10'
+              )}>
+                {testMode
+                  ? 'Brak aktywnego zlecenia'
+                  : 'Brak aktywnego zlecenia - wybierz, wznow albo utworz zlecenie przed zapisem raportu'}
+              </div>
             )}
 
             {orders.filter(o => o.status === 'paused').map(o => (
@@ -667,15 +719,15 @@ export default function OperatorReport() {
                   <div className="grid grid-cols-3 gap-3">
                     <div>
                       <label className="label text-green-400">Czas pracy</label>
-                      <input type="text" value={finishCounterRuntime} onChange={e => setFinishCounterRuntime(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                      <TimeInput label="" value={finishCounterRuntime} onChange={setFinishCounterRuntime} prevValue={lastRuntime} color="text-green-400" compact />
                     </div>
                     <div>
                       <label className="label text-amber-400">Czas gotowości</label>
-                      <input type="text" value={finishCounterReady} onChange={e => setFinishCounterReady(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                      <TimeInput label="" value={finishCounterReady} onChange={setFinishCounterReady} prevValue={lastReady} color="text-amber-400" compact />
                     </div>
                     <div>
                       <label className="label text-red-400">Czas alarmu</label>
-                      <input type="text" value={finishCounterAlarm} onChange={e => setFinishCounterAlarm(e.target.value)} placeholder="00:00" maxLength={5} className="input text-lg font-bold font-mono text-center" />
+                      <TimeInput label="" value={finishCounterAlarm} onChange={setFinishCounterAlarm} prevValue={lastAlarm} color="text-red-400" compact />
                     </div>
                   </div>
                   <div>
