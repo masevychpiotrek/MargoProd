@@ -1,106 +1,178 @@
-import { useEffect, useState, useRef } from 'react'
-import { supabase } from '@/lib/supabase'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
-import { efficiencyColor, efficiencyBg, cn, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
-import type { HourlyReport, Shift, Machine, ShiftType } from '@/types/database'
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend } from 'chart.js'
+import { cn, efficiencyBg, efficiencyColor, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
+import type { HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
-ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Title, Tooltip, Legend)
+ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
 
-const TARGET    = 2100
+const TARGET = 2100
 const REAL_TARGET = 2500
+const SHIFTS = ['I', 'II', 'III'] as const
 
 const CHART_OPTS = {
-  responsive: true, maintainAspectRatio: false,
+  responsive: true,
+  maintainAspectRatio: false,
   plugins: { legend: { labels: { color: '#8892AA', font: { size: 11 }, boxWidth: 12 } } },
   scales: {
-    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#4A5568' } },
-    x: { grid: { display: false }, ticks: { color: '#4A5568' } }
+    y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6B7A99' } },
+    x: { grid: { display: false }, ticks: { color: '#6B7A99' } }
   }
 }
 
-function minsToHHMM(m: number) {
-  if (!m) return '00:00'
-  return `${String(Math.floor(m/60)).padStart(2,'0')}:${String(m%60).padStart(2,'0')}`
-}
-
-interface MachineStatus {
-  machine: Machine
-  activeShift: (Shift & { operator_1?: { full_name: string }, operator_2?: { full_name: string } }) | null
-  todayReports: ReportWithContext[]
-}
+type Mode = 'day' | 'range' | 'month'
+type ShiftFilter = 'all' | ShiftType
 
 type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   ready_min?: number
   alarm_min?: number
+  counter_good?: number
+  counter_reject?: number
+  counter_runtime?: number
+  counter_ready?: number
+  counter_alarm?: number
+  order_id?: string | null
+  order_qty?: number | null
   operator?: { full_name: string } | { full_name: string }[] | null
-  shift?: { shift_type: string } | { shift_type: string }[] | null
+  shift?: { shift_type: string; shift_date?: string } | { shift_type: string; shift_date?: string }[] | null
 }
 
-interface WepqRow {
+type ActiveShift = Shift & {
+  operator_1?: { full_name: string } | null
+  operator_2?: { full_name: string } | null
+}
+
+type GroupRow = {
   key: string
   date: string
-  machineName: string
+  year: string
+  month: string
+  day: string
   shiftType: string
-  operatorName: string
+  machineName: string
   good: number
+  reject: number
   target: number
+  runtime: number
+  ready: number
+  alarm: number
+  downtime: number
   reports: number
   wEpq: number
   wEpqTotal: number
+}
+
+type EditState = {
+  good_count: string
+  reject_count: string
+  runtime_min: string
+  ready_min: string
+  alarm_min: string
+  downtime_min: string
+  failure_min: string
+  downtime_reason: string
+  notes: string
+  reason: string
 }
 
 function one<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
 
+function iso(d: Date) {
+  return d.toISOString().slice(0, 10)
+}
+
+function startOfMonth(year: string, month: string) {
+  return `${year}-${month}-01`
+}
+
+function endOfMonth(year: string, month: string) {
+  return iso(new Date(Number(year), Number(month), 0))
+}
+
+function addDays(date: string, days: number) {
+  const d = new Date(`${date}T12:00:00`)
+  d.setDate(d.getDate() + days)
+  return iso(d)
+}
+
+function minsToHHMM(value: number) {
+  const m = Math.max(0, Math.round(value || 0))
+  return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
+}
+
+function toInt(value: string) {
+  const parsed = Number.parseInt(value || '0', 10)
+  return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+}
+
 export default function ManagerDashboard() {
-  const { time, date, dateISO, hour } = useClock()
-  const [machines,    setMachines]    = useState<MachineStatus[]>([])
-  const [allReports,  setAllReports]  = useState<ReportWithContext[]>([])
-  const [weekReports, setWeekReports] = useState<(HourlyReport & { ready_min?: number; alarm_min?: number })[]>([])
-  const [range, setRange] = useState<'today'|'7d'|'30d'>('today')
+  const { time, dateISO } = useClock()
+  const [machines, setMachines] = useState<Machine[]>([])
+  const [activeShifts, setActiveShifts] = useState<ActiveShift[]>([])
+  const [reports, setReports] = useState<ReportWithContext[]>([])
   const [loading, setLoading] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [editError, setEditError] = useState('')
+  const [mode, setMode] = useState<Mode>('day')
+  const [selectedDate, setSelectedDate] = useState(dateISO)
+  const [fromDate, setFromDate] = useState(dateISO)
+  const [toDate, setToDate] = useState(dateISO)
+  const [month, setMonth] = useState(dateISO.slice(5, 7))
+  const [year, setYear] = useState(dateISO.slice(0, 4))
+  const [shiftFilter, setShiftFilter] = useState<ShiftFilter>('all')
+  const [machineFilter, setMachineFilter] = useState('all')
+  const [editing, setEditing] = useState<ReportWithContext | null>(null)
+  const [editState, setEditState] = useState<EditState | null>(null)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  const queryRange = useMemo(() => {
+    if (mode === 'day') return { from: selectedDate, to: selectedDate }
+    if (mode === 'month') return { from: startOfMonth(year, month), to: endOfMonth(year, month) }
+    return { from: fromDate <= toDate ? fromDate : toDate, to: fromDate <= toDate ? toDate : fromDate }
+  }, [fromDate, mode, month, selectedDate, toDate, year])
+
+  const machineNameById = useMemo(
+    () => Object.fromEntries(machines.map(machine => [machine.id, machine.name])),
+    [machines]
+  )
 
   useEffect(() => {
     load()
     channel.current?.unsubscribe()
-    channel.current = supabase.channel('mgr')
+    channel.current = supabase.channel('manager-control')
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_orders' }, load)
       .subscribe()
     return () => { channel.current?.unsubscribe() }
-  }, [dateISO, range])
+  }, [queryRange.from, queryRange.to])
 
   const load = async () => {
     setLoading(true)
-    const days = range === '7d' ? 7 : range === '30d' ? 30 : 1
-    const fromDate = new Date(); fromDate.setDate(fromDate.getDate() - days + 1)
-    const fromStr  = fromDate.toISOString().split('T')[0]
 
-    // Week for trend comparison
-    const weekAgo = new Date(); weekAgo.setDate(weekAgo.getDate() - 7)
-    const weekStr  = weekAgo.toISOString().split('T')[0]
-
-    const [mRes, sRes, rRes, wRes] = await Promise.all([
+    const [mRes, sRes, rRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
-      supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').is('ended_at', null),
+      supabase
+        .from('shifts')
+        .select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)')
+        .is('ended_at', null),
       supabase
         .from('hourly_reports')
-        .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type)')
-        .gte('report_date', fromStr)
+        .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
+        .gte('report_date', queryRange.from)
+        .lte('report_date', queryRange.to)
         .is('deleted_at', null)
-        .order('report_date')
-        .order('hour_start'),
-      supabase.from('hourly_reports').select('good_count, reject_count, runtime_min, ready_min, alarm_min, report_date').gte('report_date', weekStr).is('deleted_at', null)
+        .order('report_date', { ascending: false })
+        .order('hour_start', { ascending: false })
     ])
 
-    const mList = (mRes.data ?? []) as Machine[]
-    const sListRaw = (sRes.data ?? []) as MachineStatus['activeShift'][]
-    const staleShifts = sListRaw.filter((s): s is NonNullable<MachineStatus['activeShift']> =>
-      !!s && isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
+    const staleShifts = ((sRes.data ?? []) as ActiveShift[]).filter(s =>
+      isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
     )
     if (staleShifts.length) {
       await Promise.all(staleShifts.map(s => supabase
@@ -109,355 +181,572 @@ export default function ManagerDashboard() {
         .eq('id', s.id)
       ))
     }
-    const sList = sListRaw.filter((s): s is NonNullable<MachineStatus['activeShift']> =>
-      !!s && !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
-    )
-    const rList = (rRes.data ?? []) as ReportWithContext[]
-    const wList = (wRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
-    setAllReports(rList)
-    setWeekReports(wList)
 
-    setMachines(mList.map(m => ({
-      machine: m,
-      activeShift: sList.find(s => s.machine_id === m.id) ?? null,
-      todayReports: rList.filter(r => r.machine_id === m.id && r.report_date === dateISO)
-    })))
+    setMachines((mRes.data ?? []) as Machine[])
+    setActiveShifts(((sRes.data ?? []) as ActiveShift[]).filter(s =>
+      !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
+    ))
+    setReports((rRes.data ?? []) as ReportWithContext[])
     setLoading(false)
   }
 
-  const todayReports = allReports.filter(r => r.report_date === dateISO)
-  const machineNameById = Object.fromEntries(machines.map(ms => [ms.machine.id, ms.machine.name]))
+  const filteredReports = useMemo(() => reports.filter(report => {
+    const shiftType = one(report.shift)?.shift_type ?? ''
+    const machineOk = machineFilter === 'all' || report.machine_id === machineFilter
+    const shiftOk = shiftFilter === 'all' || shiftType === shiftFilter
+    return machineOk && shiftOk
+  }), [machineFilter, reports, shiftFilter])
 
-  // ── KPI obliczenia ────────────────────────────────────────────────────────
-  const totalGood    = todayReports.reduce((s,r) => s + r.good_count, 0)
-  const totalReject  = todayReports.reduce((s,r) => s + r.reject_count, 0)
-  const totalRuntime = todayReports.reduce((s,r) => s + r.runtime_min, 0)
-  const totalDowntime= todayReports.reduce((s,r) => s + r.downtime_min + r.failure_min, 0)
-  const totalAlarm   = todayReports.reduce((s,r) => s + (r.alarm_min ?? 0), 0)
-  const totalReady   = todayReports.reduce((s,r) => s + (r.ready_min ?? 0), 0)
-  const totalTime    = totalRuntime + totalDowntime + totalAlarm + totalReady
+  const dayReports = useMemo(
+    () => filteredReports.filter(report => report.report_date === selectedDate),
+    [filteredReports, selectedDate]
+  )
 
-  const avgEff       = todayReports.length > 0 ? Math.round(todayReports.reduce((s,r) => s + Number(r.efficiency_pct), 0) / todayReports.length) : 0
-  const oee          = todayReports.length > 0 ? Math.round(totalGood / (todayReports.length * TARGET) * 100) : 0
-  const rejectPct    = (totalGood + totalReject) > 0 ? Math.round(totalReject / (totalGood + totalReject) * 100) : 0
-  const availability = totalTime > 0 ? Math.round(totalRuntime / totalTime * 100) : 0
+  const groups = useMemo(() => {
+    const rows = Object.values(filteredReports.reduce<Record<string, GroupRow>>((acc, report) => {
+      const shiftType = one(report.shift)?.shift_type ?? '-'
+      const machineName = machineNameById[report.machine_id] ?? '-'
+      const key = `${report.report_date}|${shiftType}|${report.machine_id}`
+      const target = report.target || TARGET
 
-  // Efektywność czasowa (na podstawie raportów z order_qty)
-  const totalOrderQty = todayReports.reduce((s,r) => s + (((r as { order_qty?: number }).order_qty) ?? 0), 0)
-  const planMins      = totalOrderQty > 0 ? Math.round(totalOrderQty / REAL_TARGET * 60) : 0
-  const faktMins      = totalRuntime + totalDowntime + totalAlarm
-  const timeEfficiency = planMins > 0 && faktMins > 0 ? Math.round(planMins / faktMins * 100) : null
-
-  // Trend vs tydzień temu
-  const prevWeekGood = weekReports.filter(r => r.report_date !== dateISO).reduce((s,r) => s + r.good_count, 0)
-  const prevWeekDays = [...new Set(weekReports.filter(r => r.report_date !== dateISO).map(r => r.report_date))].length
-  const prevWeekAvgDay = prevWeekDays > 0 ? Math.round(prevWeekGood / prevWeekDays) : 0
-  const trendVsLastWeek = prevWeekAvgDay > 0 ? Math.round((totalGood - prevWeekAvgDay) / prevWeekAvgDay * 100) : null
-
-  // Najlepsza godzina
-  const bestReport = todayReports.length > 0
-    ? todayReports.reduce((best, r) => Number(r.efficiency_pct) > Number(best.efficiency_pct) ? r : best, todayReports[0])
-    : null
-
-  // Wykresy
-  const activeHours  = Array.from({length:24},(_,h)=>h).filter(h => machines.some(ms => ms.todayReports.some(r => r.hour_start === h)))
-  const hourLabels   = activeHours.map(h => `${String(h).padStart(2,'0')}:00`)
-  const hourlyDatasets = machines.map((ms,i) => ({
-    label: ms.machine.name,
-    data: activeHours.map(h => ms.todayReports.find(r => r.hour_start === h)?.good_count ?? 0),
-    backgroundColor: i === 0 ? 'rgba(59,130,246,0.75)' : 'rgba(6,182,212,0.75)',
-    borderRadius: 4
-  }))
-
-  // Trend tygodniowy
-  const dateMap: Record<string, number> = {}
-  allReports.forEach(r => { dateMap[r.report_date] = (dateMap[r.report_date] ?? 0) + r.good_count })
-  const sortedDates  = Object.keys(dateMap).sort()
-  const trendLabels  = sortedDates.map(d => d.slice(5))
-
-  const wepqRows = Object.values(allReports.reduce<Record<string, WepqRow>>((acc, r) => {
-    const report = r as ReportWithContext
-    const operatorName = one(report.operator)?.full_name ?? '—'
-    const shiftType = one(report.shift)?.shift_type ?? '—'
-    const machineName = machineNameById[report.machine_id] ?? '—'
-    const key = `${report.report_date}|${report.machine_id}|${shiftType}|${report.operator_id}`
-
-    if (!acc[key]) {
-      acc[key] = {
-        key,
-        date: report.report_date,
-        machineName,
-        shiftType,
-        operatorName,
-        good: 0,
-        target: 0,
-        reports: 0,
-        wEpq: 0,
-        wEpqTotal: 0
+      if (!acc[key]) {
+        acc[key] = {
+          key,
+          date: report.report_date,
+          year: report.report_date.slice(0, 4),
+          month: report.report_date.slice(5, 7),
+          day: report.report_date.slice(8, 10),
+          shiftType,
+          machineName,
+          good: 0,
+          reject: 0,
+          target: 0,
+          runtime: 0,
+          ready: 0,
+          alarm: 0,
+          downtime: 0,
+          reports: 0,
+          wEpq: 0,
+          wEpqTotal: 0
+        }
       }
+
+      acc[key].good += report.good_count
+      acc[key].reject += report.reject_count
+      acc[key].target += target
+      acc[key].runtime += report.runtime_min
+      acc[key].ready += report.ready_min ?? 0
+      acc[key].alarm += report.alarm_min ?? 0
+      acc[key].downtime += report.downtime_min + report.failure_min
+      acc[key].reports += 1
+      acc[key].wEpq += Number(report.efficiency_pct) || 0
+      return acc
+    }, {}))
+
+    return rows.map(row => ({
+      ...row,
+      wEpq: row.reports ? Math.round(row.wEpq / row.reports) : 0,
+      wEpqTotal: row.target ? Math.round(row.good / row.target * 100) : 0
+    })).sort((a, b) =>
+      b.date.localeCompare(a.date) ||
+      a.machineName.localeCompare(b.machineName) ||
+      a.shiftType.localeCompare(b.shiftType)
+    )
+  }, [filteredReports, machineNameById])
+
+  const kpi = useMemo(() => {
+    const totalGood = filteredReports.reduce((sum, r) => sum + r.good_count, 0)
+    const totalReject = filteredReports.reduce((sum, r) => sum + r.reject_count, 0)
+    const runtime = filteredReports.reduce((sum, r) => sum + r.runtime_min, 0)
+    const ready = filteredReports.reduce((sum, r) => sum + (r.ready_min ?? 0), 0)
+    const alarm = filteredReports.reduce((sum, r) => sum + (r.alarm_min ?? 0), 0)
+    const downtime = filteredReports.reduce((sum, r) => sum + r.downtime_min + r.failure_min, 0)
+    const totalTime = runtime + ready + alarm + downtime
+    const target = filteredReports.reduce((sum, r) => sum + (r.target || TARGET), 0)
+    const avgWepq = filteredReports.length
+      ? Math.round(filteredReports.reduce((sum, r) => sum + (Number(r.efficiency_pct) || 0), 0) / filteredReports.length)
+      : 0
+    const wepqTotal = target ? Math.round(totalGood / target * 100) : 0
+    const rejectPct = totalGood + totalReject ? Math.round(totalReject / (totalGood + totalReject) * 1000) / 10 : 0
+    const availability = totalTime ? Math.round(runtime / totalTime * 100) : 0
+    const planMins = totalGood > 0 ? Math.round(totalGood / REAL_TARGET * 60) : 0
+    const pace = planMins && runtime ? Math.round(planMins / runtime * 100) : 0
+
+    return { totalGood, totalReject, runtime, ready, alarm, downtime, target, avgWepq, wepqTotal, rejectPct, availability, pace }
+  }, [filteredReports])
+
+  const dailyTrend = useMemo(() => {
+    const map: Record<string, number> = {}
+    filteredReports.forEach(report => {
+      map[report.report_date] = (map[report.report_date] ?? 0) + report.good_count
+    })
+    const dates = Object.keys(map).sort()
+    return {
+      labels: dates.map(value => value.slice(5)),
+      values: dates.map(value => map[value])
+    }
+  }, [filteredReports])
+
+  const hourlyChart = useMemo(() => {
+    const hours = Array.from({ length: 24 }, (_, hour) => hour).filter(hour =>
+      dayReports.some(report => report.hour_start === hour)
+    )
+    const visibleMachines = machines.filter(machine =>
+      machineFilter === 'all' || machine.id === machineFilter
+    )
+    return {
+      labels: hours.map(hour => `${String(hour).padStart(2, '0')}:00`),
+      datasets: visibleMachines.map((machine, index) => ({
+        label: machine.name,
+        data: hours.map(hour => dayReports
+          .filter(report => report.machine_id === machine.id && report.hour_start === hour)
+          .reduce((sum, report) => sum + report.good_count, 0)),
+        backgroundColor: index % 2 === 0 ? 'rgba(59,130,246,0.78)' : 'rgba(34,197,94,0.78)',
+        borderRadius: 4
+      }))
+    }
+  }, [dayReports, machineFilter, machines])
+
+  const openEdit = (report: ReportWithContext) => {
+    setEditing(report)
+    setEditError('')
+    setEditState({
+      good_count: String(report.good_count ?? 0),
+      reject_count: String(report.reject_count ?? 0),
+      runtime_min: String(report.runtime_min ?? 0),
+      ready_min: String(report.ready_min ?? 0),
+      alarm_min: String(report.alarm_min ?? 0),
+      downtime_min: String(report.downtime_min ?? 0),
+      failure_min: String(report.failure_min ?? 0),
+      downtime_reason: report.downtime_reason ?? '',
+      notes: report.notes ?? '',
+      reason: ''
+    })
+  }
+
+  const saveEdit = async () => {
+    if (!editing || !editState) return
+    setSaving(true)
+    setEditError('')
+
+    const payload = {
+      good_count: toInt(editState.good_count),
+      reject_count: toInt(editState.reject_count),
+      runtime_min: toInt(editState.runtime_min),
+      ready_min: toInt(editState.ready_min),
+      alarm_min: toInt(editState.alarm_min),
+      downtime_min: toInt(editState.downtime_min),
+      failure_min: toInt(editState.failure_min),
+      downtime_reason: editState.downtime_reason.trim() || null,
+      notes: editState.notes.trim() || null
     }
 
-    acc[key].good += report.good_count
-    acc[key].target += report.target || TARGET
-    acc[key].reports += 1
-    acc[key].wEpq += Number(report.efficiency_pct) || 0
-    return acc
-  }, {})).map(row => ({
-    ...row,
-    wEpq: row.reports > 0 ? Math.round(row.wEpq / row.reports) : 0,
-    wEpqTotal: row.target > 0 ? Math.round(row.good / row.target * 100) : 0
-  })).sort((a, b) =>
-    b.date.localeCompare(a.date) ||
-    a.machineName.localeCompare(b.machineName) ||
-    a.shiftType.localeCompare(b.shiftType) ||
-    b.wEpqTotal - a.wEpqTotal
+    const { error } = await supabase.from('hourly_reports').update(payload).eq('id', editing.id)
+    if (!error) {
+      await logAudit('manager_report_update', 'hourly_reports', editing.id, {
+        good_count: editing.good_count,
+        reject_count: editing.reject_count,
+        runtime_min: editing.runtime_min,
+        ready_min: editing.ready_min,
+        alarm_min: editing.alarm_min,
+        downtime_min: editing.downtime_min,
+        failure_min: editing.failure_min,
+        downtime_reason: editing.downtime_reason,
+        notes: editing.notes
+      }, {
+        ...payload,
+        reason: editState.reason.trim() || 'korekta kierownika'
+      })
+      setEditing(null)
+      setEditState(null)
+      await load()
+    } else {
+      setEditError(error.message || 'Nie udalo sie zapisac korekty.')
+    }
+    setSaving(false)
+  }
+
+  const dayTimeline = [...dayReports].sort((a, b) =>
+    (machineNameById[a.machine_id] ?? '').localeCompare(machineNameById[b.machine_id] ?? '') ||
+    (one(a.shift)?.shift_type ?? '').localeCompare(one(b.shift)?.shift_type ?? '') ||
+    a.hour_start - b.hour_start
   )
+
+  const selectedRangeLabel = mode === 'day'
+    ? selectedDate
+    : mode === 'month'
+      ? `${year}-${month}`
+      : `${queryRange.from} - ${queryRange.to}`
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <div className="flex items-center justify-between flex-wrap gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-white">Live Produkcja</h1>
-          <p className="text-navy-400 mt-1">{date} · <span className="font-mono text-white">{time}</span></p>
+          <h1 className="text-2xl font-bold text-white">Sterowanie produkcja</h1>
+          <p className="text-navy-400 mt-1">
+            {selectedRangeLabel} · <span className="font-mono text-white">{time}</span>
+          </p>
         </div>
-        <div className="flex items-center gap-2 flex-wrap">
+        <div className="flex items-center gap-2">
           <div className="flex items-center gap-1.5 px-3 py-1.5 bg-green-500/10 border border-green-500/20 rounded-full">
             <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
             <span className="text-xs text-green-400 font-bold">LIVE</span>
           </div>
-          {(['today','7d','30d'] as const).map(r => (
-            <button key={r} onClick={() => setRange(r)}
-              className={cn('btn text-xs py-1.5 px-3', range === r ? 'btn-primary' : 'btn-secondary')}>
-              {r === 'today' ? 'Dziś' : r === '7d' ? '7 dni' : '30 dni'}
-            </button>
-          ))}
-          <button onClick={load} className="btn-secondary text-xs py-1.5 px-3">↻</button>
+          <button onClick={load} className="btn-secondary text-xs py-1.5 px-3">Odswiez</button>
         </div>
       </div>
 
-      {/* KPI row 1 — produkcja */}
+      <div className="card">
+        <div className="grid grid-cols-1 xl:grid-cols-[1.3fr_1fr_1fr] gap-3">
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Zakres kontroli</div>
+            <div className="flex flex-wrap gap-2">
+              {([
+                ['day', 'Konkretny dzien'],
+                ['range', 'Okres od-do'],
+                ['month', 'Miesiac i rok']
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  onClick={() => setMode(value)}
+                  className={cn('btn text-xs py-2 px-3', mode === value ? 'btn-primary' : 'btn-secondary')}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Data</div>
+            {mode === 'day' && (
+              <input className="input" type="date" value={selectedDate} onChange={e => setSelectedDate(e.target.value)} />
+            )}
+            {mode === 'range' && (
+              <div className="grid grid-cols-2 gap-2">
+                <input className="input" type="date" value={fromDate} onChange={e => setFromDate(e.target.value)} />
+                <input className="input" type="date" value={toDate} onChange={e => setToDate(e.target.value)} />
+              </div>
+            )}
+            {mode === 'month' && (
+              <div className="grid grid-cols-2 gap-2">
+                <select className="input" value={month} onChange={e => setMonth(e.target.value)}>
+                  {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(value => (
+                    <option key={value} value={value}>{value}</option>
+                  ))}
+                </select>
+                <input className="input" type="number" value={year} min="2024" max="2100" onChange={e => setYear(e.target.value)} />
+              </div>
+            )}
+          </div>
+
+          <div>
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Zmiana i maszyna</div>
+            <div className="grid grid-cols-2 gap-2">
+              <select className="input" value={shiftFilter} onChange={e => setShiftFilter(e.target.value as ShiftFilter)}>
+                <option value="all">Wszystkie zmiany</option>
+                {SHIFTS.map(value => <option key={value} value={value}>Zmiana {value}</option>)}
+              </select>
+              <select className="input" value={machineFilter} onChange={e => setMachineFilter(e.target.value)}>
+                <option value="all">Wszystkie maszyny</option>
+                {machines.map(machine => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
+              </select>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { l: 'Produkcja łącznie', v: totalGood.toLocaleString('pl-PL') + ' szt', c: 'text-brand',
-            sub: trendVsLastWeek !== null ? `${trendVsLastWeek >= 0 ? '↑' : '↓'} ${Math.abs(trendVsLastWeek)}% vs ostatni tydzień` : 'dziś' },
-          { l: 'OEE', v: oee + '%', c: efficiencyColor(oee), sub: 'Overall Equipment Effectiveness' },
-          { l: 'Śr. efektywność', v: avgEff > 0 ? avgEff + '%' : '—', c: efficiencyColor(avgEff), sub: `vs target ${TARGET} szt/h` },
-          { l: 'Odrzut', v: rejectPct + '%', c: rejectPct > 5 ? 'text-red-400' : rejectPct > 2 ? 'text-amber-400' : 'text-green-400',
-            sub: `${totalReject.toLocaleString('pl-PL')} szt` },
-        ].map(k => (
-          <div key={k.l} className="kpi-card">
-            <div className="kpi-label">{k.l}</div>
-            <div className={cn('kpi-value', k.c)}>{loading ? '...' : k.v}</div>
-            <div className="kpi-sub">{k.sub}</div>
+          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `cel ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'srednia z wpisow', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'produkcja / cel', color: efficiencyColor(kpi.wepqTotal) },
+          { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
+        ].map(item => (
+          <div key={item.label} className="kpi-card">
+            <div className="kpi-label">{item.label}</div>
+            <div className={cn('kpi-value', item.color)}>{loading ? '...' : item.value}</div>
+            <div className="kpi-sub">{item.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* KPI row 2 — czasy i efektywność */}
       <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
         {[
-          { l: 'Dostępność maszyn', v: availability > 0 ? availability + '%' : '—',
-            c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400',
-            sub: `czas pracy ${minsToHHMM(totalRuntime)}` },
-          { l: 'Czas przestojów', v: minsToHHMM(totalDowntime),
-            c: totalDowntime > 60 ? 'text-red-400' : totalDowntime > 30 ? 'text-amber-400' : 'text-green-400',
-            sub: 'postoje + awarie' },
-          { l: 'Czas alarmów', v: minsToHHMM(totalAlarm),
-            c: totalAlarm > 60 ? 'text-red-400' : totalAlarm > 30 ? 'text-amber-400' : 'text-green-400',
-            sub: 'czas w alarmie' },
-          { l: 'Ef. czasowa zleceń', v: timeEfficiency !== null ? timeEfficiency + '%' : '—',
-            c: timeEfficiency === null ? 'text-navy-400' : timeEfficiency >= 90 ? 'text-green-400' : timeEfficiency >= 75 ? 'text-amber-400' : 'text-red-400',
-            sub: timeEfficiency !== null ? `plan ${minsToHHMM(planMins)} vs fakt ${minsToHHMM(faktMins)}` : 'brak zleceń z planem' },
-          { l: 'Najlepsza godzina', v: bestReport ? bestReport.hour_block : '—',
-            c: 'text-cyan-400',
-            sub: bestReport ? `${bestReport.good_count.toLocaleString('pl-PL')} szt · ${bestReport.efficiency_pct}%` : 'brak danych' },
-        ].map(k => (
-          <div key={k.l} className="kpi-card">
-            <div className="kpi-label">{k.l}</div>
-            <div className={cn('kpi-value text-xl', k.c)}>{loading ? '...' : k.v}</div>
-            <div className="kpi-sub">{k.sub}</div>
+          { label: 'Czas pracy', value: minsToHHMM(kpi.runtime), sub: `gotowosc ${minsToHHMM(kpi.ready)}`, color: 'text-green-400' },
+          { label: 'Alarmy', value: minsToHHMM(kpi.alarm), sub: 'czas alarmow', color: kpi.alarm > 60 ? 'text-red-400' : 'text-amber-400' },
+          { label: 'Postoje', value: minsToHHMM(kpi.downtime), sub: 'postoj + awaria', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' },
+          { label: 'Dostepnosc', value: kpi.availability ? `${kpi.availability}%` : '-', sub: 'praca / caly czas', color: efficiencyColor(kpi.availability) },
+          { label: 'Tempo', value: kpi.pace ? `${kpi.pace}%` : '-', sub: `wg ${REAL_TARGET} szt/h`, color: efficiencyColor(kpi.pace) }
+        ].map(item => (
+          <div key={item.label} className="kpi-card">
+            <div className="kpi-label">{item.label}</div>
+            <div className={cn('kpi-value text-xl', item.color)}>{loading ? '...' : item.value}</div>
+            <div className="kpi-sub">{item.sub}</div>
           </div>
         ))}
       </div>
 
-      {/* Machine cards */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {machines.map(ms => {
-          const g    = ms.todayReports.reduce((s,r) => s + r.good_count, 0)
-          const rej  = ms.todayReports.reduce((s,r) => s + r.reject_count, 0)
-          const al   = ms.todayReports.reduce((s,r) => s + (r.alarm_min ?? 0), 0)
-          const eff  = ms.todayReports.length > 0 ? Math.round(ms.todayReports.reduce((s,r) => s + Number(r.efficiency_pct), 0) / ms.todayReports.length) : 0
-          const rPct = (g + rej) > 0 ? Math.round(rej / (g + rej) * 100) : 0
-          const reported = ms.todayReports.some(r => r.hour_start === hour)
-          const online   = !!ms.activeShift
-          const ops = [ms.activeShift?.operator_1?.full_name, ms.activeShift?.operator_2?.full_name].filter(Boolean).join(' / ')
-
-          return (
-            <div key={ms.machine.id} className={cn('card border-2', online ? 'border-brand/20' : 'border-navy-700')}>
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div className={cn('w-3 h-3 rounded-full', online ? 'bg-green-400 animate-pulse' : 'bg-navy-600')} />
-                  <div>
-                    <div className="font-bold text-white text-lg">{ms.machine.name}</div>
-                    <div className="text-xs text-navy-400">{online ? `Zmiana ${ms.activeShift?.shift_type} · ${ops || '—'}` : 'Brak aktywnej zmiany'}</div>
-                  </div>
-                </div>
-                {online && (reported
-                  ? <span className="status-ok text-xs">✓ raport ok</span>
-                  : <span className="status-alarm text-xs animate-pulse">⚠ brak raportu</span>
-                )}
-              </div>
-
-              <div className="grid grid-cols-4 gap-2 mb-3">
-                {[
-                  { l: 'Produkcja', v: g.toLocaleString('pl-PL'), c: 'text-white' },
-                  { l: 'Efektywność', v: eff > 0 ? eff + '%' : '—', c: efficiencyColor(eff) },
-                  { l: '% odrzutu', v: rPct > 0 ? rPct + '%' : '—', c: rPct > 5 ? 'text-red-400' : 'text-green-400' },
-                  { l: 'Alarm', v: al > 0 ? minsToHHMM(al) : '—', c: al > 30 ? 'text-red-400' : 'text-navy-400' }
-                ].map(s => (
-                  <div key={s.l} className="bg-navy-900 rounded-xl p-2.5 text-center">
-                    <div className="text-xs text-navy-500 mb-1">{s.l}</div>
-                    <div className={cn('text-base font-bold font-mono', s.c)}>{s.v}</div>
-                  </div>
-                ))}
-              </div>
-
-              {eff > 0 && (
-                <div className="mb-3">
-                  <div className="h-2 bg-navy-900 rounded-full overflow-hidden">
-                    <div className={cn('h-full rounded-full', efficiencyBg(eff))} style={{ width: `${Math.min(eff,100)}%` }} />
-                  </div>
-                </div>
-              )}
-
-              {/* Mini chart */}
-              {ms.todayReports.length > 0 && (
-                <div className="flex items-end gap-px h-8 mt-1">
-                  {Array.from({length:24},(_,h) => {
-                    const r = ms.todayReports.find(r => r.hour_start === h)
-                    const e = r ? Number(r.efficiency_pct) : 0
-                    return (
-                      <div key={h} className="flex-1 flex flex-col justify-end h-full">
-                        {r ? <div className={cn('rounded-sm', efficiencyBg(e))} style={{ height: `${Math.max(e,8)}%` }} title={`${h}:00 — ${r.good_count} szt`} />
-                           : <div className="rounded-sm bg-navy-800 opacity-30" style={{ height: '3px' }} />}
-                      </div>
-                    )
-                  })}
-                </div>
-              )}
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="card xl:col-span-2">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Dzien / zmiana / maszyna</div>
+              <div className="card-sub">Dane zapisane i pokazane w ukladzie rok, miesiac, dzien, zmiana, maszyna</div>
             </div>
-          )
-        })}
-      </div>
-
-      {/* Charts */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        <div className="card">
-          <div className="card-header"><div><div className="card-title">Przyrost godzinowy — dziś</div><div className="card-sub">Automat 3 vs Automat 4</div></div></div>
-          <div style={{ height: 200 }}>
-            {hourLabels.length > 0
-              ? <Bar data={{ labels: hourLabels, datasets: hourlyDatasets }} options={CHART_OPTS as never} />
-              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych</div>}
           </div>
-        </div>
-
-        <div className="card">
-          <div className="card-header"><div><div className="card-title">Trend produkcji</div><div className="card-sub">Łączna produkcja dzienna</div></div></div>
-          <div style={{ height: 200 }}>
-            {trendLabels.length > 0
-              ? <Line data={{
-                  labels: trendLabels,
-                  datasets: [
-                    { label: 'Produkcja łącznie', data: sortedDates.map(d => dateMap[d]), borderColor: '#3B82F6', tension: 0.4, fill: false, pointRadius: 3, spanGaps: true }
-                  ]
-                }} options={CHART_OPTS as never} />
-              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych</div>}
-          </div>
-        </div>
-      </div>
-
-      {/* WEPQ per operator */}
-      <div className="card">
-        <div className="card-header">
-          <div><div className="card-title">WEPQ operatorów</div><div className="card-sub">{wepqRows.length} zestawień · osoba / zmiana / dzień / maszyna</div></div>
-        </div>
-        {wepqRows.length === 0
-          ? <div className="text-center py-8 text-navy-500">Brak danych WEPQ</div>
-          : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-navy-700">
-                    {['Data','Maszyna','Zmiana','Operator','W EPQ','WEPQ TOTAL','Produkcja','Raporty'].map(h => (
-                      <th key={h} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {wepqRows.map(row => (
-                    <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
-                      <td className="py-2 px-3 font-mono text-xs text-navy-300">{row.date}</td>
-                      <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
-                      <td className="py-2 px-3 font-bold text-white">Zmiana {row.shiftType}</td>
-                      <td className="py-2 px-3 text-navy-200">{row.operatorName}</td>
-                      <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq}%</span></td>
-                      <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(row.wEpqTotal))}>{row.wEpqTotal}%</span></td>
-                      <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
-                      <td className="py-2 px-3 font-mono text-navy-400">{row.reports}</td>
-                    </tr>
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-navy-700">
+                  {['Rok', 'Mc', 'Dzien', 'Zmiana', 'Maszyna', 'W EPQ', 'WEPQ TOTAL', 'Produkcja', 'Czas', 'Alarm', 'Postoj'].map(header => (
+                    <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                   ))}
-                </tbody>
-              </table>
+                </tr>
+              </thead>
+              <tbody>
+                {groups.length === 0 && (
+                  <tr><td colSpan={11} className="py-8 text-center text-navy-500">Brak danych dla wybranego zakresu</td></tr>
+                )}
+                {groups.map(row => (
+                  <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
+                    <td className="py-2 px-3 font-mono text-navy-300">{row.year}</td>
+                    <td className="py-2 px-3 font-mono text-navy-300">{row.month}</td>
+                    <td className="py-2 px-3 font-mono text-white">{row.day}</td>
+                    <td className="py-2 px-3 font-bold text-white">Zmiana {row.shiftType}</td>
+                    <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
+                    <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq}%</td>
+                    <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpqTotal))}>{row.wEpqTotal}%</td>
+                    <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
+                    <td className="py-2 px-3 font-mono text-green-400">{minsToHHMM(row.runtime)}</td>
+                    <td className="py-2 px-3 font-mono text-red-400">{minsToHHMM(row.alarm)}</td>
+                    <td className="py-2 px-3 font-mono text-amber-400">{minsToHHMM(row.downtime)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Aktywne zmiany</div>
+              <div className="card-sub">Kto teraz pracuje i gdzie</div>
             </div>
-          )
-        }
+          </div>
+          <div className="space-y-2">
+            {activeShifts.length === 0 && <div className="text-center py-8 text-navy-500">Brak aktywnych zmian</div>}
+            {activeShifts.map(shift => (
+              <div key={shift.id} className="bg-navy-900 rounded-xl p-3 border border-navy-700">
+                <div className="flex items-center justify-between">
+                  <div className="font-bold text-white">{machineNameById[shift.machine_id] ?? 'Maszyna'}</div>
+                  <span className="status-ok text-xs">Zmiana {shift.shift_type}</span>
+                </div>
+                <div className="text-xs text-navy-400 mt-1">{shift.shift_date}</div>
+                <div className="text-sm text-navy-200 mt-2">
+                  {[shift.operator_1?.full_name, shift.operator_2?.full_name].filter(Boolean).join(' / ') || 'Brak operatorow'}
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
       </div>
 
-      {/* Table */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="card">
+          <div className="card-header">
+            <div><div className="card-title">Przyrost godzinowy</div><div className="card-sub">Odtwarzany dla wybranego dnia</div></div>
+          </div>
+          <div style={{ height: 220 }}>
+            {hourlyChart.labels.length
+              ? <Bar data={hourlyChart} options={CHART_OPTS as never} />
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak raportow w tym dniu</div>}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div><div className="card-title">Trend zakresu</div><div className="card-sub">Suma produkcji dzien po dniu</div></div>
+          </div>
+          <div style={{ height: 220 }}>
+            {dailyTrend.labels.length
+              ? <Line data={{
+                labels: dailyTrend.labels,
+                datasets: [{ label: 'Produkcja', data: dailyTrend.values, borderColor: '#3B82F6', tension: 0.35, pointRadius: 3 }]
+              }} options={CHART_OPTS as never} />
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak trendu</div>}
+          </div>
+        </div>
+      </div>
+
       <div className="card">
         <div className="card-header">
-          <div><div className="card-title">Raporty godzinowe — dziś</div><div className="card-sub">{todayReports.length} wpisów</div></div>
+          <div>
+            <div className="card-title">Odtworzenie calego dnia</div>
+            <div className="card-sub">{selectedDate} · kolejnosc wpisow po maszynie, zmianie i godzinie</div>
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              className="btn-secondary text-xs py-1.5 px-3"
+              onClick={() => {
+                setSelectedDate(addDays(selectedDate, -1))
+                setMode('day')
+              }}
+            >
+              Poprzedni
+            </button>
+            <button
+              className="btn-secondary text-xs py-1.5 px-3"
+              onClick={() => {
+                const next = addDays(selectedDate, 1)
+                setSelectedDate(next > dateISO ? dateISO : next)
+                setMode('day')
+              }}
+            >
+              Nastepny
+            </button>
+          </div>
         </div>
-        {todayReports.length === 0
-          ? <div className="text-center py-8 text-navy-500">Brak raportów</div>
-          : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-navy-700">
-                    {['Godzina','Maszyna','Operator','W EPQ','Przyrost','Odrzut','Efektyw.','Czas pracy','Alarm','Uwagi'].map(h => (
-                      <th key={h} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {[...todayReports].reverse().map(r => {
-                    const eff = Number(r.efficiency_pct)
-                    const report = r as ReportWithContext
-                    const m = machines.find(ms => ms.machine.id === r.machine_id)
-                    const operatorName = one(report.operator)?.full_name ?? '—'
-                    return (
-                      <tr key={r.id} className="border-b border-navy-800 hover:bg-navy-800/50">
-                        <td className="py-2 px-3 font-mono text-xs text-white">{r.hour_block}</td>
-                        <td className="py-2 px-3"><span className="status-info text-xs">{m?.machine.name ?? '—'}</span></td>
-                        <td className="py-2 px-3 text-xs text-navy-300 max-w-[120px] truncate">{operatorName}</td>
-                        <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(eff))}>{eff}%</span></td>
-                        <td className="py-2 px-3 font-bold font-mono text-white">{r.good_count.toLocaleString('pl-PL')}</td>
-                        <td className="py-2 px-3 font-mono text-red-400 text-xs">{r.reject_count || '—'}</td>
-                        <td className="py-2 px-3"><span className={cn('font-bold', efficiencyColor(eff))}>{eff}%</span></td>
-                        <td className="py-2 px-3 font-mono text-xs text-green-400">{minsToHHMM(r.runtime_min)}</td>
-                        <td className="py-2 px-3 font-mono text-xs text-red-400">{r.alarm_min ? minsToHHMM(r.alarm_min) : '—'}</td>
-                        <td className="py-2 px-3 text-xs text-navy-500 max-w-xs truncate">{r.notes || r.downtime_reason || '—'}</td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )
-        }
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
+          {dayTimeline.length === 0 && <div className="md:col-span-2 xl:col-span-3 text-center py-8 text-navy-500">Brak wpisow w wybranym dniu</div>}
+          {dayTimeline.map(report => {
+            const eff = Number(report.efficiency_pct) || 0
+            return (
+              <div key={report.id} className="bg-navy-900 rounded-xl p-3 border border-navy-700">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="font-mono text-white font-bold">{report.hour_block}</div>
+                  <div className={cn('font-mono font-bold', efficiencyColor(eff))}>{eff}%</div>
+                </div>
+                <div className="text-xs text-navy-400 mt-1">
+                  {machineNameById[report.machine_id] ?? '-'} · Zmiana {one(report.shift)?.shift_type ?? '-'} · {one(report.operator)?.full_name ?? '-'}
+                </div>
+                <div className="grid grid-cols-4 gap-2 mt-3 text-center">
+                  <div><div className="text-xs text-navy-500">szt</div><div className="font-mono font-bold text-white">{report.good_count}</div></div>
+                  <div><div className="text-xs text-navy-500">odrz</div><div className="font-mono font-bold text-red-400">{report.reject_count}</div></div>
+                  <div><div className="text-xs text-navy-500">praca</div><div className="font-mono font-bold text-green-400">{minsToHHMM(report.runtime_min)}</div></div>
+                  <div><div className="text-xs text-navy-500">alarm</div><div className="font-mono font-bold text-amber-400">{minsToHHMM(report.alarm_min ?? 0)}</div></div>
+                </div>
+                <div className="h-1.5 bg-navy-800 rounded-full overflow-hidden mt-3">
+                  <div className={cn('h-full rounded-full', efficiencyBg(eff))} style={{ width: `${Math.min(eff, 120)}%` }} />
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Raporty do kontroli i korekty</div>
+            <div className="card-sub">{filteredReports.length} wpisow w aktualnym widoku</div>
+          </div>
+        </div>
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-navy-700">
+                {['Data', 'Godzina', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Praca', 'Alarm', 'Postoj', 'Akcja'].map(header => (
+                  <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {filteredReports.length === 0 && (
+                <tr><td colSpan={12} className="py-8 text-center text-navy-500">Brak raportow do pokazania</td></tr>
+              )}
+              {filteredReports.map(report => {
+                const eff = Number(report.efficiency_pct) || 0
+                return (
+                  <tr key={report.id} className="border-b border-navy-800 hover:bg-navy-800/50">
+                    <td className="py-2 px-3 font-mono text-xs text-navy-300">{report.report_date}</td>
+                    <td className="py-2 px-3 font-mono text-xs text-white">{report.hour_block}</td>
+                    <td className="py-2 px-3"><span className="status-info text-xs">{machineNameById[report.machine_id] ?? '-'}</span></td>
+                    <td className="py-2 px-3 font-bold text-white">Zmiana {one(report.shift)?.shift_type ?? '-'}</td>
+                    <td className="py-2 px-3 text-navy-200 max-w-[150px] truncate">{one(report.operator)?.full_name ?? '-'}</td>
+                    <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(eff))}>{eff}%</td>
+                    <td className="py-2 px-3 font-bold font-mono text-white">{report.good_count}</td>
+                    <td className="py-2 px-3 font-mono text-red-400">{report.reject_count}</td>
+                    <td className="py-2 px-3 font-mono text-green-400">{minsToHHMM(report.runtime_min)}</td>
+                    <td className="py-2 px-3 font-mono text-amber-400">{minsToHHMM(report.alarm_min ?? 0)}</td>
+                    <td className="py-2 px-3 font-mono text-navy-300">{minsToHHMM(report.downtime_min + report.failure_min)}</td>
+                    <td className="py-2 px-3">
+                      <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openEdit(report)}>Edytuj</button>
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {editing && editState && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="card w-full max-w-3xl max-h-[90vh] overflow-y-auto">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Korekta wpisu kierownika</div>
+                <div className="card-sub">
+                  {editing.report_date} · {editing.hour_block} · {machineNameById[editing.machine_id] ?? '-'} · Zmiana {one(editing.shift)?.shift_type ?? '-'}
+                </div>
+              </div>
+              <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => { setEditing(null); setEditError('') }}>Zamknij</button>
+            </div>
+
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+              {[
+                ['good_count', 'Sztuki dobre'],
+                ['reject_count', 'Odrzut'],
+                ['runtime_min', 'Praca min'],
+                ['ready_min', 'Gotowosc min'],
+                ['alarm_min', 'Alarm min'],
+                ['downtime_min', 'Postoj min'],
+                ['failure_min', 'Awaria min']
+              ].map(([key, label]) => (
+                <label key={key} className="block">
+                  <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">{label}</span>
+                  <input
+                    className="input mt-1"
+                    type="number"
+                    min="0"
+                    value={editState[key as keyof EditState]}
+                    onChange={e => setEditState({ ...editState, [key]: e.target.value })}
+                  />
+                </label>
+              ))}
+            </div>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Powod postoju</span>
+                <input className="input mt-1" value={editState.downtime_reason} onChange={e => setEditState({ ...editState, downtime_reason: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Powod korekty</span>
+                <input className="input mt-1" placeholder="np. blad operatora, korekta licznika" value={editState.reason} onChange={e => setEditState({ ...editState, reason: e.target.value })} />
+              </label>
+            </div>
+
+            <label className="block mt-3">
+              <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Notatka</span>
+              <textarea className="input mt-1 min-h-[90px]" value={editState.notes} onChange={e => setEditState({ ...editState, notes: e.target.value })} />
+            </label>
+
+            {editError && (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {editError}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 mt-5">
+              <button className="btn-secondary" onClick={() => { setEditing(null); setEditError('') }} disabled={saving}>Anuluj</button>
+              <button className="btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Zapisywanie...' : 'Zapisz korekte'}</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
