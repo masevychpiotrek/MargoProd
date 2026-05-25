@@ -99,7 +99,7 @@ export default function OperatorReport() {
   const { activeShift, activeMachine, loadActiveShift } = useShiftStore()
   const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
-  const { hour } = useClock()
+  const { now, hour } = useClock()
   const shiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
   const activeTarget = activeMachine?.target_per_hour ?? TARGET
 
@@ -189,10 +189,8 @@ export default function OperatorReport() {
 
   useEffect(() => {
     const reported = existingReports.map(r => r.hour_start)
-    if (!reported.includes(selectedHour)) return
-
-    const nextOpenHour = shiftHours.find(h => !reported.includes(h))
-    if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
+    const firstMissing = shiftHours.find(h => !reported.includes(h))
+    if (firstMissing !== undefined && selectedHour !== firstMissing) setSelectedHour(firstMissing)
   }, [activeShift?.shift_type, existingReports, selectedHour, testMode])
 
   const loadReports = async () => {
@@ -279,6 +277,17 @@ export default function OperatorReport() {
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
   const belowTarget = !testMode && incGood > 0 && incGood < activeTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
+  const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
+  const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
+  const currentSlotReported = currentSlotBelongsToShift && existingReports.some(r => r.hour_start === currentSlot)
+  const reportedHours = existingReports.map(r => r.hour_start)
+  const firstMissingHour = shiftHours.find(h => !reportedHours.includes(h))
+  const firstOpenMissingHour = shiftHours.find(h =>
+    !reportedHours.includes(h) &&
+    (testMode || !activeShift || canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h, now))
+  )
+  const mustFillPreviousHour = firstMissingHour !== undefined && selectedHour !== firstMissingHour
+  const shouldWarnCurrentSlot = firstOpenMissingHour !== undefined && !currentSlotReported
   const activeOrder = orders.find(o => o.id === activeOrderId)
   const selectedReportOpenAt = activeShift && !testMode
     ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
@@ -362,6 +371,7 @@ export default function OperatorReport() {
       const openAt = getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
       errs.push(`Raport za ten blok mozna wpisac dopiero od ${openAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}`)
     }
+    if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
@@ -417,7 +427,8 @@ export default function OperatorReport() {
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setCounterGood(''); setCounterReject(''); setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
       setDowntimeReason(''); setNotes(''); setDowntimes([]); setOrderQty('')
-      const nextOpenHour = shiftHours.find(h => h !== selectedHour && !existingReports.some(r => r.hour_start === h))
+      const nextReported = [...reportedHours, selectedHour]
+      const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
       if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
       loadReports(); loadOrders()
     } finally { setSaving(false) }
@@ -431,6 +442,11 @@ export default function OperatorReport() {
         <div>
           <h1 className="text-2xl font-bold text-white">Wpisz wynik godziny</h1>
           <p className="text-navy-400 mt-1">{activeMachine?.name} · Zmiana {activeShift.shift_type}</p>
+          {!testMode && firstOpenMissingHour !== undefined && firstOpenMissingHour !== currentSlot && (
+            <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm font-semibold text-amber-300">
+              Masz zalegly raport: {formatHourBlock(firstOpenMissingHour)}. Kolejne godziny beda dostepne po jego zapisaniu.
+            </div>
+          )}
           {testMode && (
             <div className="mt-2 inline-flex rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-1 text-xs font-bold text-amber-300">
               Tryb testowy: szybkie wpisy do analizy
@@ -438,9 +454,9 @@ export default function OperatorReport() {
           )}
         </div>
         <div className="text-right">
-          <div className={cn('text-3xl font-bold font-mono', isUrgent ? 'text-red-400' : 'text-white')}>{countdown}</div>
-          <div className="text-xs text-navy-400">do końca godziny</div>
-          {isUrgent && <div className="text-xs text-red-400 font-bold animate-pulse">⚠ CZAS NA WPIS!</div>}
+          <div className={cn('text-3xl font-bold font-mono', isUrgent && shouldWarnCurrentSlot ? 'text-red-400' : currentSlotReported ? 'text-green-400' : 'text-white')}>{currentSlotReported ? 'OK' : countdown}</div>
+          <div className="text-xs text-navy-400">{currentSlotReported ? 'obecny blok wpisany' : 'do konca godziny'}</div>
+          {isUrgent && shouldWarnCurrentSlot && <div className="text-xs text-red-400 font-bold animate-pulse">⚠ CZAS NA WPIS!</div>}
         </div>
       </div>
 
@@ -459,19 +475,17 @@ export default function OperatorReport() {
               </div>
               <select value={selectedHour} onChange={e => setSelectedHour(parseInt(e.target.value))} className="input w-auto text-sm font-bold">
                 {(() => {
-                  const reported = existingReports.map(r => r.hour_start)
                   const hours = shiftHours
-                  const now = new Date()
                   const currentHour = now.getHours()
 
                   return hours.map((h, idx) => {
-                    const alreadyReported = reported.includes(h)
+                    const alreadyReported = reportedHours.includes(h)
 
                     // Czy godzina już minęła (uwzględnia zmianę nocną)
                     // Czy godzina już minęła — uwzględnia zmianę nocną
                     const canEnter = testMode || !activeShift || canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h, now)
-                    let hasPassed: boolean
-                    if (activeShift?.shift_type === 'III') {
+                    let hasPassed = canEnter
+                    if (false && activeShift?.shift_type === 'III') {
                       // Nocna: 22,23,0,1,2,3,4,5
                       if (h >= 22) hasPassed = currentHour >= 22 ? currentHour > h : true
                       else hasPassed = currentHour >= 0 && currentHour < 22 ? true : currentHour > h
@@ -487,11 +501,12 @@ export default function OperatorReport() {
 
                     // Kolejność — poprzednia godzina musi być wpisana (lub to pierwsza)
                     const prevHour = idx > 0 ? hours[idx - 1] : null
-                    const prevReported = prevHour === null || reported.includes(prevHour)
+                    const prevReported = prevHour === null || reportedHours.includes(prevHour)
 
                     const isDisabled = alreadyReported ||
                       (!testMode && !hasPassed) ||
-                      (!testMode && !isFirstHour && !prevReported)
+                      (!testMode && !isFirstHour && !prevReported) ||
+                      (firstMissingHour !== undefined && h !== firstMissingHour && !alreadyReported)
 
                     return (
                       <option key={h} value={h} disabled={isDisabled}>

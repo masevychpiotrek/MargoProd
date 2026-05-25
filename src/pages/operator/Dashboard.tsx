@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useCurrentHourBlock, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { efficiencyColor, efficiencyBg, formatHourBlock, cn, SHIFT_HOURS } from '@/lib/utils'
+import { efficiencyColor, efficiencyBg, formatHourBlock, cn, SHIFT_HOURS, canEnterHourlyReport } from '@/lib/utils'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 2100
@@ -18,7 +18,7 @@ export default function OperatorDashboard() {
   const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
   const hourBlock = useCurrentHourBlock()
-  const { hour, time, date } = useClock()
+  const { now, hour, time, date } = useClock()
   const [reports, setReports] = useState<HourlyReport[]>([])
 
   useEffect(() => {
@@ -76,7 +76,14 @@ export default function OperatorDashboard() {
   const shiftHours = activeShift ? (testMode ? TEST_SLOTS : SHIFT_HOURS[activeShift.shift_type as ShiftType]) : []
   const currentHourBelongsToShift = testMode || shiftHours.includes(hour)
   const currentHourReported = currentHourBelongsToShift && reports.some(r => r.hour_start === currentSlot)
-  const showCurrentHourReminder = currentHourBelongsToShift && !currentHourReported
+  const reportedHours = reports.map(r => r.hour_start)
+  const firstOpenMissingHour = activeShift
+    ? shiftHours.find(h => !reportedHours.includes(h) && (testMode || canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h, now)))
+    : undefined
+  const reminderBlock = firstOpenMissingHour !== undefined
+    ? (testMode ? hourBlock : formatHourBlock(firstOpenMissingHour))
+    : hourBlock
+  const showCurrentHourReminder = firstOpenMissingHour !== undefined
   const visibleActiveShift = !shiftLoading &&
     activeShift &&
     !activeShift.ended_at &&
@@ -124,7 +131,7 @@ export default function OperatorDashboard() {
                     {isUrgent ? '⚠ CZAS NA WPIS GODZINY!' : '⏰ Pamiętaj o wpisaniu wyniku'}
                   </div>
                   <div className="text-sm text-navy-300 mt-0.5">
-                    Raport za godzinę <span className="font-bold text-white">{hourBlock}</span> nie został jeszcze wpisany
+                    Raport za godzinę <span className="font-bold text-white">{reminderBlock}</span> nie został jeszcze wpisany
                   </div>
                 </div>
                 <div className="text-left sm:text-right">
