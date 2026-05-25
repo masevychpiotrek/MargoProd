@@ -28,13 +28,37 @@ function minsToHHMM(m: number) {
 interface MachineStatus {
   machine: Machine
   activeShift: (Shift & { operator_1?: { full_name: string }, operator_2?: { full_name: string } }) | null
-  todayReports: (HourlyReport & { ready_min?: number; alarm_min?: number })[]
+  todayReports: ReportWithContext[]
+}
+
+type ReportWithContext = Omit<HourlyReport, 'operator'> & {
+  ready_min?: number
+  alarm_min?: number
+  operator?: { full_name: string } | { full_name: string }[] | null
+  shift?: { shift_type: string } | { shift_type: string }[] | null
+}
+
+interface WepqRow {
+  key: string
+  date: string
+  machineName: string
+  shiftType: string
+  operatorName: string
+  good: number
+  target: number
+  reports: number
+  wEpq: number
+  wEpqTotal: number
+}
+
+function one<T>(value: T | T[] | null | undefined) {
+  return Array.isArray(value) ? value[0] : value
 }
 
 export default function ManagerDashboard() {
   const { time, date, dateISO, hour } = useClock()
   const [machines,    setMachines]    = useState<MachineStatus[]>([])
-  const [allReports,  setAllReports]  = useState<(HourlyReport & { ready_min?: number; alarm_min?: number })[]>([])
+  const [allReports,  setAllReports]  = useState<ReportWithContext[]>([])
   const [weekReports, setWeekReports] = useState<(HourlyReport & { ready_min?: number; alarm_min?: number })[]>([])
   const [range, setRange] = useState<'today'|'7d'|'30d'>('today')
   const [loading, setLoading] = useState(true)
@@ -63,13 +87,19 @@ export default function ManagerDashboard() {
     const [mRes, sRes, rRes, wRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
       supabase.from('shifts').select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)').eq('shift_date', dateISO).is('ended_at', null),
-      supabase.from('hourly_reports').select('*').gte('report_date', fromStr).is('deleted_at', null).order('report_date').order('hour_start'),
+      supabase
+        .from('hourly_reports')
+        .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type)')
+        .gte('report_date', fromStr)
+        .is('deleted_at', null)
+        .order('report_date')
+        .order('hour_start'),
       supabase.from('hourly_reports').select('good_count, reject_count, runtime_min, ready_min, alarm_min, report_date').gte('report_date', weekStr).is('deleted_at', null)
     ])
 
     const mList = (mRes.data ?? []) as Machine[]
     const sList = sRes.data ?? []
-    const rList = (rRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
+    const rList = (rRes.data ?? []) as ReportWithContext[]
     const wList = (wRes.data ?? []) as (HourlyReport & { ready_min?: number; alarm_min?: number })[]
     setAllReports(rList)
     setWeekReports(wList)
@@ -83,6 +113,7 @@ export default function ManagerDashboard() {
   }
 
   const todayReports = allReports.filter(r => r.report_date === dateISO)
+  const machineNameById = Object.fromEntries(machines.map(ms => [ms.machine.id, ms.machine.name]))
 
   // ── KPI obliczenia ────────────────────────────────────────────────────────
   const totalGood    = todayReports.reduce((s,r) => s + r.good_count, 0)
@@ -130,6 +161,44 @@ export default function ManagerDashboard() {
   allReports.forEach(r => { dateMap[r.report_date] = (dateMap[r.report_date] ?? 0) + r.good_count })
   const sortedDates  = Object.keys(dateMap).sort()
   const trendLabels  = sortedDates.map(d => d.slice(5))
+
+  const wepqRows = Object.values(allReports.reduce<Record<string, WepqRow>>((acc, r) => {
+    const report = r as ReportWithContext
+    const operatorName = one(report.operator)?.full_name ?? '—'
+    const shiftType = one(report.shift)?.shift_type ?? '—'
+    const machineName = machineNameById[report.machine_id] ?? '—'
+    const key = `${report.report_date}|${report.machine_id}|${shiftType}|${report.operator_id}`
+
+    if (!acc[key]) {
+      acc[key] = {
+        key,
+        date: report.report_date,
+        machineName,
+        shiftType,
+        operatorName,
+        good: 0,
+        target: 0,
+        reports: 0,
+        wEpq: 0,
+        wEpqTotal: 0
+      }
+    }
+
+    acc[key].good += report.good_count
+    acc[key].target += report.target || TARGET
+    acc[key].reports += 1
+    acc[key].wEpq += Number(report.efficiency_pct) || 0
+    return acc
+  }, {})).map(row => ({
+    ...row,
+    wEpq: row.reports > 0 ? Math.round(row.wEpq / row.reports) : 0,
+    wEpqTotal: row.target > 0 ? Math.round(row.good / row.target * 100) : 0
+  })).sort((a, b) =>
+    b.date.localeCompare(a.date) ||
+    a.machineName.localeCompare(b.machineName) ||
+    a.shiftType.localeCompare(b.shiftType) ||
+    b.wEpqTotal - a.wEpqTotal
+  )
 
   return (
     <div className="space-y-5">
@@ -295,6 +364,43 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
+      {/* WEPQ per operator */}
+      <div className="card">
+        <div className="card-header">
+          <div><div className="card-title">WEPQ operatorów</div><div className="card-sub">{wepqRows.length} zestawień · osoba / zmiana / dzień / maszyna</div></div>
+        </div>
+        {wepqRows.length === 0
+          ? <div className="text-center py-8 text-navy-500">Brak danych WEPQ</div>
+          : (
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="border-b border-navy-700">
+                    {['Data','Maszyna','Zmiana','Operator','W EPQ','WEPQ TOTAL','Produkcja','Raporty'].map(h => (
+                      <th key={h} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {wepqRows.map(row => (
+                    <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
+                      <td className="py-2 px-3 font-mono text-xs text-navy-300">{row.date}</td>
+                      <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
+                      <td className="py-2 px-3 font-bold text-white">Zmiana {row.shiftType}</td>
+                      <td className="py-2 px-3 text-navy-200">{row.operatorName}</td>
+                      <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq}%</span></td>
+                      <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(row.wEpqTotal))}>{row.wEpqTotal}%</span></td>
+                      <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
+                      <td className="py-2 px-3 font-mono text-navy-400">{row.reports}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )
+        }
+      </div>
+
       {/* Table */}
       <div className="card">
         <div className="card-header">
@@ -307,7 +413,7 @@ export default function ManagerDashboard() {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="border-b border-navy-700">
-                    {['Godzina','Maszyna','Przyrost','Odrzut','Efektyw.','Czas pracy','Alarm','Uwagi'].map(h => (
+                    {['Godzina','Maszyna','Operator','W EPQ','Przyrost','Odrzut','Efektyw.','Czas pracy','Alarm','Uwagi'].map(h => (
                       <th key={h} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{h}</th>
                     ))}
                   </tr>
@@ -315,11 +421,15 @@ export default function ManagerDashboard() {
                 <tbody>
                   {[...todayReports].reverse().map(r => {
                     const eff = Number(r.efficiency_pct)
+                    const report = r as ReportWithContext
                     const m = machines.find(ms => ms.machine.id === r.machine_id)
+                    const operatorName = one(report.operator)?.full_name ?? '—'
                     return (
                       <tr key={r.id} className="border-b border-navy-800 hover:bg-navy-800/50">
                         <td className="py-2 px-3 font-mono text-xs text-white">{r.hour_block}</td>
                         <td className="py-2 px-3"><span className="status-info text-xs">{m?.machine.name ?? '—'}</span></td>
+                        <td className="py-2 px-3 text-xs text-navy-300 max-w-[120px] truncate">{operatorName}</td>
+                        <td className="py-2 px-3"><span className={cn('font-bold font-mono', efficiencyColor(eff))}>{eff}%</span></td>
                         <td className="py-2 px-3 font-bold font-mono text-white">{r.good_count.toLocaleString('pl-PL')}</td>
                         <td className="py-2 px-3 font-mono text-red-400 text-xs">{r.reject_count || '—'}</td>
                         <td className="py-2 px-3"><span className={cn('font-bold', efficiencyColor(eff))}>{eff}%</span></td>
