@@ -4,8 +4,6 @@ import { useAuthStore } from '@/stores/authStore'
 import { efficiencyColor, cn } from '@/lib/utils'
 import type { HourlyReport } from '@/types/database'
 
-const TARGET = 2100
-
 export default function OperatorHistory() {
   const { profile } = useAuthStore()
   const [reports, setReports] = useState<HourlyReport[]>([])

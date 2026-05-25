@@ -16,6 +16,14 @@ interface OrderStat {
   first_started: string | null
   last_completed: string | null
 }
+interface OrderWithAssortment {
+  id: string
+  assortment_id: string
+  produced_qty: number
+  started_at: string
+  completed_at: string | null
+  assortment?: { name: string } | { name: string }[] | null
+}
 
 const MONTHS = ['Styczeń','Luty','Marzec','Kwiecień','Maj','Czerwiec','Lipiec','Sierpień','Wrzesień','Październik','Listopad','Grudzień']
 const REAL_TARGET = 2500 // szt/h — target do liczenia czasu zaplanowanego
@@ -29,7 +37,6 @@ export default function ManagerAssortments() {
   const [assortments, setAssortments] = useState<Assortment[]>([])
   const [plans,       setPlans]       = useState<MonthlyPlan[]>([])
   const [stats,       setStats]       = useState<OrderStat[]>([])
-  const [loading,     setLoading]     = useState(true)
   const [saving,      setSaving]      = useState(false)
   const [msg,         setMsg]         = useState('')
   const [editPlans,   setEditPlans]   = useState<Record<string, { qty: number; notes: string }>>({})
@@ -41,7 +48,6 @@ export default function ManagerAssortments() {
   useEffect(() => { loadAll() }, [year, month])
 
   const loadAll = async () => {
-    setLoading(true)
     const [aRes, pRes] = await Promise.all([
       supabase.from('assortments').select('*').eq('is_active', true).order('sort_order'),
       supabase.from('monthly_plans').select('*').eq('year', year).eq('month', month)
@@ -69,11 +75,12 @@ export default function ManagerAssortments() {
         .is('deleted_at', null)
 
       const statsMap: Record<string, OrderStat> = {}
-      orders.forEach((o: { id: string; assortment_id: string; produced_qty: number; started_at: string; completed_at: string | null; assortment?: { name: string } }) => {
+      ;(orders as OrderWithAssortment[]).forEach((o) => {
         const key = o.assortment_id
+        const assortment = Array.isArray(o.assortment) ? o.assortment[0] : o.assortment
         if (!statsMap[key]) statsMap[key] = {
           assortment_id: o.assortment_id,
-          assortment_name: o.assortment?.name ?? '—',
+          assortment_name: assortment?.name ?? '—',
           total_produced: 0, total_runtime_min: 0,
           total_downtime_min: 0, total_alarm_min: 0,
           orders_count: 0, first_started: null, last_completed: null
@@ -98,7 +105,6 @@ export default function ManagerAssortments() {
     } else {
       setStats([])
     }
-    setLoading(false)
   }
 
   const getPlanQty = (assortmentId: string) => {

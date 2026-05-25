@@ -226,7 +226,6 @@ export function TutorialProvider({ children }: { children: React.ReactNode }) {
   }, [profile?.id]) // eslint-disable-line
 
   // Globalny numer kroku dla paska postępu
-  const totalSteps = STEPS_NO_SHIFT.length + STEPS_WITH_SHIFT.length
   const globalStep = phase === 'no-shift' ? currentStep : STEPS_NO_SHIFT.length + currentStep
 
   return (

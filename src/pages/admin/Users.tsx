@@ -20,7 +20,6 @@ export default function AdminUsers() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const [editUser, setEditUser] = useState<UserRow | null>(null)
   const [resetUser, setResetUser] = useState<UserRow | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)

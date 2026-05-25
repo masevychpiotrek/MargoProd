@@ -28,6 +28,9 @@ interface OrderReport {
   report_date: string
   operator?: { full_name: string }
 }
+interface RawOrderReport extends Omit<OrderReport, 'operator'> {
+  operator?: { full_name: string } | { full_name: string }[] | null
+}
 
 const STATUS_LABELS: Record<string, { label: string; cls: string }> = {
   active:    { label: '● Aktywne',     cls: 'status-ok' },
@@ -84,7 +87,12 @@ export default function ManagerOrders() {
       .is('deleted_at', null)
       .order('report_date')
       .order('hour_start')
-    if (data) setReports(data as OrderReport[])
+    if (data) {
+      setReports((data as RawOrderReport[]).map(r => ({
+        ...r,
+        operator: Array.isArray(r.operator) ? r.operator[0] : r.operator ?? undefined
+      })))
+    }
     setLoadingRep(false)
   }
 

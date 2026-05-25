@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { playAlertSound } from '@/hooks/useAlertEngine'
 import { formatHourBlock } from '@/lib/utils'
 
@@ -22,10 +21,6 @@ export function AlertPopup({ hour, onDismiss, onGoToReport }: AlertPopupProps) {
 
   const mins = Math.floor(elapsed / 60)
   const secs = elapsed % 60
-  const elapsedStr = mins > 0
-    ? `${mins} min ${secs} sek`
-    : `${secs} sekund`
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4"
       style={{ background: 'rgba(7,8,13,0.95)', backdropFilter: 'blur(8px)' }}>

@@ -231,12 +231,6 @@ export default function OperatorReport() {
     await supabase.from('production_orders').update({ status: 'active', paused_at: null }).eq('id', id)
     setActiveOrderId(id); loadOrders()
   }
-  const handleCompleteOrder = async (id: string) => {
-    if (!confirm('Oznaczyć zlecenie jako zakończone?')) return
-    await supabase.from('production_orders').update({ status: 'completed', completed_at: new Date().toISOString() }).eq('id', id)
-    if (activeOrderId === id) setActiveOrderId(''); loadOrders()
-  }
-
   // Prev report
   const getHourIndex = (h: number) => shiftHours.indexOf(h)
   const selectedHourIndex = getHourIndex(selectedHour)

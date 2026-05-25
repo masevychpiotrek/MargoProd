@@ -204,7 +204,6 @@ export default function ManagerDashboard() {
         {machines.map(ms => {
           const g    = ms.todayReports.reduce((s,r) => s + r.good_count, 0)
           const rej  = ms.todayReports.reduce((s,r) => s + r.reject_count, 0)
-          const rt   = ms.todayReports.reduce((s,r) => s + r.runtime_min, 0)
           const al   = ms.todayReports.reduce((s,r) => s + (r.alarm_min ?? 0), 0)
           const eff  = ms.todayReports.length > 0 ? Math.round(ms.todayReports.reduce((s,r) => s + Number(r.efficiency_pct), 0) / ms.todayReports.length) : 0
           const rPct = (g + rej) > 0 ? Math.round(rej / (g + rej) * 100) : 0

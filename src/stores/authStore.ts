@@ -50,7 +50,7 @@ export const useAuthStore = create<AuthState>()(
         // Set up listener only once
         if (!authListenerSet) {
           authListenerSet = true
-          supabase.auth.onAuthStateChange(async (event, session) => {
+          supabase.auth.onAuthStateChange(async (event) => {
             if (event === 'SIGNED_OUT') {
               set({ user: null, session: null, profile: null, isInitialized: true })
             }

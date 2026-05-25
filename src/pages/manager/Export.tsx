@@ -1,6 +1,6 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { efficiencyColor, efficiencyBg, cn } from '@/lib/utils'
+import { efficiencyColor, cn } from '@/lib/utils'
 import type { HourlyReport, Machine } from '@/types/database'
 
 const TARGET = 2100
@@ -10,6 +10,15 @@ interface ReportData {
   machines: Machine[]
   dateFrom: string
   dateTo: string
+}
+
+interface XLSXApi {
+  utils: {
+    json_to_sheet: (rows: Record<string, unknown>[]) => unknown
+    book_new: () => unknown
+    book_append_sheet: (workbook: unknown, worksheet: unknown, name: string) => void
+  }
+  writeFile: (workbook: unknown, fileName: string) => void
 }
 
 export default function ManagerExport() {
@@ -24,11 +33,11 @@ export default function ManagerExport() {
   const [data, setData] = useState<ReportData | null>(null)
   const [machines, setMachines] = useState<Machine[]>([])
 
-  useState(() => {
+  useEffect(() => {
     supabase.from('machines').select('*').eq('is_active', true).then(({ data }) => {
       if (data) setMachines(data as Machine[])
     })
-  })
+  }, [])
 
   const loadData = async () => {
     setLoading(true)
@@ -52,7 +61,7 @@ export default function ManagerExport() {
 
   const exportExcel = () => {
     if (!data) return
-    const XLSX = (window as unknown as { XLSX: typeof import('xlsx') }).XLSX
+    const XLSX = (window as unknown as { XLSX?: XLSXApi }).XLSX
     if (!XLSX) { alert('Ładowanie biblioteki Excel...'); loadXLSX().then(exportExcel); return }
 
     const rows = data.reports.map(r => {
