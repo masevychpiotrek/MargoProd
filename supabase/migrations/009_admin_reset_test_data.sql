@@ -31,35 +31,37 @@ BEGIN
   END IF;
 
   IF p_scope IN ('reports', 'all') THEN
-    DELETE FROM public.downtime_events;
+    DELETE FROM public.downtime_events WHERE TRUE;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('downtime_events', v_count);
 
-    DELETE FROM public.hourly_reports;
+    DELETE FROM public.hourly_reports WHERE TRUE;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('hourly_reports', v_count);
   END IF;
 
   IF p_scope IN ('shifts', 'all') THEN
-    DELETE FROM public.shifts;
+    DELETE FROM public.shifts WHERE TRUE;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('shifts', v_count);
   END IF;
 
   IF p_scope IN ('orders', 'all') THEN
-    DELETE FROM public.production_orders;
+    UPDATE public.hourly_reports SET order_id = NULL WHERE order_id IS NOT NULL;
+
+    DELETE FROM public.production_orders WHERE TRUE;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('production_orders', v_count);
   END IF;
 
   IF p_scope IN ('plans', 'all') AND to_regclass('public.monthly_plans') IS NOT NULL THEN
-    EXECUTE 'DELETE FROM public.monthly_plans';
+    EXECUTE 'DELETE FROM public.monthly_plans WHERE TRUE';
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('monthly_plans', v_count);
   END IF;
 
   IF p_scope IN ('audit', 'all') THEN
-    DELETE FROM public.audit_logs;
+    DELETE FROM public.audit_logs WHERE TRUE;
     GET DIAGNOSTICS v_count = ROW_COUNT;
     v_deleted := v_deleted || jsonb_build_object('audit_logs', v_count);
   END IF;
