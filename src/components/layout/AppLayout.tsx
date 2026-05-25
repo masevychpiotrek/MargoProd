@@ -56,7 +56,7 @@ const NAV_ADMIN = [
   { to: '/admin/targets',      label: 'Targety',          icon: Icons.targets },
   { to: '/admin/schedules',    label: 'Harmonogram',      icon: Icons.schedule },
   { to: '/admin/orders',       label: 'Zlecenia (admin)', icon: Icons.orders },
-  { to: '/admin/audit',        label: 'Audit log',        icon: Icons.audit },
+  { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
   { to: '/manager',            label: '── Live produkcja',   icon: Icons.live },
   { to: '/manager/plan',       label: '── Plan produkcyjny', icon: Icons.plan },
