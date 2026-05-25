@@ -179,7 +179,7 @@ export default function OperatorReport() {
       }, loadActiveShift)
       .subscribe()
 
-    const fallback = window.setInterval(reloadShiftData, 15000)
+    const fallback = window.setInterval(reloadShiftData, 45000)
 
     return () => {
       window.clearInterval(fallback)

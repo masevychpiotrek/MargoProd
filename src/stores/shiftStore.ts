@@ -4,6 +4,19 @@ import type { Shift, ShiftType, Machine } from '@/types/database'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useAuthStore } from './authStore'
 
+function sameShiftState(
+  currentShift: Shift | null,
+  nextShift: Shift | null,
+  currentMachine: Machine | null,
+  nextMachine: Machine | null
+) {
+  return currentShift?.id === nextShift?.id &&
+    currentShift?.ended_at === nextShift?.ended_at &&
+    currentShift?.operator_1_id === nextShift?.operator_1_id &&
+    currentShift?.operator_2_id === nextShift?.operator_2_id &&
+    currentMachine?.id === nextMachine?.id
+}
+
 interface ShiftState {
   activeShift: Shift | null
   activeMachine: Machine | null
@@ -108,11 +121,15 @@ export const useShiftStore = create<ShiftState>()(
       loadActiveShift: async () => {
         const profile = useAuthStore.getState().profile
         if (!profile || profile.role !== 'operator') {
-          set({ activeShift: null, activeMachine: null, isLoading: false })
+          const state = get()
+          if (state.activeShift || state.activeMachine || state.isLoading) {
+            set({ activeShift: null, activeMachine: null, isLoading: false })
+          }
           return
         }
 
-        set({ isLoading: true })
+        const initialState = get()
+        if (initialState.isLoading && !initialState.activeShift) set({ isLoading: true })
         const today = new Date().toISOString().split('T')[0]
 
         try {
@@ -126,7 +143,11 @@ export const useShiftStore = create<ShiftState>()(
             .maybeSingle()
 
           if (asOp1) {
-            set({ activeShift: asOp1, activeMachine: asOp1.machine as Machine })
+            const machine = asOp1.machine as Machine
+            const state = get()
+            if (!sameShiftState(state.activeShift, asOp1, state.activeMachine, machine) || state.isLoading) {
+              set({ activeShift: asOp1, activeMachine: machine, isLoading: false })
+            }
             return
           }
 
@@ -140,14 +161,21 @@ export const useShiftStore = create<ShiftState>()(
             .maybeSingle()
 
           if (asOp2) {
-            set({ activeShift: asOp2, activeMachine: asOp2.machine as Machine })
+            const machine = asOp2.machine as Machine
+            const state = get()
+            if (!sameShiftState(state.activeShift, asOp2, state.activeMachine, machine) || state.isLoading) {
+              set({ activeShift: asOp2, activeMachine: machine, isLoading: false })
+            }
             return
           }
 
           // Brak aktywnej zmiany w bazie: wyczyść stan zapamiętany w przeglądarce.
-          set({ activeShift: null, activeMachine: null })
+          const state = get()
+          if (state.activeShift || state.activeMachine || state.isLoading) {
+            set({ activeShift: null, activeMachine: null, isLoading: false })
+          }
         } finally {
-          set({ isLoading: false })
+          if (get().isLoading) set({ isLoading: false })
         }
       }
     }),

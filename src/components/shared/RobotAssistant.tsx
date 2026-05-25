@@ -117,7 +117,7 @@ export default function RobotAssistant() {
   const { activeShift, activeMachine } = useShiftStore()
   const { profile } = useAuthStore()
   const operatorHasShift = profile?.role === 'operator' && !!activeShift
-  const [isCompact, setIsCompact] = useState(() => window.innerWidth < 768)
+  const [isCompact, setIsCompact] = useState(() => window.innerWidth < 768 || window.matchMedia('(pointer: coarse)').matches)
   const [open, setOpen] = useState(false)
   const [input, setInput] = useState('')
   const [pos, setPos] = useState(() => ({
@@ -231,11 +231,11 @@ export default function RobotAssistant() {
         posRef.current = next
         return next
       })
-    }, 70)
+    }, isCompact ? 500 : 70)
 
     const targetId = window.setInterval(pickTarget, 4200)
     const resize = () => {
-      const compact = window.innerWidth < 768
+      const compact = window.innerWidth < 768 || window.matchMedia('(pointer: coarse)').matches
       setIsCompact(compact)
       const next = compact
         ? compactPosition()

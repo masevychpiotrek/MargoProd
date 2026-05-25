@@ -58,7 +58,7 @@ export default function OperatorDashboard() {
     const fallback = window.setInterval(() => {
       loadReports()
       loadActiveShift()
-    }, 15000)
+    }, 45000)
 
     return () => {
       window.clearInterval(fallback)

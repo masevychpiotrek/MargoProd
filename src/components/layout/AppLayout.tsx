@@ -103,7 +103,7 @@ export default function AppLayout() {
       })
       .subscribe()
 
-    const fallback = window.setInterval(loadActiveShift, 15000)
+    const fallback = window.setInterval(loadActiveShift, 60000)
 
     return () => {
       window.clearInterval(fallback)
