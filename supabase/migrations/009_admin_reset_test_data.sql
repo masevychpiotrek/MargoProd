@@ -73,3 +73,6 @@ $$;
 
 REVOKE ALL ON FUNCTION public.admin_reset_test_data(TEXT) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.admin_reset_test_data(TEXT) TO authenticated;
+
+-- Refresh PostgREST/Supabase schema cache so the app can call the RPC immediately.
+NOTIFY pgrst, 'reload schema';

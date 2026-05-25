@@ -94,7 +94,13 @@ export default function AdminReset() {
     setLoading(true); setError('')
     try {
       const { data, error: err } = await supabase.rpc('admin_reset_test_data', { p_scope: selectedOption.id })
-      if (err) { setError(`Blad resetu: ${err.message}`); return }
+      if (err) {
+        const missingFunction = err.message.includes('admin_reset_test_data') || err.message.includes('schema cache')
+        setError(missingFunction
+          ? 'Reset nie jest jeszcze aktywny w bazie. Wgraj migracje 009_admin_reset_test_data.sql w Supabase SQL Editor i odswiez strone.'
+          : `Blad resetu: ${err.message}`)
+        return
+      }
 
       const deleted = (data as { deleted?: Record<string, number> } | null)?.deleted ?? {}
       const count = Object.values(deleted).reduce((sum, value) => sum + Number(value), 0)
