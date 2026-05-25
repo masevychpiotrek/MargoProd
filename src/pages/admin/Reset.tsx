@@ -88,6 +88,24 @@ export default function AdminReset() {
     } finally { setLoading(false) }
   }
 
+  const handleResetRpc = async () => {
+    if (!selectedOption) return
+    if (confirm !== 'RESET') { setError('Wpisz RESET zeby potwierdzic'); return }
+    setLoading(true); setError('')
+    try {
+      const { data, error: err } = await supabase.rpc('admin_reset_test_data', { p_scope: selectedOption.id })
+      if (err) { setError(`Blad resetu: ${err.message}`); return }
+
+      const deleted = (data as { deleted?: Record<string, number> } | null)?.deleted ?? {}
+      const count = Object.values(deleted).reduce((sum, value) => sum + Number(value), 0)
+      setMsg(`OK: ${selectedOption.label} - usunieto ${count} rekordow`)
+      setSelected(null); setConfirm('')
+      setTimeout(() => setMsg(''), 5000)
+    } finally { setLoading(false) }
+  }
+
+  void handleReset
+
   return (
     <div className="space-y-6 max-w-2xl">
       <div>
@@ -155,7 +173,7 @@ export default function AdminReset() {
           />
           {error && <div className="text-red-400 text-sm mb-3">{error}</div>}
           <div className="flex gap-3">
-            <button onClick={handleReset} disabled={loading || confirm !== 'RESET'}
+            <button onClick={handleResetRpc} disabled={loading || confirm !== 'RESET'}
               className="btn-danger flex-1 py-3 font-bold disabled:opacity-40">
               {loading ? 'Usuwanie...' : '🗑 Usuń dane'}
             </button>
