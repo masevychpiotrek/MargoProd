@@ -25,6 +25,7 @@ interface ShiftState {
 
   startShift: (machineId: string, shiftType: ShiftType, operator2Id?: string) => Promise<{ error: string | null }>
   endShift: () => Promise<{ error: string | null }>
+  reopenShift: (shiftId: string) => Promise<{ error: string | null }>
   loadActiveShift: () => Promise<void>
 }
 
@@ -132,6 +133,26 @@ export const useShiftStore = create<ShiftState>()(
 
         logAudit('shift_end', 'shifts', activeShift.id, undefined, { ended_at: endedAt }).catch(() => undefined)
         set({ activeShift: null, activeMachine: null, isLoading: false })
+        return { error: null }
+      },
+
+      reopenShift: async (shiftId) => {
+        set({ isLoading: true })
+        const { data: shift, error } = await supabase
+          .from('shifts')
+          .update({ ended_at: null })
+          .eq('id', shiftId)
+          .select('*, machine:machines(*)')
+          .single()
+
+        if (error || !shift) {
+          set({ isLoading: false })
+          return { error: error?.message ?? 'Nie udalo sie przywrocic zmiany.' }
+        }
+
+        const machine = shift.machine as Machine
+        logAudit('shift_start', 'shifts', shift.id, undefined, { reopened: true }).catch(() => undefined)
+        set({ activeShift: shift, activeMachine: machine, isLoading: false })
         return { error: null }
       },
 

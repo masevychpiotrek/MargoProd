@@ -13,6 +13,7 @@ interface ProductionOrder {
   assortment?: { name: string }
 }
 interface Assortment { id: string; name: string; code: string }
+interface ExistingShift { id: string; ended_at: string | null }
 
 function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
@@ -35,7 +36,7 @@ function hourlyRate(pieces: number, runtimeMin: number) {
 export default function OperatorShift() {
   const navigate = useNavigate()
   const { profile } = useAuthStore()
-  const { activeShift, activeMachine, startShift, endShift, isLoading } = useShiftStore()
+  const { activeShift, activeMachine, startShift, endShift, reopenShift, isLoading } = useShiftStore()
   const [machines, setMachines]     = useState<Machine[]>([])
   const [operators, setOperators]   = useState<Profile[]>([])
   const [assortments, setAssortments] = useState<Assortment[]>([])
@@ -43,6 +44,7 @@ export default function OperatorShift() {
   const [selectedShift,   setSelectedShift]   = useState<ShiftType>('I')
   const [selectedOp2,     setSelectedOp2]     = useState('')
   const [error, setError] = useState('')
+  const [restorableShift, setRestorableShift] = useState<ExistingShift | null>(null)
 
   // Zlecenia
   const [orders,         setOrders]         = useState<ProductionOrder[]>([])
@@ -55,6 +57,7 @@ export default function OperatorShift() {
 
   // Ostrzeżenie przy kończeniu zmiany
   const [showEndWarning, setShowEndWarning] = useState(false)
+  const [endConfirmText, setEndConfirmText] = useState('')
   const [missingHours,   setMissingHours]   = useState<number[]>([])
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
 
@@ -72,6 +75,10 @@ export default function OperatorShift() {
   useEffect(() => {
     if (selectedMachine) loadOrders(selectedMachine)
   }, [selectedMachine])
+
+  useEffect(() => {
+    setRestorableShift(null)
+  }, [selectedMachine, selectedShift])
 
   useEffect(() => {
     if (!activeShift) return
@@ -136,6 +143,7 @@ export default function OperatorShift() {
     setError('')
     const { data: existingShift } = await findExistingShift()
     if (existingShift) {
+      if (existingShift.ended_at) setRestorableShift(existingShift as ExistingShift)
       setError(existingShift.ended_at
         ? 'Ta zmiana była już uruchomiona na tej maszynie. Nie można rozpocząć jej drugi raz.'
         : 'Ta zmiana jest już aktywna na tej maszynie. Najpierw zakończ obecną zmianę albo wybierz inną maszynę.')
@@ -180,12 +188,24 @@ export default function OperatorShift() {
     setError('')
     const { data: existingShift } = await findExistingShift()
     if (existingShift) {
+      if (existingShift.ended_at) setRestorableShift(existingShift as ExistingShift)
       setError(existingShift.ended_at
         ? 'Ta zmiana była już uruchomiona na tej maszynie. Nie można rozpocząć jej drugi raz.'
         : 'Ta zmiana jest już aktywna na tej maszynie. Najpierw zakończ obecną zmianę albo wybierz inną maszynę.')
       return
     }
     doStart()
+  }
+
+  const handleReopenShift = async () => {
+    if (!restorableShift) return
+    setError('')
+    const { error: reopenError } = await reopenShift(restorableShift.id)
+    if (reopenError) {
+      setError('Nie udalo sie przywrocic zmiany: ' + reopenError)
+      return
+    }
+    setRestorableShift(null)
   }
 
   // Sprawdź brakujące godziny przed zakończeniem zmiany
@@ -198,16 +218,18 @@ export default function OperatorShift() {
     const missing = shiftHours.filter(h =>
       canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h) && !reportedHours.includes(h)
     )
-    if (missing.length > 0) {
-      setMissingHours(missing)
-      setShowEndWarning(true)
-    } else {
-      handleEndConfirm()
-    }
+    setMissingHours(missing)
+    setEndConfirmText('')
+    setShowEndWarning(true)
   }
 
   const handleEndConfirm = async () => {
+    if (endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ') {
+      setError('Aby zakończyć zmianę, wpisz ZAMKNIJ w oknie potwierdzenia.')
+      return
+    }
     setShowEndWarning(false)
+    setEndConfirmText('')
     const { error: endError } = await endShift()
     if (endError) setError('Nie udało się zakończyć zmiany: ' + endError)
   }
@@ -254,23 +276,46 @@ export default function OperatorShift() {
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
             <div className="bg-navy-800 border-2 border-amber-500/50 rounded-2xl p-6 w-full max-w-md">
-              <div className="text-3xl mb-3">⚠️</div>
-              <h2 className="text-xl font-bold text-amber-400 mb-2">Za wcześnie na zakończenie zmiany!</h2>
-              <p className="text-navy-300 text-sm mb-4">Brakuje raportów za następujące godziny:</p>
-              <div className="bg-navy-900 rounded-xl p-3 mb-4">
-                {missingHours.map(h => (
-                  <div key={h} className="text-amber-400 font-mono text-sm">
-                    • {String(h).padStart(2,'0')}:00 – {String((h+1)%24).padStart(2,'0')}:00
+              <h2 className="text-xl font-bold text-amber-400 mb-2">Potwierdz zakonczenie zmiany</h2>
+              <p className="text-navy-300 text-sm mb-4">
+                Zamkniesz aktywna zmiane na maszynie {activeMachine.name}. Po zamknieciu operator nie bedzie juz wpisywal wynikow w tej zmianie.
+              </p>
+              {missingHours.length > 0 ? (
+                <>
+                  <p className="text-navy-300 text-sm mb-4">Brakuje raportow za nastepujace godziny:</p>
+                  <div className="bg-navy-900 rounded-xl p-3 mb-4">
+                    {missingHours.map(h => (
+                      <div key={h} className="text-amber-400 font-mono text-sm">
+                        - {String(h).padStart(2,'0')}:00 - {String((h+1)%24).padStart(2,'0')}:00
+                      </div>
+                    ))}
                   </div>
-                ))}
-              </div>
-              <p className="text-navy-400 text-xs mb-5">Czy na pewno chcesz zakończyć zmianę bez wpisania tych wyników?</p>
+                </>
+              ) : (
+                <div className="bg-green-500/10 border border-green-500/25 rounded-xl p-3 mb-4 text-sm font-semibold text-green-300">
+                  Otwarte raporty wygladaja na uzupelnione.
+                </div>
+              )}
+              <label className="block mb-5">
+                <span className="label">Wpisz ZAMKNIJ, aby potwierdzic</span>
+                <input
+                  value={endConfirmText}
+                  onChange={e => setEndConfirmText(e.target.value)}
+                  className="input mt-1 font-mono uppercase"
+                  placeholder="ZAMKNIJ"
+                  autoFocus
+                />
+              </label>
               <div className="flex flex-col gap-3 sm:flex-row">
-                <button onClick={() => setShowEndWarning(false)} className="btn-primary flex-1 py-3">
-                  Wróć i wpisz wyniki
+                <button onClick={() => { setShowEndWarning(false); setEndConfirmText('') }} className="btn-primary flex-1 py-3">
+                  Wroc do zmiany
                 </button>
-                <button onClick={handleEndConfirm} className="btn-danger px-5 py-3 text-sm">
-                  Zakończ mimo to
+                <button
+                  onClick={handleEndConfirm}
+                  disabled={endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ' || isLoading}
+                  className="btn-danger px-5 py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  {isLoading ? 'Zamykanie...' : 'Zakoncz zmiane'}
                 </button>
               </div>
             </div>
@@ -520,7 +565,21 @@ export default function OperatorShift() {
           </select>
         </div>
 
-        {error && <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">{error}</div>}
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
+            <div>{error}</div>
+            {restorableShift && (
+              <button
+                type="button"
+                onClick={handleReopenShift}
+                disabled={isLoading}
+                className="mt-3 rounded-lg border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-xs font-bold text-amber-300 transition-all hover:bg-amber-500/20 disabled:opacity-50"
+              >
+                Przywroc te zmiane
+              </button>
+            )}
+          </div>
+        )}
 
         <button onClick={handleStart} disabled={isLoading || !selectedMachine} className="btn-primary w-full py-4 text-base">
           {isLoading ? 'Uruchamianie...' : '🚀 Rozpocznij zmianę'}
