@@ -190,11 +190,6 @@ export default function OperatorReport() {
   const [newOrderNotes,  setNewOrderNotes]  = useState('')
   const [savingOrder,    setSavingOrder]    = useState(false)
   const [showFinishOrder, setShowFinishOrder] = useState(false)
-  const [finishCounterGood,    setFinishCounterGood]    = useState('')
-  const [finishCounterReject,  setFinishCounterReject]  = useState('')
-  const [finishCounterRuntime, setFinishCounterRuntime] = useState('')
-  const [finishCounterReady,   setFinishCounterReady]   = useState('')
-  const [finishCounterAlarm,   setFinishCounterAlarm]   = useState('')
   const [finishNotes,          setFinishNotes]          = useState('')
   const [savingFinish,         setSavingFinish]         = useState(false)
 
@@ -354,62 +349,25 @@ export default function OperatorReport() {
     ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
     : null
   const selectedReportCanBeEntered = !selectedReportOpenAt || new Date().getTime() >= selectedReportOpenAt.getTime()
-  const lastReportForFinish = orderedReports[orderedReports.length - 1] as ReportExt | undefined
-  const lastGood = lastReportForFinish?.counter_good ?? 0
-  const lastReject = lastReportForFinish?.counter_reject ?? 0
-  const lastRuntime = lastReportForFinish?.counter_runtime ?? 0
-  const lastReady = lastReportForFinish?.counter_ready ?? 0
-  const lastAlarm = lastReportForFinish?.counter_alarm ?? 0
 
   const handleFinishOrder = async () => {
     if (!activeShift || !profile || !activeOrderId) return
-    const curG = parseInt(finishCounterGood)  || 0
-    const curR = parseInt(finishCounterReject) || 0
-    const curRt = parseHHMM(finishCounterRuntime)
-    const curRd = parseHHMM(finishCounterReady)
-    const curAl = parseHHMM(finishCounterAlarm)
-    const incG  = Math.max(0, curG  - lastGood)
-    const incRj = Math.max(0, curR  - lastReject)
-    const incRt = Math.max(0, curRt - lastRuntime)
-    const incRd = Math.max(0, curRd - lastReady)
-    const incAl = Math.max(0, curAl - lastAlarm)
-    const finishTarget = effectiveTarget(activeTarget, incRt + incRd + incAl)
-    const finishErrors: string[] = []
-    if (!finishCounterGood) finishErrors.push('Wpisz stan licznika dobrych sztuk')
-    if (!finishCounterRuntime) finishErrors.push('Wpisz stan licznika czasu pracy (HH:MM)')
-    if (!finishCounterReady) finishErrors.push('Wpisz stan licznika czasu gotowosci (HH:MM)')
-    if (!finishCounterAlarm) finishErrors.push('Wpisz stan licznika czasu alarmu (HH:MM)')
-    if (finishCounterRuntime && !isValidHHMM(finishCounterRuntime)) finishErrors.push('Czas pracy wpisz w formacie HH:MM, z minutami 00-59')
-    if (finishCounterReady && !isValidHHMM(finishCounterReady)) finishErrors.push('Czas gotowosci wpisz w formacie HH:MM, z minutami 00-59')
-    if (finishCounterAlarm && !isValidHHMM(finishCounterAlarm)) finishErrors.push('Czas alarmu wpisz w formacie HH:MM, z minutami 00-59')
-    if (finishCounterGood !== '' && lastGood > 0 && curG < lastGood) finishErrors.push('Licznik dobrych nie moze malec')
-    if (finishCounterReject !== '' && lastReject > 0 && curR < lastReject) finishErrors.push('Licznik odrzutu nie moze malec')
-    if (finishCounterRuntime !== '' && lastRuntime > 0 && curRt < lastRuntime) finishErrors.push('Licznik czasu pracy nie moze malec')
-    if (finishCounterReady !== '' && lastReady > 0 && curRd < lastReady) finishErrors.push('Licznik czasu gotowosci nie moze malec')
-    if (finishCounterAlarm !== '' && lastAlarm > 0 && curAl < lastAlarm) finishErrors.push('Licznik czasu alarmu nie moze malec')
-    if (finishErrors.length) { setErrors(finishErrors); reportValidationError(finishErrors[0]); return }
     setSavingFinish(true)
     const now = new Date()
-    const finishHour = now.getHours()
-    const { error } = await supabase.from('hourly_reports').insert({
-      shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
-      hour_block: `${String(finishHour).padStart(2,'0')}:00–${String(finishHour).padStart(2,'00')}:${String(now.getMinutes()).padStart(2,'0')}`,
-      report_date: activeShift.shift_date, hour_start: finishHour,
-      good_count: incG, reject_count: incRj, total_count: curG,
-      counter_good: curG, counter_reject: curR,
-      runtime_min: incRt, ready_min: incRd, alarm_min: incAl,
-      downtime_min: legacyDowntimeForSave(incRt), micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
-      counter_runtime: curRt, counter_ready: curRd, counter_alarm: curAl,
-      target: finishTarget,
-      notes: finishNotes || 'Zakończenie zlecenia', status: 'submitted',
-      order_id: activeOrderId, order_qty: incG
-    })
+    const completionNote = finishNotes.trim()
+      ? `Zakonczone: ${finishNotes.trim()}`
+      : 'Zakonczone przez operatora'
+    const { error } = await supabase
+      .from('production_orders')
+      .update({
+        status: 'completed',
+        completed_at: now.toISOString(),
+        notes: activeOrder?.notes ? `${activeOrder.notes}\n${completionNote}` : completionNote
+      })
+      .eq('id', activeOrderId)
     if (!error) {
-      await supabase.from('production_orders').update({ status: 'completed', completed_at: now.toISOString() }).eq('id', activeOrderId)
       setActiveOrderId('')
       setShowFinishOrder(false)
-      setFinishCounterGood(''); setFinishCounterReject('')
-      setFinishCounterRuntime(''); setFinishCounterReady(''); setFinishCounterAlarm('')
       setFinishNotes('')
       loadReports(); loadOrders()
     } else {
@@ -855,45 +813,21 @@ export default function OperatorReport() {
           {showFinishOrder && activeOrder && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
               <div className="bg-navy-800 border border-amber-500/30 rounded-2xl p-6 w-full max-w-lg">
-                <h2 className="text-xl font-bold text-white mb-1">🏁 Zakończ zlecenie</h2>
-                <p className="text-navy-400 text-sm mb-5">Zlecenie: <span className="font-mono font-bold text-white">{activeOrder.order_number}</span> · Wpisz aktualny stan liczników</p>
-                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-400 mb-4">
-                  ⚠ Suma czasów NIE musi wynosić 60 minut — wpisz rzeczywisty czas od ostatniego raportu do teraz
+                <h2 className="text-xl font-bold text-white mb-1">Zakończ zlecenie</h2>
+                <p className="text-navy-400 text-sm mb-5">Zlecenie: <span className="font-mono font-bold text-white">{activeOrder.order_number}</span></p>
+                <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-3 text-xs text-amber-300 mb-4">
+                  Zakończenie zlecenia nie zapisuje wyniku godzinowego. Produkcję wpisuj wyłącznie przez przycisk „Zapisz raport godzinowy”.
                 </div>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 gap-3">
-                    <div>
-                      <label className="label">Licznik dobrych (szt)</label>
-                      <input type="number" value={finishCounterGood} onChange={e => setFinishCounterGood(e.target.value)} placeholder="Stan licznika" className="input text-lg font-bold font-mono" />
-                    </div>
-                    <div>
-                      <label className="label">Licznik odrzutu (szt)</label>
-                      <input type="number" value={finishCounterReject} onChange={e => setFinishCounterReject(e.target.value)} placeholder="Stan licznika" className="input text-lg font-bold font-mono" />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-3 gap-3">
-                    <div>
-                      <label className="label text-green-400">Czas pracy</label>
-                      <TimeInput label="" value={finishCounterRuntime} onChange={setFinishCounterRuntime} prevValue={lastRuntime} color="text-green-400" compact />
-                    </div>
-                    <div>
-                      <label className="label text-amber-400">Czas gotowości</label>
-                      <TimeInput label="" value={finishCounterReady} onChange={setFinishCounterReady} prevValue={lastReady} color="text-amber-400" compact />
-                    </div>
-                    <div>
-                      <label className="label text-red-400">Czas alarmu</label>
-                      <TimeInput label="" value={finishCounterAlarm} onChange={setFinishCounterAlarm} prevValue={lastAlarm} color="text-red-400" compact />
-                    </div>
-                  </div>
                   <div>
-                    <label className="label">Uwagi</label>
-                    <input value={finishNotes} onChange={e => setFinishNotes(e.target.value)} placeholder="Opcjonalnie..." className="input" />
+                    <label className="label">Uwagi do zakończenia</label>
+                    <textarea value={finishNotes} onChange={e => setFinishNotes(e.target.value)} placeholder="Opcjonalnie..." rows={3} className="input text-sm font-normal resize-none" />
                   </div>
                 </div>
                 <div className="flex gap-3 mt-6">
-                  <button onClick={handleFinishOrder} disabled={savingFinish || !finishCounterGood}
+                  <button onClick={handleFinishOrder} disabled={savingFinish}
                     className="flex-1 bg-amber-500 hover:bg-amber-400 text-navy-900 font-bold py-3 rounded-xl transition-all disabled:opacity-50">
-                    {savingFinish ? 'Zapisywanie...' : '🏁 Zakończ i zapisz'}
+                    {savingFinish ? 'Zapisywanie...' : 'Zakończ zlecenie'}
                   </button>
                   <button onClick={() => setShowFinishOrder(false)} className="btn-secondary px-5 py-3">Anuluj</button>
                 </div>

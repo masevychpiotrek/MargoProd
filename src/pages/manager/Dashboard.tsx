@@ -150,6 +150,7 @@ export default function ManagerDashboard() {
   const [reports, setReports] = useState<ReportWithContext[]>([])
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const [editError, setEditError] = useState('')
   const [mode, setMode] = useState<Mode>('day')
   const [selectedDate, setSelectedDate] = useState(dateISO)
@@ -410,6 +411,52 @@ export default function ManagerDashboard() {
       setEditError(error.message || 'Nie udalo sie zapisac korekty.')
     }
     setSaving(false)
+  }
+
+  const deleteReport = async () => {
+    if (!editing || !editState) return
+    const reason = editState.reason.trim()
+    if (!reason) {
+      setEditError('Wpisz powod usuniecia, zeby zostal slad w audycie.')
+      return
+    }
+
+    setDeleting(true)
+    setEditError('')
+
+    const { error } = await supabase
+      .from('hourly_reports')
+      .update({
+        deleted_at: new Date().toISOString(),
+        notes: editing.notes
+          ? `${editing.notes}\nUsuniete przez kierownika: ${reason}`
+          : `Usuniete przez kierownika: ${reason}`
+      })
+      .eq('id', editing.id)
+
+    if (!error) {
+      await logAudit('manager_report_delete', 'hourly_reports', editing.id, {
+        good_count: editing.good_count,
+        reject_count: editing.reject_count,
+        runtime_min: editing.runtime_min,
+        ready_min: editing.ready_min,
+        alarm_min: editing.alarm_min,
+        downtime_min: editing.downtime_min,
+        failure_min: editing.failure_min,
+        downtime_reason: editing.downtime_reason,
+        notes: editing.notes
+      }, {
+        deleted_at: true,
+        reason
+      })
+      setEditing(null)
+      setEditState(null)
+      await load()
+    } else {
+      setEditError(error.message || 'Nie udalo sie usunac wpisu.')
+    }
+
+    setDeleting(false)
   }
 
   const dayTimeline = [...dayReports].sort((a, b) =>
@@ -794,9 +841,18 @@ export default function ManagerDashboard() {
               </div>
             )}
 
-            <div className="flex justify-end gap-2 mt-5">
-              <button className="btn-secondary" onClick={() => { setEditing(null); setEditError('') }} disabled={saving}>Anuluj</button>
-              <button className="btn-primary" onClick={saveEdit} disabled={saving}>{saving ? 'Zapisywanie...' : 'Zapisz korekte'}</button>
+            <div className="flex flex-wrap justify-between gap-2 mt-5">
+              <button
+                className="rounded-xl border border-red-500/40 bg-red-500/10 px-4 py-2 font-bold text-red-300 transition-all hover:bg-red-500/20 disabled:opacity-50"
+                onClick={deleteReport}
+                disabled={saving || deleting}
+              >
+                {deleting ? 'Usuwanie...' : 'Usun wpis'}
+              </button>
+              <div className="flex gap-2">
+                <button className="btn-secondary" onClick={() => { setEditing(null); setEditError('') }} disabled={saving || deleting}>Anuluj</button>
+                <button className="btn-primary" onClick={saveEdit} disabled={saving || deleting}>{saving ? 'Zapisywanie...' : 'Zapisz korekte'}</button>
+              </div>
             </div>
           </div>
         </div>
