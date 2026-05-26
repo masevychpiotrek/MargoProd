@@ -100,6 +100,14 @@ function toInt(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
+function effectiveTarget(ratePerHour: number, runtimeMin: number) {
+  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
+}
+
+function hourlyRate(pieces: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
+}
+
 export default function ManagerOrders() {
   const [orders, setOrders] = useState<Order[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -188,6 +196,9 @@ export default function ManagerOrders() {
     reject: reports.reduce((s, r) => s + r.reject_count, 0),
     good: reports.reduce((s, r) => s + r.good_count, 0)
   }), [reports])
+  const totalOutput = reportTotals.good + reportTotals.reject
+  const machineRate = hourlyRate(totalOutput, reportTotals.runtime)
+  const goodRate = hourlyRate(reportTotals.good, reportTotals.runtime)
 
   const operators = [...new Set(reports.map(r => r.operator?.full_name).filter(Boolean))]
   const hasProblems = reports.some(r => r.alarm_min > 15 || (r.downtime_min + r.failure_min) > 10)
@@ -276,15 +287,18 @@ export default function ManagerOrders() {
     setSaving(true)
     setError('')
 
+    const runtimeMin = toInt(reportEdit.runtime_min)
+    const ratePerHour = machines.find(machine => machine.id === selected?.machine_id)?.target_per_hour ?? 2100
     const payload = {
       good_count: toInt(reportEdit.good_count),
       reject_count: toInt(reportEdit.reject_count),
       order_qty: toInt(reportEdit.order_qty),
-      runtime_min: toInt(reportEdit.runtime_min),
+      runtime_min: runtimeMin,
       ready_min: toInt(reportEdit.ready_min),
       alarm_min: toInt(reportEdit.alarm_min),
       downtime_min: toInt(reportEdit.downtime_min),
       failure_min: toInt(reportEdit.failure_min),
+      target: effectiveTarget(ratePerHour, runtimeMin),
       downtime_reason: reportEdit.downtime_reason.trim() || null,
       notes: reportEdit.notes.trim() || null
     }
@@ -434,6 +448,8 @@ export default function ManagerOrders() {
               <div className="grid grid-cols-2 gap-3">
                 <Kpi label="Z raportow" value={reportTotals.good.toLocaleString('pl-PL')} sub="szt dobrych" color="text-brand" />
                 <Kpi label="Odrzut" value={reportTotals.reject.toLocaleString('pl-PL')} sub="szt lacznie" color={reportTotals.reject ? 'text-red-400' : 'text-green-400'} />
+                <Kpi label="Wyd. maszyny" value={`${machineRate.toLocaleString('pl-PL')} szt/h`} sub="dobre + odrzut" color="text-cyan-400" />
+                <Kpi label="Wyd. dobrych" value={`${goodRate.toLocaleString('pl-PL')} szt/h`} sub="tylko zgodne" color="text-green-400" />
                 <Kpi label="Czas pracy" value={minsToHHMM(reportTotals.runtime)} sub="aktywna praca" color="text-green-400" />
                 <Kpi label="Alarmy + postoje" value={minsToHHMM(reportTotals.alarm + reportTotals.downtime)} sub={hasProblems ? 'wymaga sprawdzenia' : 'bez problemow'} color={(reportTotals.alarm + reportTotals.downtime) > 60 ? 'text-red-400' : 'text-amber-400'} />
               </div>

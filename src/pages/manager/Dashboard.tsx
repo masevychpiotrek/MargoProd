@@ -9,7 +9,6 @@ import { Bar, Line } from 'react-chartjs-2'
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
 
 const TARGET = 2100
-const REAL_TARGET = 2500
 const SHIFTS = ['I', 'II', 'III'] as const
 
 const CHART_OPTS = {
@@ -55,6 +54,8 @@ type GroupRow = {
   good: number
   reject: number
   target: number
+  machineRate: number
+  goodRate: number
   runtime: number
   ready: number
   alarm: number
@@ -109,6 +110,19 @@ function toInt(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
+function effectiveTarget(ratePerHour: number, runtimeMin: number) {
+  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
+}
+
+function reportWepq(report: ReportWithContext, ratePerHour: number) {
+  const target = effectiveTarget(ratePerHour, report.runtime_min)
+  return target > 0 ? Math.round(report.good_count / target * 100) : 0
+}
+
+function hourlyRate(pieces: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
+}
+
 export default function ManagerDashboard() {
   const { time, dateISO } = useClock()
   const [machines, setMachines] = useState<Machine[]>([])
@@ -137,6 +151,10 @@ export default function ManagerDashboard() {
 
   const machineNameById = useMemo(
     () => Object.fromEntries(machines.map(machine => [machine.id, machine.name])),
+    [machines]
+  )
+  const machineTargetById = useMemo(
+    () => Object.fromEntries(machines.map(machine => [machine.id, machine.target_per_hour])),
     [machines]
   )
 
@@ -207,7 +225,7 @@ export default function ManagerDashboard() {
       const shiftType = one(report.shift)?.shift_type ?? '-'
       const machineName = machineNameById[report.machine_id] ?? '-'
       const key = `${report.report_date}|${shiftType}|${report.machine_id}`
-      const target = report.target || TARGET
+      const target = effectiveTarget(machineTargetById[report.machine_id] ?? TARGET, report.runtime_min)
 
       if (!acc[key]) {
         acc[key] = {
@@ -221,6 +239,8 @@ export default function ManagerDashboard() {
           good: 0,
           reject: 0,
           target: 0,
+          machineRate: 0,
+          goodRate: 0,
           runtime: 0,
           ready: 0,
           alarm: 0,
@@ -239,20 +259,22 @@ export default function ManagerDashboard() {
       acc[key].alarm += report.alarm_min ?? 0
       acc[key].downtime += report.downtime_min + report.failure_min
       acc[key].reports += 1
-      acc[key].wEpq += Number(report.efficiency_pct) || 0
+      acc[key].wEpq += reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
       return acc
     }, {}))
 
     return rows.map(row => ({
       ...row,
       wEpq: row.reports ? Math.round(row.wEpq / row.reports) : 0,
-      wEpqTotal: row.target ? Math.round(row.good / row.target * 100) : 0
+      wEpqTotal: row.target ? Math.round(row.good / row.target * 100) : 0,
+      machineRate: hourlyRate(row.good + row.reject, row.runtime),
+      goodRate: hourlyRate(row.good, row.runtime)
     })).sort((a, b) =>
       b.date.localeCompare(a.date) ||
       a.machineName.localeCompare(b.machineName) ||
       a.shiftType.localeCompare(b.shiftType)
     )
-  }, [filteredReports, machineNameById])
+  }, [filteredReports, machineNameById, machineTargetById])
 
   const kpi = useMemo(() => {
     const totalGood = filteredReports.reduce((sum, r) => sum + r.good_count, 0)
@@ -262,18 +284,18 @@ export default function ManagerDashboard() {
     const alarm = filteredReports.reduce((sum, r) => sum + (r.alarm_min ?? 0), 0)
     const downtime = filteredReports.reduce((sum, r) => sum + r.downtime_min + r.failure_min, 0)
     const totalTime = runtime + ready + alarm + downtime
-    const target = filteredReports.reduce((sum, r) => sum + (r.target || TARGET), 0)
+    const target = filteredReports.reduce((sum, r) => sum + effectiveTarget(machineTargetById[r.machine_id] ?? TARGET, r.runtime_min), 0)
     const avgWepq = filteredReports.length
-      ? Math.round(filteredReports.reduce((sum, r) => sum + (Number(r.efficiency_pct) || 0), 0) / filteredReports.length)
+      ? Math.round(filteredReports.reduce((sum, r) => sum + reportWepq(r, machineTargetById[r.machine_id] ?? TARGET), 0) / filteredReports.length)
       : 0
     const wepqTotal = target ? Math.round(totalGood / target * 100) : 0
     const rejectPct = totalGood + totalReject ? Math.round(totalReject / (totalGood + totalReject) * 1000) / 10 : 0
     const availability = totalTime ? Math.round(runtime / totalTime * 100) : 0
-    const planMins = totalGood > 0 ? Math.round(totalGood / REAL_TARGET * 60) : 0
-    const pace = planMins && runtime ? Math.round(planMins / runtime * 100) : 0
+    const machineRate = hourlyRate(totalGood + totalReject, runtime)
+    const goodRate = hourlyRate(totalGood, runtime)
 
-    return { totalGood, totalReject, runtime, ready, alarm, downtime, target, avgWepq, wepqTotal, rejectPct, availability, pace }
-  }, [filteredReports])
+    return { totalGood, totalReject, runtime, ready, alarm, downtime, target, avgWepq, wepqTotal, rejectPct, availability, machineRate, goodRate }
+  }, [filteredReports, machineTargetById])
 
   const dailyTrend = useMemo(() => {
     const map: Record<string, number> = {}
@@ -329,14 +351,16 @@ export default function ManagerDashboard() {
     setSaving(true)
     setEditError('')
 
+    const runtimeMin = toInt(editState.runtime_min)
     const payload = {
       good_count: toInt(editState.good_count),
       reject_count: toInt(editState.reject_count),
-      runtime_min: toInt(editState.runtime_min),
+      runtime_min: runtimeMin,
       ready_min: toInt(editState.ready_min),
       alarm_min: toInt(editState.alarm_min),
       downtime_min: toInt(editState.downtime_min),
       failure_min: toInt(editState.failure_min),
+      target: effectiveTarget(machineTargetById[editing.machine_id] ?? TARGET, runtimeMin),
       downtime_reason: editState.downtime_reason.trim() || null,
       notes: editState.notes.trim() || null
     }
@@ -458,9 +482,9 @@ export default function ManagerDashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `cel ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'srednia z wpisow', color: efficiencyColor(kpi.avgWepq) },
-          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'produkcja / cel', color: efficiencyColor(kpi.wepqTotal) },
+          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z czasu pracy ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'srednia: szt / norma czasu', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'suma szt / suma normy', color: efficiencyColor(kpi.wepqTotal) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
         ].map(item => (
           <div key={item.label} className="kpi-card">
@@ -471,13 +495,14 @@ export default function ManagerDashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {[
           { label: 'Czas pracy', value: minsToHHMM(kpi.runtime), sub: `gotowosc ${minsToHHMM(kpi.ready)}`, color: 'text-green-400' },
+          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'dobre + odrzut', color: 'text-cyan-400' },
+          { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'tylko zgodne', color: 'text-green-400' },
           { label: 'Alarmy', value: minsToHHMM(kpi.alarm), sub: 'czas alarmow', color: kpi.alarm > 60 ? 'text-red-400' : 'text-amber-400' },
           { label: 'Postoje', value: minsToHHMM(kpi.downtime), sub: 'postoj + awaria', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' },
-          { label: 'Dostepnosc', value: kpi.availability ? `${kpi.availability}%` : '-', sub: 'praca / caly czas', color: efficiencyColor(kpi.availability) },
-          { label: 'Tempo', value: kpi.pace ? `${kpi.pace}%` : '-', sub: `wg ${REAL_TARGET} szt/h`, color: efficiencyColor(kpi.pace) }
+          { label: 'Dostepnosc', value: kpi.availability ? `${kpi.availability}%` : '-', sub: 'praca / caly czas', color: efficiencyColor(kpi.availability) }
         ].map(item => (
           <div key={item.label} className="kpi-card">
             <div className="kpi-label">{item.label}</div>
@@ -499,14 +524,14 @@ export default function ManagerDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-navy-700">
-                  {['Rok', 'Mc', 'Dzien', 'Zmiana', 'Maszyna', 'W EPQ', 'WEPQ TOTAL', 'Produkcja', 'Czas', 'Alarm', 'Postoj'].map(header => (
+                  {['Rok', 'Mc', 'Dzien', 'Zmiana', 'Maszyna', 'W EPQ', 'WEPQ TOTAL', 'Wyd. maszyny', 'Produkcja', 'Czas', 'Alarm', 'Postoj'].map(header => (
                     <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {groups.length === 0 && (
-                  <tr><td colSpan={11} className="py-8 text-center text-navy-500">Brak danych dla wybranego zakresu</td></tr>
+                  <tr><td colSpan={12} className="py-8 text-center text-navy-500">Brak danych dla wybranego zakresu</td></tr>
                 )}
                 {groups.map(row => (
                   <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
@@ -517,6 +542,7 @@ export default function ManagerDashboard() {
                     <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
                     <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq}%</td>
                     <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpqTotal))}>{row.wEpqTotal}%</td>
+                    <td className="py-2 px-3 font-bold font-mono text-cyan-300">{row.machineRate.toLocaleString('pl-PL')}</td>
                     <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
                     <td className="py-2 px-3 font-mono text-green-400">{minsToHHMM(row.runtime)}</td>
                     <td className="py-2 px-3 font-mono text-red-400">{minsToHHMM(row.alarm)}</td>
@@ -611,7 +637,8 @@ export default function ManagerDashboard() {
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
           {dayTimeline.length === 0 && <div className="md:col-span-2 xl:col-span-3 text-center py-8 text-navy-500">Brak wpisow w wybranym dniu</div>}
           {dayTimeline.map(report => {
-            const eff = Number(report.efficiency_pct) || 0
+            const eff = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
+            const machineRate = hourlyRate(report.good_count + report.reject_count, report.runtime_min)
             return (
               <div key={report.id} className="bg-navy-900 rounded-xl p-3 border border-navy-700">
                 <div className="flex items-center justify-between gap-3">
@@ -626,6 +653,9 @@ export default function ManagerDashboard() {
                   <div><div className="text-xs text-navy-500">odrz</div><div className="font-mono font-bold text-red-400">{report.reject_count}</div></div>
                   <div><div className="text-xs text-navy-500">praca</div><div className="font-mono font-bold text-green-400">{minsToHHMM(report.runtime_min)}</div></div>
                   <div><div className="text-xs text-navy-500">alarm</div><div className="font-mono font-bold text-amber-400">{minsToHHMM(report.alarm_min ?? 0)}</div></div>
+                </div>
+                <div className="mt-3 rounded-lg bg-navy-800 px-3 py-2 text-xs text-navy-300">
+                  Wydajnosc maszyny: <span className="font-mono font-bold text-cyan-300">{machineRate.toLocaleString('pl-PL')} szt/h</span>
                 </div>
                 <div className="h-1.5 bg-navy-800 rounded-full overflow-hidden mt-3">
                   <div className={cn('h-full rounded-full', efficiencyBg(eff))} style={{ width: `${Math.min(eff, 120)}%` }} />
@@ -647,17 +677,18 @@ export default function ManagerDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Data', 'Godzina', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Praca', 'Alarm', 'Postoj', 'Akcja'].map(header => (
+                {['Data', 'Godzina', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Wyd. maszyny', 'Szt', 'Odrzut', 'Praca', 'Alarm', 'Postoj', 'Akcja'].map(header => (
                   <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {filteredReports.length === 0 && (
-                <tr><td colSpan={12} className="py-8 text-center text-navy-500">Brak raportow do pokazania</td></tr>
+                <tr><td colSpan={13} className="py-8 text-center text-navy-500">Brak raportow do pokazania</td></tr>
               )}
               {filteredReports.map(report => {
-                const eff = Number(report.efficiency_pct) || 0
+                const eff = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
+                const machineRate = hourlyRate(report.good_count + report.reject_count, report.runtime_min)
                 return (
                   <tr key={report.id} className="border-b border-navy-800 hover:bg-navy-800/50">
                     <td className="py-2 px-3 font-mono text-xs text-navy-300">{report.report_date}</td>
@@ -666,6 +697,7 @@ export default function ManagerDashboard() {
                     <td className="py-2 px-3 font-bold text-white">Zmiana {one(report.shift)?.shift_type ?? '-'}</td>
                     <td className="py-2 px-3 text-navy-200 max-w-[150px] truncate">{one(report.operator)?.full_name ?? '-'}</td>
                     <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(eff))}>{eff}%</td>
+                    <td className="py-2 px-3 font-bold font-mono text-cyan-300">{machineRate.toLocaleString('pl-PL')}</td>
                     <td className="py-2 px-3 font-bold font-mono text-white">{report.good_count}</td>
                     <td className="py-2 px-3 font-mono text-red-400">{report.reject_count}</td>
                     <td className="py-2 px-3 font-mono text-green-400">{minsToHHMM(report.runtime_min)}</td>

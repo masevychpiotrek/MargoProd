@@ -18,6 +18,19 @@ function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
 }
 
+function effectiveTarget(ratePerHour: number, runtimeMin: number) {
+  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
+}
+
+function reportWepq(good: number, ratePerHour: number, runtimeMin: number) {
+  const target = effectiveTarget(ratePerHour, runtimeMin)
+  return target > 0 ? Math.round(good / target * 100) : 0
+}
+
+function hourlyRate(pieces: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
+}
+
 // Godziny poszczególnych zmian
 export default function OperatorShift() {
   const navigate = useNavigate()
@@ -213,8 +226,9 @@ export default function OperatorShift() {
   const totalGood = shiftReports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = shiftReports.reduce((s, r) => s + r.reject_count, 0)
   const totalRuntime = shiftReports.reduce((s, r) => s + r.runtime_min, 0)
-  const avgEff = shiftReports.length
-    ? Math.round(shiftReports.reduce((s, r) => s + Number(r.efficiency_pct), 0) / shiftReports.length)
+  const machineRate = hourlyRate(totalGood + totalReject, totalRuntime)
+  const avgEff = shiftReports.length && activeMachine
+    ? Math.round(shiftReports.reduce((s, r) => s + reportWepq(r.good_count, activeMachine.target_per_hour, r.runtime_min), 0) / shiftReports.length)
     : 0
   const completePct = activeShiftHours.length
     ? Math.round(shiftReports.length / activeShiftHours.length * 100)
@@ -268,7 +282,7 @@ export default function OperatorShift() {
             <div className="bg-navy-900 rounded-xl p-4">
               <div className="label">Maszyna</div>
               <div className="text-xl font-bold text-white">{activeMachine.name}</div>
-              <div className="text-xs text-navy-400 mt-1">Target: {activeMachine.target_per_hour} szt/h</div>
+              <div className="text-xs text-navy-400 mt-1">Wydajnosc: {activeMachine.target_per_hour} szt/h</div>
             </div>
             <div className="bg-navy-900 rounded-xl p-4">
               <div className="label">Zmiana</div>
@@ -324,7 +338,7 @@ export default function OperatorShift() {
             <div className="h-2 rounded-full bg-navy-700">
               <div className="h-full rounded-full bg-brand" style={{ width: `${completePct}%` }} />
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
               <div className="rounded-lg bg-navy-800 p-3">
                 <div className="text-xs text-navy-400">Dobre</div>
                 <div className="font-mono text-lg font-bold text-green-400">{totalGood.toLocaleString('pl-PL')}</div>
@@ -338,7 +352,11 @@ export default function OperatorShift() {
                 <div className="font-mono text-lg font-bold text-cyan-300">{minsToHHMM(totalRuntime)}</div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
-                <div className="text-xs text-navy-400">Srednia EPQ</div>
+                <div className="text-xs text-navy-400">Wyd. maszyny</div>
+                <div className="font-mono text-lg font-bold text-cyan-300">{machineRate.toLocaleString('pl-PL')}</div>
+              </div>
+              <div className="rounded-lg bg-navy-800 p-3">
+                <div className="text-xs text-navy-400">Srednie W EPQ</div>
                 <div className="font-mono text-lg font-bold text-white">{avgEff}%</div>
               </div>
             </div>
@@ -387,7 +405,7 @@ export default function OperatorShift() {
                 className={cn('p-4 rounded-xl border-2 text-left transition-all',
                   selectedMachine === m.id ? 'border-brand bg-brand/10 text-white' : 'border-navy-600 bg-navy-900 text-navy-300 hover:border-navy-500')}>
                 <div className="text-lg font-bold">🤖 {m.name}</div>
-                <div className="text-xs mt-1 opacity-70">Target: {m.target_per_hour} szt/h</div>
+                <div className="text-xs mt-1 opacity-70">Wydajnosc: {m.target_per_hour} szt/h</div>
               </button>
             ))}
           </div>

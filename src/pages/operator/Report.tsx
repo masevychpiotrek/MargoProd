@@ -22,6 +22,18 @@ function formatTestBlock(slot: number) {
   return `Test ${String(Math.floor(start / 60)).padStart(2, '0')}:${String(start % 60).padStart(2, '0')}-${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`
 }
 
+function effectiveTarget(ratePerHour: number, runtimeMin: number) {
+  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
+}
+
+function calcEfficiency(good: number, target: number) {
+  return target > 0 ? Math.round(good / target * 100) : 0
+}
+
+function hourlyRate(pieces: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
+}
+
 function getRobotHint(errors: string[]) {
   const first = errors[0]?.toLowerCase() ?? ''
   if (first.includes('suma')) return 'Czasy musza dac razem 01:00. Policz: praca + gotowosc + alarm, a ja puszcze raport dalej.'
@@ -271,11 +283,13 @@ export default function OperatorReport() {
 
   const timeSum = incRuntime + incReady + incAlarm
   const allTimesFilled = counterRuntime !== '' && counterReady !== '' && counterAlarm !== ''
-  const efficiency  = incGood > 0 ? Math.round(incGood / activeTarget * 100) : 0
+  const reportTarget = effectiveTarget(activeTarget, incRuntime)
+  const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
-  const machineRate = incRuntime > 0 ? Math.round(incGood / incRuntime * 60) : 0
+  const machineRate = hourlyRate(incGood + incReject, incRuntime)
+  const goodRate = hourlyRate(incGood, incRuntime)
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
-  const belowTarget = !testMode && incGood > 0 && incGood < activeTarget
+  const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
@@ -312,6 +326,7 @@ export default function OperatorReport() {
     const incRt = Math.max(0, curRt - lastRuntime)
     const incRd = Math.max(0, curRd - lastReady)
     const incAl = Math.max(0, curAl - lastAlarm)
+    const finishTarget = effectiveTarget(activeTarget, incRt)
     const finishErrors: string[] = []
     if (!finishCounterGood) finishErrors.push('Wpisz stan licznika dobrych sztuk')
     if (!finishCounterRuntime) finishErrors.push('Wpisz stan licznika czasu pracy (HH:MM)')
@@ -338,7 +353,7 @@ export default function OperatorReport() {
       runtime_min: incRt, ready_min: incRd, alarm_min: incAl,
       downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
       counter_runtime: curRt, counter_ready: curRd, counter_alarm: curAl,
-      target: activeTarget,
+      target: finishTarget,
       notes: finishNotes || 'Zakończenie zlecenia', status: 'submitted',
       order_id: activeOrderId, order_qty: incG
     })
@@ -374,7 +389,7 @@ export default function OperatorReport() {
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
-    if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej targetu — wymagana przyczyna`)
+    if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej normy czasu pracy — wymagana przyczyna`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie mogą być większe niż przyrost dobrych sztuk')
     if (downtimes.some(d => d.duration_min <= 0)) errs.push('Zdarzenie przestojowe musi mieć czas większy od 0 min')
@@ -413,8 +428,8 @@ export default function OperatorReport() {
         runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
-        target: activeTarget,
-        downtime_reason: downtimeReason || (testMode && incGood < activeTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
+        target: reportTarget,
+        downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
         order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
       }).select().single()
       if (error) { setErrors([error.message]); return }
@@ -647,7 +662,7 @@ export default function OperatorReport() {
             )}
             {belowTarget && (
               <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
-                <div className="text-red-400 font-bold text-sm mb-2">⚠ Przyrost {incGood} szt poniżej targetu ({TARGET}) — wymagana przyczyna</div>
+                <div className="text-red-400 font-bold text-sm mb-2">⚠ Przyrost {incGood} szt poniżej normy czasu pracy ({reportTarget} szt) — wymagana przyczyna</div>
                 <textarea value={downtimeReason} onChange={e => setDowntimeReason(e.target.value)} placeholder="Opisz przyczynę..." rows={2} className="input text-sm font-normal resize-none" />
               </div>
             )}
@@ -687,11 +702,12 @@ export default function OperatorReport() {
 
           {/* Live KPI */}
           {incGood > 0 && incRuntime > 0 && (
-            <div className="grid grid-cols-4 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
               {[
-                { l: 'Efektywność',  v: efficiency + '%',       c: efficiencyColor(efficiency) },
+                { l: 'W EPQ',        v: efficiency + '%',       c: efficiencyColor(efficiency) },
                 { l: '% odrzutu',    v: rejectPct + '%',        c: rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400' },
                 { l: 'Wyd. maszyny', v: machineRate + ' szt/h', c: 'text-cyan-400' },
+                { l: 'Wyd. dobrych', v: goodRate + ' szt/h',    c: 'text-green-400' },
                 { l: 'Dostępność',   v: availability + '%',     c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400' },
               ].map(k => (
                 <div key={k.l} className="bg-navy-900 rounded-xl p-3 text-center">
@@ -839,7 +855,7 @@ export default function OperatorReport() {
               <div className="space-y-2 text-sm">
                 {[
                   { l: 'Produkcja łącznie', v: existingReports.reduce((s,r)=>s+r.good_count,0).toLocaleString('pl-PL') + ' szt', c: 'text-white' },
-                  { l: 'Śr. efektywność', v: Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length) + '%', c: efficiencyColor(Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length)) },
+                  { l: 'Śr. W EPQ', v: Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length) + '%', c: efficiencyColor(Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length)) },
                   { l: 'Odrzut łącznie', v: existingReports.reduce((s,r)=>s+r.reject_count,0) + ' szt', c: 'text-red-400' },
                   { l: 'Czas pracy łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+r.runtime_min,0)), c: 'text-green-400' },
                   { l: 'Czas alarmu łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+((r as ReportExt).alarm_min??0),0)), c: 'text-red-400' },
