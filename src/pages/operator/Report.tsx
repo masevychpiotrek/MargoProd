@@ -97,7 +97,7 @@ function getSaveErrorMessage(message: string) {
   }
 
   if (text.includes('duplicate key') || text.includes('hourly_reports_shift_id_hour_start_key')) {
-    return 'Ten blok godzinowy jest juz zapisany. Odswiezylem liste raportow.'
+    return 'Ten blok jest nadal zablokowany w bazie. Uruchom migracje 013, zeby usuniete wpisy zwalnialy godzine.'
   }
 
   if (text.includes('row-level security') || text.includes('violates row-level security')) {
