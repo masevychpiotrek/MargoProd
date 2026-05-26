@@ -33,6 +33,7 @@ export default function LoginPage() {
   const onSubmit = async (data: FormData) => {
     setServerError(null)
     localStorage.removeItem('margoline-auth')
+    sessionStorage.removeItem('margoline-auth')
     const { error } = await signIn(data.email, data.password)
     if (error) {
       setServerError(error)
@@ -89,7 +90,7 @@ export default function LoginPage() {
             <p className="text-sm mt-1" style={{ color: '#6b7f99' }}>Wpisz e-mail i hasło aby kontynuować</p>
           </div>
 
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
+          <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-5">
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
                 Adres e-mail
@@ -129,7 +130,7 @@ export default function LoginPage() {
             </div>
 
             {serverError && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
+              <div role="alert" className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
                 {serverError}
               </div>
             )}

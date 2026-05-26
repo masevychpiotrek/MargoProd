@@ -33,6 +33,20 @@ function isUsableProfile(profile: Profile | null) {
   return !!profile && profile.is_active && !profile.deleted_at
 }
 
+function mapAuthError(message: string) {
+  const normalized = message.toLowerCase()
+  if (
+    normalized.includes('invalid login credentials') ||
+    normalized.includes('invalid_grant') ||
+    normalized.includes('email not confirmed') ||
+    normalized.includes('invalid credentials')
+  ) {
+    return 'Nieprawidlowy e-mail lub haslo.'
+  }
+
+  return message || 'Blad logowania.'
+}
+
 export const useAuthStore = create<AuthState>()((set, get) => ({
   user: null,
   session: null,
@@ -89,13 +103,22 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   signIn: async (email, password) => {
-    set({ isLoading: true })
+    set({
+      isLoading: true,
+      user: null,
+      session: null,
+      profile: null,
+      isInitialized: true
+    })
+
     try {
+      await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
+
       const { data, error } = await supabase.auth.signInWithPassword({
         email: email.trim().toLowerCase(),
         password
       })
-      if (error) return { error: error.message }
+      if (error) return { error: mapAuthError(error.message) }
       if (!data.session) return { error: 'Brak sesji po zalogowaniu.' }
 
       const profile = await loadProfile(data.user.id)
@@ -120,7 +143,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       await logAudit('login')
       return { error: null }
     } catch (e: unknown) {
-      return { error: e instanceof Error ? e.message : 'Blad logowania' }
+      return { error: e instanceof Error ? mapAuthError(e.message) : 'Blad logowania.' }
     } finally {
       set({ isLoading: false })
     }
