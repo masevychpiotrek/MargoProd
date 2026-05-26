@@ -72,6 +72,7 @@ function errorTargetSelector(error: string) {
   const text = error.toLowerCase()
   if (text.includes('blok') || text.includes('godzin') || text.includes('raport za')) return '[data-error-target="hour"]'
   if (text.includes('zlecen')) return '[data-error-target="order"]'
+  if (text.includes('przyczyna') || text.includes('ponizej normy') || text.includes('poniżej normy')) return '[data-error-target="reason"]'
   if (text.includes('licznik dobrych') || text.includes('licznik odrzutu') || text.includes('przyrost') || text.includes('normy')) return '[data-error-target="production"]'
   if (text.includes('czas') || text.includes('gotow') || text.includes('alarm')) return '[data-error-target="times"]'
   if (text.includes('przestoj')) return '[data-error-target="downtime"]'
@@ -82,6 +83,32 @@ function reportValidationError(error: string) {
   window.dispatchEvent(new CustomEvent('margoprod:validation-error', {
     detail: { message: error, selector: errorTargetSelector(error) }
   }))
+}
+
+function getSaveErrorMessage(message: string) {
+  const text = message.toLowerCase()
+
+  if (text.includes('times_sum_60') || text.includes('reason_required') || text.includes('check constraint')) {
+    return 'Baza ma jeszcze stara regule zapisu raportow. Zaktualizuj schemat Supabase i sprobuj ponownie.'
+  }
+
+  if (text.includes('duplicate key') || text.includes('hourly_reports_shift_id_hour_start_key')) {
+    return 'Ten blok godzinowy jest juz zapisany. Odswiezylem liste raportow.'
+  }
+
+  if (text.includes('row-level security') || text.includes('violates row-level security')) {
+    return 'Brak uprawnien do zapisu tego raportu. Wyloguj sie i zaloguj ponownie albo sprawdz, czy pracujesz na swojej zmianie.'
+  }
+
+  if (text.includes('schema cache') || text.includes('could not find') || text.includes('column')) {
+    return 'Baza nie ma jeszcze wszystkich kolumn potrzebnych do zapisu. Uruchom aktualizacje schematu Supabase.'
+  }
+
+  if (text.includes('network') || text.includes('failed to fetch')) {
+    return 'Nie udalo sie polaczyc z baza. Sprawdz internet i sprobuj ponownie.'
+  }
+
+  return message || 'Nie udalo sie zapisac raportu. Sprobuj ponownie.'
 }
 
 interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
@@ -382,8 +409,9 @@ export default function OperatorReport() {
       setFinishNotes('')
       loadReports(); loadOrders()
     } else {
-      setErrors([error.message])
-      reportValidationError(error.message)
+      const message = getSaveErrorMessage(error.message)
+      setErrors([message])
+      reportValidationError(message)
     }
     setSavingFinish(false)
   }
@@ -406,7 +434,7 @@ export default function OperatorReport() {
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
-    if (belowTarget && !downtimeReason.trim()) errs.push(`Przyrost ${incGood} szt poniżej normy czasu pracy — wymagana przyczyna`)
+    if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej normy: przyrost ${incGood} szt przy normie ${reportTarget} szt`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie mogą być większe niż przyrost dobrych sztuk')
     if (downtimes.some(d => d.duration_min <= 0)) errs.push('Zdarzenie przestojowe musi mieć czas większy od 0 min')
@@ -425,13 +453,19 @@ export default function OperatorReport() {
     setSaving(true); setErrors([])
     try {
       const orderQtyVal = parseInt(orderQty) || incGood
-      const { data: currentReports } = await supabase
+      const { data: currentReports, error: currentReportsError } = await supabase
         .from('hourly_reports')
         .select('id')
         .eq('shift_id', activeShift.id)
         .eq('hour_start', selectedHour)
         .is('deleted_at', null)
         .maybeSingle()
+      if (currentReportsError) {
+        const message = getSaveErrorMessage(currentReportsError.message)
+        setErrors([message])
+        reportValidationError(message)
+        return
+      }
       if (currentReports) {
         const message = `Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} zostal juz zapisany na innym urzadzeniu`
         setErrors([message])
@@ -451,12 +485,25 @@ export default function OperatorReport() {
         downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
         order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
       }).select().single()
-      if (error) { setErrors([error.message]); reportValidationError(error.message); return }
+      if (error) {
+        const message = getSaveErrorMessage(error.message)
+        setErrors([message])
+        reportValidationError(message)
+        await loadReports()
+        return
+      }
       if (downtimes.length && report) {
-        await supabase.from('downtime_events').insert(downtimes.map(d => ({
+        const { error: downtimeError } = await supabase.from('downtime_events').insert(downtimes.map(d => ({
           report_id: report.id, shift_id: activeShift.id, machine_id: activeShift.machine_id,
           category: d.category, duration_min: d.duration_min, description: d.description || null
         })))
+        if (downtimeError) {
+          const message = getSaveErrorMessage(downtimeError.message)
+          setErrors([`Raport zapisany, ale zdarzenia przestojowe nie zostaly zapisane: ${message}`])
+          reportValidationError(message)
+          await loadReports()
+          return
+        }
       }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setCounterGood(''); setCounterReject(''); setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
@@ -679,10 +726,43 @@ export default function OperatorReport() {
                 {incReject > 0 && <div className={cn('text-sm font-bold mt-2', rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400')}>Odrzut: +{incReject} szt · {rejectPct}%</div>}
               </div>
             )}
-            {belowTarget && (
-              <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3">
-                <div className="text-red-400 font-bold text-sm mb-2">⚠ Przyrost {incGood} szt poniżej normy czasu pracy ({reportTarget} szt) — wymagana przyczyna</div>
-                <textarea value={downtimeReason} onChange={e => setDowntimeReason(e.target.value)} placeholder="Opisz przyczynę..." rows={2} className="input text-sm font-normal resize-none" />
+          </div>
+
+          <div
+            className={cn(
+              'card',
+              belowTarget && !downtimeReason.trim() && 'border-red-500/50 bg-red-500/5'
+            )}
+            data-error-target="reason"
+          >
+            <div className="card-header">
+              <div>
+                <div className={cn('card-title', belowTarget && 'text-red-300')}>Przyczyna / komentarz do wyniku</div>
+                <div className="card-sub">
+                  {belowTarget
+                    ? `Wymagane, bo wynik jest ponizej normy: ${incGood.toLocaleString('pl-PL')} / ${reportTarget.toLocaleString('pl-PL')} szt`
+                    : 'Opcjonalnie, ale warto wpisac gdy wynik wymaga wyjasnienia'}
+                </div>
+              </div>
+              {belowTarget && (
+                <span className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-300">
+                  Wymagane
+                </span>
+              )}
+            </div>
+            <textarea
+              value={downtimeReason}
+              onChange={e => setDowntimeReason(e.target.value)}
+              placeholder={belowTarget ? 'Np. brak materialu, problem z forma, kontrola jakosci...' : 'Np. spokojna praca, drobne uwagi, nietypowa sytuacja...'}
+              rows={3}
+              className={cn(
+                'input text-sm font-normal resize-none',
+                belowTarget && !downtimeReason.trim() && 'border-red-500/60'
+              )}
+            />
+            {belowTarget && !downtimeReason.trim() && (
+              <div className="mt-2 text-xs font-semibold text-red-300">
+                Bez tej przyczyny raport nie zostanie zapisany.
               </div>
             )}
           </div>
