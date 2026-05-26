@@ -119,6 +119,10 @@ function reportWepq(report: ReportWithContext, ratePerHour: number) {
   return target > 0 ? Math.round(report.good_count / target * 100) : 0
 }
 
+function pct(value: number, target: number) {
+  return target > 0 ? Math.round(value / target * 100) : 0
+}
+
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
 }
@@ -265,8 +269,8 @@ export default function ManagerDashboard() {
 
     return rows.map(row => ({
       ...row,
-      wEpq: row.reports ? Math.round(row.wEpq / row.reports) : 0,
-      wEpqTotal: row.target ? Math.round(row.good / row.target * 100) : 0,
+      wEpq: pct(row.good, row.target),
+      wEpqTotal: pct(row.good + row.reject, row.target),
       machineRate: hourlyRate(row.good + row.reject, row.runtime),
       goodRate: hourlyRate(row.good, row.runtime)
     })).sort((a, b) =>
@@ -285,10 +289,8 @@ export default function ManagerDashboard() {
     const downtime = filteredReports.reduce((sum, r) => sum + r.downtime_min + r.failure_min, 0)
     const totalTime = runtime + ready + alarm + downtime
     const target = filteredReports.reduce((sum, r) => sum + effectiveTarget(machineTargetById[r.machine_id] ?? TARGET, r.runtime_min), 0)
-    const avgWepq = filteredReports.length
-      ? Math.round(filteredReports.reduce((sum, r) => sum + reportWepq(r, machineTargetById[r.machine_id] ?? TARGET), 0) / filteredReports.length)
-      : 0
-    const wepqTotal = target ? Math.round(totalGood / target * 100) : 0
+    const avgWepq = pct(totalGood, target)
+    const wepqTotal = pct(totalGood + totalReject, target)
     const rejectPct = totalGood + totalReject ? Math.round(totalReject / (totalGood + totalReject) * 1000) / 10 : 0
     const availability = totalTime ? Math.round(runtime / totalTime * 100) : 0
     const machineRate = hourlyRate(totalGood + totalReject, runtime)
@@ -483,8 +485,8 @@ export default function ManagerDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z czasu pracy ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'srednia: szt / norma czasu', color: efficiencyColor(kpi.avgWepq) },
-          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'suma szt / suma normy', color: efficiencyColor(kpi.wepqTotal) },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma czasu', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / norma', color: efficiencyColor(kpi.wepqTotal) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
         ].map(item => (
           <div key={item.label} className="kpi-card">
