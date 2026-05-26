@@ -60,12 +60,28 @@ function ValidationRobot({ errors }: { errors: string[] }) {
         <div className="mx-auto mt-1 w-8 h-3 rounded-b-lg bg-navy-900 border-x border-b border-amber-400/40" />
       </div>
       <div className="min-w-0">
-        <div className="text-amber-300 font-bold text-sm">Robokontroler mowi: chwila, chwila.</div>
+        <div className="text-amber-300 font-bold text-sm">Kontroler raportu</div>
         <div className="text-sm text-amber-100 mt-1">{getRobotHint(errors)}</div>
-        {errors.length > 1 && <div className="text-xs text-amber-300/80 mt-2">Widze {errors.length} rzeczy do poprawy.</div>}
+        {errors.length > 1 && <div className="text-xs text-amber-300/80 mt-2">Do poprawy: {errors.length} pozycje.</div>}
       </div>
     </div>
   )
+}
+
+function errorTargetSelector(error: string) {
+  const text = error.toLowerCase()
+  if (text.includes('blok') || text.includes('godzin') || text.includes('raport za')) return '[data-error-target="hour"]'
+  if (text.includes('zlecen')) return '[data-error-target="order"]'
+  if (text.includes('licznik dobrych') || text.includes('licznik odrzutu') || text.includes('przyrost') || text.includes('normy')) return '[data-error-target="production"]'
+  if (text.includes('czas') || text.includes('gotow') || text.includes('alarm')) return '[data-error-target="times"]'
+  if (text.includes('przestoj')) return '[data-error-target="downtime"]'
+  return '[data-error-target="errors"]'
+}
+
+function reportValidationError(error: string) {
+  window.dispatchEvent(new CustomEvent('margoprod:validation-error', {
+    detail: { message: error, selector: errorTargetSelector(error) }
+  }))
 }
 
 interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
@@ -340,7 +356,7 @@ export default function OperatorReport() {
     if (finishCounterRuntime !== '' && lastRuntime > 0 && curRt < lastRuntime) finishErrors.push('Licznik czasu pracy nie moze malec')
     if (finishCounterReady !== '' && lastReady > 0 && curRd < lastReady) finishErrors.push('Licznik czasu gotowosci nie moze malec')
     if (finishCounterAlarm !== '' && lastAlarm > 0 && curAl < lastAlarm) finishErrors.push('Licznik czasu alarmu nie moze malec')
-    if (finishErrors.length) { setErrors(finishErrors); return }
+    if (finishErrors.length) { setErrors(finishErrors); reportValidationError(finishErrors[0]); return }
     setSavingFinish(true)
     const now = new Date()
     const finishHour = now.getHours()
@@ -367,6 +383,7 @@ export default function OperatorReport() {
       loadReports(); loadOrders()
     } else {
       setErrors([error.message])
+      reportValidationError(error.message)
     }
     setSavingFinish(false)
   }
@@ -403,7 +420,7 @@ export default function OperatorReport() {
 
   const handleSave = async () => {
     const errs = validate()
-    if (errs.length) { setErrors(errs); return }
+    if (errs.length) { setErrors(errs); reportValidationError(errs[0]); return }
     if (!activeShift || !profile) return
     setSaving(true); setErrors([])
     try {
@@ -416,7 +433,9 @@ export default function OperatorReport() {
         .is('deleted_at', null)
         .maybeSingle()
       if (currentReports) {
-        setErrors([`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} został już zapisany na innym urządzeniu`])
+        const message = `Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} zostal juz zapisany na innym urzadzeniu`
+        setErrors([message])
+        reportValidationError(message)
         await loadReports()
         return
       }
@@ -432,7 +451,7 @@ export default function OperatorReport() {
         downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
         order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
       }).select().single()
-      if (error) { setErrors([error.message]); return }
+      if (error) { setErrors([error.message]); reportValidationError(error.message); return }
       if (downtimes.length && report) {
         await supabase.from('downtime_events').insert(downtimes.map(d => ({
           report_id: report.id, shift_id: activeShift.id, machine_id: activeShift.machine_id,
@@ -479,7 +498,7 @@ export default function OperatorReport() {
         <div className="lg:col-span-2 space-y-4">
 
           {/* Hour selector */}
-          <div className="card">
+          <div className="card" data-error-target="hour">
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <div className="card-title">Blok godziny</div>
@@ -540,7 +559,7 @@ export default function OperatorReport() {
           </div>
 
           {/* Zlecenia */}
-          <div className="card">
+          <div className="card" data-error-target="order">
             <div className="card-header">
               <div><div className="card-title">Zlecenie produkcyjne</div><div className="card-sub">Aktywne zlecenie</div></div>
               <button onClick={() => setShowNewOrder(true)} className="btn-secondary text-xs py-1.5 px-3">+ Nowe zlecenie</button>
@@ -639,7 +658,7 @@ export default function OperatorReport() {
           )}
 
           {/* Liczniki produkcji */}
-          <div className="card">
+          <div className="card" data-error-target="production">
             <div className="card-header">
               <div><div className="card-title">Liczniki produkcji</div><div className="card-sub">Stan licznika na koniec godziny</div></div>
               {incGood > 0 && <div className={cn('text-2xl font-bold font-mono', efficiencyColor(efficiency))}>{efficiency}%</div>}
@@ -669,7 +688,7 @@ export default function OperatorReport() {
           </div>
 
           {/* Liczniki czasów HH:MM */}
-          <div className="card">
+          <div className="card" data-error-target="times">
             <div className="card-header">
               <div><div className="card-title">Liczniki czasów pracy</div><div className="card-sub">{testMode ? 'Tryb testowy — przyrost może mieć dowolną długość' : 'Format HH:MM — przyrost musi sumować się do 01:00'}</div></div>
               {allTimesFilled && (
@@ -719,7 +738,7 @@ export default function OperatorReport() {
           )}
 
           {/* Przestoje */}
-          <div className="card">
+          <div className="card" data-error-target="downtime">
             <div className="card-header">
               <div><div className="card-title">Zdarzenia przestojowe</div><div className="card-sub">Opcjonalnie</div></div>
               <button onClick={() => setDowntimes(p => [...p, { category: 'mechanical_failure', duration_min: 0, description: '' }])} className="btn-secondary text-xs py-1.5 px-3">+ Dodaj</button>
@@ -799,7 +818,7 @@ export default function OperatorReport() {
           )}
 
           {errors.length > 0 && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4">
+            <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-4" data-error-target="errors">
               <ValidationRobot errors={errors} />
               <div className="font-bold text-red-400 mb-2 text-sm">Popraw błędy:</div>
               {errors.map((e,i) => <div key={i} className="text-red-300 text-sm">• {e}</div>)}
