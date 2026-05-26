@@ -34,6 +34,10 @@ function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
 }
 
+function legacyDowntimeForSave(runtimeMin: number) {
+  return Math.max(0, 60 - runtimeMin)
+}
+
 function getRobotHint(errors: string[]) {
   const first = errors[0]?.toLowerCase() ?? ''
   if (first.includes('suma')) return 'Czasy musza dac razem 01:00. Policz: praca + gotowosc + alarm, a ja puszcze raport dalej.'
@@ -394,7 +398,7 @@ export default function OperatorReport() {
       good_count: incG, reject_count: incRj, total_count: curG,
       counter_good: curG, counter_reject: curR,
       runtime_min: incRt, ready_min: incRd, alarm_min: incAl,
-      downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
+      downtime_min: legacyDowntimeForSave(incRt), micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
       counter_runtime: curRt, counter_ready: curRd, counter_alarm: curAl,
       target: finishTarget,
       notes: finishNotes || 'Zakończenie zlecenia', status: 'submitted',
@@ -479,7 +483,7 @@ export default function OperatorReport() {
         good_count: incGood, reject_count: incReject, total_count: curGood,
         counter_good: curGood, counter_reject: curReject,
         runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
-        downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
+        downtime_min: legacyDowntimeForSave(incRuntime), micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
         target: reportTarget,
         downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',

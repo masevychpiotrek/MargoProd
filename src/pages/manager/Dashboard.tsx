@@ -110,14 +110,19 @@ function toInt(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
+function reportDowntimeMinutes(report: ReportWithContext) {
+  const downtime = report.downtime_min + report.failure_min
+  const readyAndAlarm = (report.ready_min ?? 0) + (report.alarm_min ?? 0)
+  return downtime === readyAndAlarm && report.failure_min === 0 ? 0 : downtime
+}
+
 function reportAccountableMinutes(report: ReportWithContext) {
   return Math.max(
     0,
     report.runtime_min +
       (report.ready_min ?? 0) +
       (report.alarm_min ?? 0) +
-      report.downtime_min +
-      report.failure_min
+      reportDowntimeMinutes(report)
   )
 }
 
@@ -273,7 +278,7 @@ export default function ManagerDashboard() {
       acc[key].runtime += report.runtime_min
       acc[key].ready += report.ready_min ?? 0
       acc[key].alarm += report.alarm_min ?? 0
-      acc[key].downtime += report.downtime_min + report.failure_min
+      acc[key].downtime += reportDowntimeMinutes(report)
       acc[key].reports += 1
       acc[key].wEpq += reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
       return acc
@@ -298,7 +303,7 @@ export default function ManagerDashboard() {
     const runtime = filteredReports.reduce((sum, r) => sum + r.runtime_min, 0)
     const ready = filteredReports.reduce((sum, r) => sum + (r.ready_min ?? 0), 0)
     const alarm = filteredReports.reduce((sum, r) => sum + (r.alarm_min ?? 0), 0)
-    const downtime = filteredReports.reduce((sum, r) => sum + r.downtime_min + r.failure_min, 0)
+    const downtime = filteredReports.reduce((sum, r) => sum + reportDowntimeMinutes(r), 0)
     const totalTime = runtime + ready + alarm + downtime
     const target = filteredReports.reduce((sum, r) => sum + effectiveTarget(machineTargetById[r.machine_id] ?? TARGET, reportAccountableMinutes(r)), 0)
     const avgWepq = pct(totalGood, target)
@@ -719,7 +724,7 @@ export default function ManagerDashboard() {
                     <td className="py-2 px-3 font-mono text-red-400">{report.reject_count}</td>
                     <td className="py-2 px-3 font-mono text-green-400">{minsToHHMM(report.runtime_min)}</td>
                     <td className="py-2 px-3 font-mono text-amber-400">{minsToHHMM(report.alarm_min ?? 0)}</td>
-                    <td className="py-2 px-3 font-mono text-navy-300">{minsToHHMM(report.downtime_min + report.failure_min)}</td>
+                    <td className="py-2 px-3 font-mono text-navy-300">{minsToHHMM(reportDowntimeMinutes(report))}</td>
                     <td className="py-2 px-3">
                       <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openEdit(report)}>Edytuj</button>
                     </td>
