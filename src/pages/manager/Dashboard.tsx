@@ -110,12 +110,23 @@ function toInt(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
-function effectiveTarget(ratePerHour: number, runtimeMin: number) {
-  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
+function reportAccountableMinutes(report: ReportWithContext) {
+  return Math.max(
+    0,
+    report.runtime_min +
+      (report.ready_min ?? 0) +
+      (report.alarm_min ?? 0) +
+      report.downtime_min +
+      report.failure_min
+  )
+}
+
+function effectiveTarget(ratePerHour: number, accountableMin: number) {
+  return Math.round(Math.max(0, ratePerHour) * Math.max(0, accountableMin) / 60)
 }
 
 function reportWepq(report: ReportWithContext, ratePerHour: number) {
-  const target = effectiveTarget(ratePerHour, report.runtime_min)
+  const target = effectiveTarget(ratePerHour, reportAccountableMinutes(report))
   return target > 0 ? Math.round(report.good_count / target * 100) : 0
 }
 
@@ -229,7 +240,8 @@ export default function ManagerDashboard() {
       const shiftType = one(report.shift)?.shift_type ?? '-'
       const machineName = machineNameById[report.machine_id] ?? '-'
       const key = `${report.report_date}|${shiftType}|${report.machine_id}`
-      const target = effectiveTarget(machineTargetById[report.machine_id] ?? TARGET, report.runtime_min)
+      const accountableMin = reportAccountableMinutes(report)
+      const target = effectiveTarget(machineTargetById[report.machine_id] ?? TARGET, accountableMin)
 
       if (!acc[key]) {
         acc[key] = {
@@ -271,8 +283,8 @@ export default function ManagerDashboard() {
       ...row,
       wEpq: pct(row.good, row.target),
       wEpqTotal: pct(row.good + row.reject, row.target),
-      machineRate: hourlyRate(row.good + row.reject, row.runtime),
-      goodRate: hourlyRate(row.good, row.runtime)
+      machineRate: hourlyRate(row.good + row.reject, row.runtime + row.ready + row.alarm + row.downtime),
+      goodRate: hourlyRate(row.good, row.runtime + row.ready + row.alarm + row.downtime)
     })).sort((a, b) =>
       b.date.localeCompare(a.date) ||
       a.machineName.localeCompare(b.machineName) ||
@@ -288,13 +300,13 @@ export default function ManagerDashboard() {
     const alarm = filteredReports.reduce((sum, r) => sum + (r.alarm_min ?? 0), 0)
     const downtime = filteredReports.reduce((sum, r) => sum + r.downtime_min + r.failure_min, 0)
     const totalTime = runtime + ready + alarm + downtime
-    const target = filteredReports.reduce((sum, r) => sum + effectiveTarget(machineTargetById[r.machine_id] ?? TARGET, r.runtime_min), 0)
+    const target = filteredReports.reduce((sum, r) => sum + effectiveTarget(machineTargetById[r.machine_id] ?? TARGET, reportAccountableMinutes(r)), 0)
     const avgWepq = pct(totalGood, target)
     const wepqTotal = pct(totalGood + totalReject, target)
     const rejectPct = totalGood + totalReject ? Math.round(totalReject / (totalGood + totalReject) * 1000) / 10 : 0
     const availability = totalTime ? Math.round(runtime / totalTime * 100) : 0
-    const machineRate = hourlyRate(totalGood + totalReject, runtime)
-    const goodRate = hourlyRate(totalGood, runtime)
+    const machineRate = hourlyRate(totalGood + totalReject, totalTime)
+    const goodRate = hourlyRate(totalGood, totalTime)
 
     return { totalGood, totalReject, runtime, ready, alarm, downtime, target, avgWepq, wepqTotal, rejectPct, availability, machineRate, goodRate }
   }, [filteredReports, machineTargetById])
@@ -362,7 +374,10 @@ export default function ManagerDashboard() {
       alarm_min: toInt(editState.alarm_min),
       downtime_min: toInt(editState.downtime_min),
       failure_min: toInt(editState.failure_min),
-      target: effectiveTarget(machineTargetById[editing.machine_id] ?? TARGET, runtimeMin),
+      target: effectiveTarget(
+        machineTargetById[editing.machine_id] ?? TARGET,
+        runtimeMin + toInt(editState.ready_min) + toInt(editState.alarm_min) + toInt(editState.downtime_min) + toInt(editState.failure_min)
+      ),
       downtime_reason: editState.downtime_reason.trim() || null,
       notes: editState.notes.trim() || null
     }
@@ -484,8 +499,8 @@ export default function ManagerDashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z czasu pracy ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma czasu', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma czasu rozlicz. ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma czasu rozlicz.', color: efficiencyColor(kpi.avgWepq) },
           { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / norma', color: efficiencyColor(kpi.wepqTotal) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
         ].map(item => (
@@ -500,8 +515,8 @@ export default function ManagerDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {[
           { label: 'Czas pracy', value: minsToHHMM(kpi.runtime), sub: `gotowosc ${minsToHHMM(kpi.ready)}`, color: 'text-green-400' },
-          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'dobre + odrzut', color: 'text-cyan-400' },
-          { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'tylko zgodne', color: 'text-green-400' },
+          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'dobre + odrzut / caly czas', color: 'text-cyan-400' },
+          { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'zgodne / caly czas', color: 'text-green-400' },
           { label: 'Alarmy', value: minsToHHMM(kpi.alarm), sub: 'czas alarmow', color: kpi.alarm > 60 ? 'text-red-400' : 'text-amber-400' },
           { label: 'Postoje', value: minsToHHMM(kpi.downtime), sub: 'postoj + awaria', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' },
           { label: 'Dostepnosc', value: kpi.availability ? `${kpi.availability}%` : '-', sub: 'praca / caly czas', color: efficiencyColor(kpi.availability) }
@@ -640,7 +655,7 @@ export default function ManagerDashboard() {
           {dayTimeline.length === 0 && <div className="md:col-span-2 xl:col-span-3 text-center py-8 text-navy-500">Brak wpisow w wybranym dniu</div>}
           {dayTimeline.map(report => {
             const eff = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
-            const machineRate = hourlyRate(report.good_count + report.reject_count, report.runtime_min)
+            const machineRate = hourlyRate(report.good_count + report.reject_count, reportAccountableMinutes(report))
             return (
               <div key={report.id} className="bg-navy-900 rounded-xl p-3 border border-navy-700">
                 <div className="flex items-center justify-between gap-3">
@@ -690,7 +705,7 @@ export default function ManagerDashboard() {
               )}
               {filteredReports.map(report => {
                 const eff = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
-                const machineRate = hourlyRate(report.good_count + report.reject_count, report.runtime_min)
+                const machineRate = hourlyRate(report.good_count + report.reject_count, reportAccountableMinutes(report))
                 return (
                   <tr key={report.id} className="border-b border-navy-800 hover:bg-navy-800/50">
                     <td className="py-2 px-3 font-mono text-xs text-navy-300">{report.report_date}</td>

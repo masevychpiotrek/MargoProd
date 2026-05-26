@@ -191,14 +191,16 @@ export default function ManagerOrders() {
 
   const reportTotals = useMemo(() => ({
     runtime: reports.reduce((s, r) => s + r.runtime_min, 0),
+    ready: reports.reduce((s, r) => s + (r.ready_min ?? 0), 0),
     alarm: reports.reduce((s, r) => s + (r.alarm_min ?? 0), 0),
     downtime: reports.reduce((s, r) => s + r.downtime_min + r.failure_min, 0),
     reject: reports.reduce((s, r) => s + r.reject_count, 0),
     good: reports.reduce((s, r) => s + r.good_count, 0)
   }), [reports])
   const totalOutput = reportTotals.good + reportTotals.reject
-  const machineRate = hourlyRate(totalOutput, reportTotals.runtime)
-  const goodRate = hourlyRate(reportTotals.good, reportTotals.runtime)
+  const accountableTime = reportTotals.runtime + reportTotals.ready + reportTotals.alarm + reportTotals.downtime
+  const machineRate = hourlyRate(totalOutput, accountableTime)
+  const goodRate = hourlyRate(reportTotals.good, accountableTime)
 
   const operators = [...new Set(reports.map(r => r.operator?.full_name).filter(Boolean))]
   const hasProblems = reports.some(r => r.alarm_min > 15 || (r.downtime_min + r.failure_min) > 10)
@@ -288,6 +290,7 @@ export default function ManagerOrders() {
     setError('')
 
     const runtimeMin = toInt(reportEdit.runtime_min)
+    const accountableMin = runtimeMin + toInt(reportEdit.ready_min) + toInt(reportEdit.alarm_min) + toInt(reportEdit.downtime_min) + toInt(reportEdit.failure_min)
     const ratePerHour = machines.find(machine => machine.id === selected?.machine_id)?.target_per_hour ?? 2100
     const payload = {
       good_count: toInt(reportEdit.good_count),
@@ -298,7 +301,7 @@ export default function ManagerOrders() {
       alarm_min: toInt(reportEdit.alarm_min),
       downtime_min: toInt(reportEdit.downtime_min),
       failure_min: toInt(reportEdit.failure_min),
-      target: effectiveTarget(ratePerHour, runtimeMin),
+      target: effectiveTarget(ratePerHour, accountableMin),
       downtime_reason: reportEdit.downtime_reason.trim() || null,
       notes: reportEdit.notes.trim() || null
     }
@@ -448,8 +451,8 @@ export default function ManagerOrders() {
               <div className="grid grid-cols-2 gap-3">
                 <Kpi label="Z raportow" value={reportTotals.good.toLocaleString('pl-PL')} sub="szt dobrych" color="text-brand" />
                 <Kpi label="Odrzut" value={reportTotals.reject.toLocaleString('pl-PL')} sub="szt lacznie" color={reportTotals.reject ? 'text-red-400' : 'text-green-400'} />
-                <Kpi label="Wyd. maszyny" value={`${machineRate.toLocaleString('pl-PL')} szt/h`} sub="dobre + odrzut" color="text-cyan-400" />
-                <Kpi label="Wyd. dobrych" value={`${goodRate.toLocaleString('pl-PL')} szt/h`} sub="tylko zgodne" color="text-green-400" />
+                <Kpi label="Wyd. maszyny" value={`${machineRate.toLocaleString('pl-PL')} szt/h`} sub="dobre + odrzut / caly czas" color="text-cyan-400" />
+                <Kpi label="Wyd. dobrych" value={`${goodRate.toLocaleString('pl-PL')} szt/h`} sub="zgodne / caly czas" color="text-green-400" />
                 <Kpi label="Czas pracy" value={minsToHHMM(reportTotals.runtime)} sub="aktywna praca" color="text-green-400" />
                 <Kpi label="Alarmy + postoje" value={minsToHHMM(reportTotals.alarm + reportTotals.downtime)} sub={hasProblems ? 'wymaga sprawdzenia' : 'bez problemow'} color={(reportTotals.alarm + reportTotals.downtime) > 60 ? 'text-red-400' : 'text-amber-400'} />
               </div>

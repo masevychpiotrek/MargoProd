@@ -226,9 +226,13 @@ export default function OperatorShift() {
   const totalGood = shiftReports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = shiftReports.reduce((s, r) => s + r.reject_count, 0)
   const totalRuntime = shiftReports.reduce((s, r) => s + r.runtime_min, 0)
-  const machineRate = hourlyRate(totalGood + totalReject, totalRuntime)
+  const totalReady = shiftReports.reduce((s, r) => s + ((r as HourlyReport & { ready_min?: number }).ready_min ?? 0), 0)
+  const totalAlarm = shiftReports.reduce((s, r) => s + ((r as HourlyReport & { alarm_min?: number }).alarm_min ?? 0), 0)
+  const totalDowntime = shiftReports.reduce((s, r) => s + r.downtime_min + r.failure_min, 0)
+  const totalAccountable = totalRuntime + totalReady + totalAlarm + totalDowntime
+  const machineRate = hourlyRate(totalGood + totalReject, totalAccountable)
   const avgEff = shiftReports.length && activeMachine
-    ? Math.round(shiftReports.reduce((s, r) => s + reportWepq(r.good_count, activeMachine.target_per_hour, r.runtime_min), 0) / shiftReports.length)
+    ? reportWepq(totalGood, activeMachine.target_per_hour, totalAccountable)
     : 0
   const completePct = activeShiftHours.length
     ? Math.round(shiftReports.length / activeShiftHours.length * 100)

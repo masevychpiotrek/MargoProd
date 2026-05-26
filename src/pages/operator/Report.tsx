@@ -283,11 +283,11 @@ export default function OperatorReport() {
 
   const timeSum = incRuntime + incReady + incAlarm
   const allTimesFilled = counterRuntime !== '' && counterReady !== '' && counterAlarm !== ''
-  const reportTarget = effectiveTarget(activeTarget, incRuntime)
+  const reportTarget = effectiveTarget(activeTarget, timeSum)
   const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
-  const machineRate = hourlyRate(incGood + incReject, incRuntime)
-  const goodRate = hourlyRate(incGood, incRuntime)
+  const machineRate = hourlyRate(incGood + incReject, timeSum)
+  const goodRate = hourlyRate(incGood, timeSum)
   const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
   const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
@@ -326,7 +326,7 @@ export default function OperatorReport() {
     const incRt = Math.max(0, curRt - lastRuntime)
     const incRd = Math.max(0, curRd - lastReady)
     const incAl = Math.max(0, curAl - lastAlarm)
-    const finishTarget = effectiveTarget(activeTarget, incRt)
+    const finishTarget = effectiveTarget(activeTarget, incRt + incRd + incAl)
     const finishErrors: string[] = []
     if (!finishCounterGood) finishErrors.push('Wpisz stan licznika dobrych sztuk')
     if (!finishCounterRuntime) finishErrors.push('Wpisz stan licznika czasu pracy (HH:MM)')
