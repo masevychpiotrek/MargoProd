@@ -32,12 +32,13 @@ export default function LoginPage() {
 
   const onSubmit = async (data: FormData) => {
     setServerError(null)
+    localStorage.removeItem('margoline-auth')
     const { error } = await signIn(data.email, data.password)
     if (error) {
       setServerError(error)
       return
     }
-    navigate('/')
+    navigate('/', { replace: true })
   }
 
   // Najpierw animacja — po 14s pojawia się formularz
