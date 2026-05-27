@@ -11,6 +11,7 @@ import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database
 
 const TARGET = 2100
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
+const ORDERS_ENABLED = false
 
 function getShiftHours(shiftType?: ShiftType) {
   return shiftType ? SHIFT_HOURS[shiftType] : Array.from({ length: 24 }, (_, h) => h)
@@ -268,6 +269,7 @@ export default function OperatorReport() {
     }
   }
   const loadOrders = async () => {
+    if (!ORDERS_ENABLED) return
     if (!activeShift) return
     const { data } = await supabase.from('production_orders').select('*').eq('machine_id', activeShift.machine_id).in('status', ['active','paused']).order('created_at', { ascending: false })
     if (data) {
@@ -406,7 +408,7 @@ export default function OperatorReport() {
       errs.push(`Raport za ten blok mozna wpisac dopiero od ${openAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}`)
     }
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
-    if (!testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
+    if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej normy: przyrost ${incGood} szt przy normie ${reportTarget} szt`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
@@ -457,7 +459,8 @@ export default function OperatorReport() {
         counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
         target: reportTarget,
         downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
-        order_id: activeOrderId || null, order_qty: activeOrderId ? orderQtyVal : null
+        order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
+        order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
       }).select().single()
       if (error) {
         const message = getSaveErrorMessage(error.message)
@@ -580,7 +583,7 @@ export default function OperatorReport() {
           </div>
 
           {/* Zlecenia */}
-          <div className="card" data-error-target="order">
+          {ORDERS_ENABLED && <div className="card" data-error-target="order">
             <div className="card-header">
               <div><div className="card-title">Zlecenie produkcyjne</div><div className="card-sub">Aktywne zlecenie</div></div>
               <button onClick={() => setShowNewOrder(true)} className="btn-secondary text-xs py-1.5 px-3">+ Nowe zlecenie</button>
@@ -641,10 +644,10 @@ export default function OperatorReport() {
                   className="input" />
               </div>
             )}
-          </div>
+          </div>}
 
           {/* Modal nowe zlecenie */}
-          {showNewOrder && (
+          {ORDERS_ENABLED && showNewOrder && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
               <div className="bg-navy-800 border border-navy-600 rounded-2xl p-6 w-full max-w-md">
                 <h2 className="text-xl font-bold text-white mb-5">Nowe zlecenie produkcyjne</h2>
@@ -822,7 +825,7 @@ export default function OperatorReport() {
           </div>
 
           {/* Modal zakończenia zlecenia */}
-          {showFinishOrder && activeOrder && (
+          {ORDERS_ENABLED && showFinishOrder && activeOrder && (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
               <div className="bg-navy-800 border border-amber-500/30 rounded-2xl p-6 w-full max-w-lg">
                 <h2 className="text-xl font-bold text-white mb-1">Zakończ zlecenie</h2>
@@ -885,7 +888,7 @@ export default function OperatorReport() {
                         <span className="text-green-400">⏱ {minsToHHMM(r.runtime_min)}</span>
                         {(r as ReportExt).alarm_min != null && (r as ReportExt).alarm_min! > 0 && <span className="text-red-400">🔔 {minsToHHMM((r as ReportExt).alarm_min!)}</span>}
                       </div>
-                      {(r as ReportExt).order_id && (
+                      {ORDERS_ENABLED && (r as ReportExt).order_id && (
                         <div className="text-xs text-brand mt-1">📋 {orders.find(o => o.id === (r as ReportExt).order_id)?.order_number ?? 'zlecenie'}</div>
                       )}
                       <div className="h-1 bg-navy-700 rounded mt-1.5 overflow-hidden">

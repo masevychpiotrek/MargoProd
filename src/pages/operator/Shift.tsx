@@ -14,6 +14,7 @@ interface ProductionOrder {
 }
 interface Assortment { id: string; name: string; code: string }
 interface ExistingShift { id: string; ended_at: string | null }
+const ORDERS_ENABLED = false
 
 function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
@@ -124,6 +125,7 @@ export default function OperatorShift() {
   }
 
   const loadOrders = async (machineId: string) => {
+    if (!ORDERS_ENABLED) return
     const { data } = await supabase
       .from('production_orders')
       .select('*, assortment:assortments(name)')
@@ -149,8 +151,8 @@ export default function OperatorShift() {
   // Właściwy start — po potwierdzeniu
   const doStart = async () => {
     if (!selectedMachine) { setError('Wybierz maszynę'); return }
-    if (!selectedOrderId && !showNewOrder) { setError('Wybierz zlecenie produkcyjne lub utwórz nowe'); return }
-    if (showNewOrder && !newOrderNumber) { setError('Wpisz numer zlecenia'); return }
+    if (ORDERS_ENABLED && !selectedOrderId && !showNewOrder) { setError('Wybierz zlecenie produkcyjne lub utworz nowe'); return }
+    if (ORDERS_ENABLED && showNewOrder && !newOrderNumber) { setError('Wpisz numer zlecenia'); return }
     setError('')
     const { data: existingShift } = await findExistingShift()
     if (existingShift) {
@@ -161,7 +163,7 @@ export default function OperatorShift() {
       return
     }
     let orderId = selectedOrderId
-    if (showNewOrder && newOrderNumber) {
+    if (ORDERS_ENABLED && showNewOrder && newOrderNumber) {
       await supabase
         .from('production_orders')
         .update({ status: 'paused', paused_at: new Date().toISOString() })
@@ -179,7 +181,7 @@ export default function OperatorShift() {
         }).select().single()
       if (orderError) { setError('Błąd tworzenia zlecenia: ' + orderError.message); return }
       orderId = data.id
-    } else if (orderId) {
+    } else if (ORDERS_ENABLED && orderId) {
       await supabase
         .from('production_orders')
         .update({ status: 'paused', paused_at: new Date().toISOString() })
@@ -452,7 +454,7 @@ export default function OperatorShift() {
     <div className="mx-auto w-full max-w-2xl">
       <div className="mb-4 sm:mb-6">
         <h1 className="text-xl sm:text-2xl font-bold text-white">Rozpocznij zmianę</h1>
-        <p className="text-sm sm:text-base text-navy-400 mt-1">Wybierz maszynę, zmianę i zlecenie</p>
+        <p className="text-sm sm:text-base text-navy-400 mt-1">Wybierz maszyne i zmiane</p>
       </div>
       <div className="card space-y-5">
 
@@ -487,7 +489,7 @@ export default function OperatorShift() {
         </div>
 
         {/* Zlecenie */}
-        {selectedMachine && (
+        {ORDERS_ENABLED && selectedMachine && (
           <div>
             <label className="label">Zlecenie produkcyjne</label>
             {!showNewOrder ? (
