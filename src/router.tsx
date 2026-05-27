@@ -14,6 +14,7 @@ const OperatorFailure    = lazy(() => import('@/pages/operator/Failure'))
 const OperatorTasks      = lazy(() => import('@/pages/operator/Tasks'))
 const OperatorPassword   = lazy(() => import('@/pages/operator/Password'))
 const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
+const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ManagerOrders      = lazy(() => import('@/pages/manager/Orders'))
 const ManagerAssortments = lazy(() => import('@/pages/manager/Assortments'))
@@ -86,6 +87,10 @@ const router = createBrowserRouter([
       {
         path: 'manager',
         element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/day-report',
+        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerDayReport /></Wrap></RequireAuth>
       },
       {
         path: 'manager/export',
