@@ -163,6 +163,7 @@ export default function ManagerDashboard() {
   const [editing, setEditing] = useState<ReportWithContext | null>(null)
   const [editState, setEditState] = useState<EditState | null>(null)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const loadRequestSeq = useRef(0)
 
   const queryRange = useMemo(() => {
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
@@ -188,10 +189,21 @@ export default function ManagerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'production_orders' }, load)
       .subscribe()
-    return () => { channel.current?.unsubscribe() }
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') load()
+    }
+    window.addEventListener('focus', load)
+    document.addEventListener('visibilitychange', refreshOnFocus)
+
+    return () => {
+      window.removeEventListener('focus', load)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
+      channel.current?.unsubscribe()
+    }
   }, [queryRange.from, queryRange.to])
 
   const load = async () => {
+    const requestId = ++loadRequestSeq.current
     setLoading(true)
 
     const [mRes, sRes, rRes] = await Promise.all([
@@ -210,6 +222,8 @@ export default function ManagerDashboard() {
         .order('hour_start', { ascending: false })
     ])
 
+    if (requestId !== loadRequestSeq.current) return
+
     const staleShifts = ((sRes.data ?? []) as ActiveShift[]).filter(s =>
       isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
     )
@@ -221,11 +235,13 @@ export default function ManagerDashboard() {
       ))
     }
 
-    setMachines((mRes.data ?? []) as Machine[])
-    setActiveShifts(((sRes.data ?? []) as ActiveShift[]).filter(s =>
-      !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
-    ))
-    setReports((rRes.data ?? []) as ReportWithContext[])
+    if (!mRes.error) setMachines((mRes.data ?? []) as Machine[])
+    if (!sRes.error) {
+      setActiveShifts(((sRes.data ?? []) as ActiveShift[]).filter(s =>
+        !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
+      ))
+    }
+    if (!rRes.error) setReports((rRes.data ?? []) as ReportWithContext[])
     setLoading(false)
   }
 

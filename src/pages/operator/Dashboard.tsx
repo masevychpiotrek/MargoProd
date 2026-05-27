@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -20,6 +20,7 @@ export default function OperatorDashboard() {
   const hourBlock = useCurrentHourBlock()
   const { now, hour, time, date } = useClock()
   const [reports, setReports] = useState<HourlyReport[]>([])
+  const reportsRequestSeq = useRef(0)
 
   useEffect(() => {
     // Auto-detect shift for operator_2
@@ -54,20 +55,34 @@ export default function OperatorDashboard() {
       loadReports()
       loadActiveShift()
     }, 45000)
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') {
+        loadReports()
+        loadActiveShift()
+      }
+    }
+    window.addEventListener('focus', refreshOnFocus)
+    document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
       window.clearInterval(fallback)
+      window.removeEventListener('focus', refreshOnFocus)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
     }
   }, [activeShift?.id, loadActiveShift])
 
   const loadReports = async () => {
     if (!activeShift) return
-    const { data } = await supabase
+    const requestId = ++reportsRequestSeq.current
+    const shiftId = activeShift.id
+    const shiftType = activeShift.shift_type as ShiftType
+    const { data, error } = await supabase
       .from('hourly_reports').select('*')
-      .eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
+      .eq('shift_id', shiftId).is('deleted_at', null).order('hour_start')
+    if (error || requestId !== reportsRequestSeq.current) return
     if (data) {
-      const hours = testMode ? TEST_SLOTS : SHIFT_HOURS[activeShift.shift_type as ShiftType]
+      const hours = testMode ? TEST_SLOTS : SHIFT_HOURS[shiftType]
       setReports((data as HourlyReport[]).sort((a, b) => hours.indexOf(a.hour_start) - hours.indexOf(b.hour_start)))
     }
   }

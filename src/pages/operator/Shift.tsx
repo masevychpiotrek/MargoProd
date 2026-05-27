@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -60,6 +60,7 @@ export default function OperatorShift() {
   const [endConfirmText, setEndConfirmText] = useState('')
   const [missingHours,   setMissingHours]   = useState<number[]>([])
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
+  const reportsRequestSeq = useRef(0)
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
@@ -93,20 +94,30 @@ export default function OperatorShift() {
         filter: `shift_id=eq.${activeShift.id}`
       }, loadShiftReports)
       .subscribe()
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') loadShiftReports()
+    }
+    window.addEventListener('focus', loadShiftReports)
+    document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
+      window.removeEventListener('focus', loadShiftReports)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
     }
   }, [activeShift?.id])
 
   const loadShiftReports = async () => {
     if (!activeShift) return []
-    const { data } = await supabase
+    const requestId = ++reportsRequestSeq.current
+    const shiftId = activeShift.id
+    const { data, error } = await supabase
       .from('hourly_reports')
       .select('*')
-      .eq('shift_id', activeShift.id)
+      .eq('shift_id', shiftId)
       .is('deleted_at', null)
       .order('hour_start')
+    if (error || requestId !== reportsRequestSeq.current) return shiftReports
     const list = (data ?? []) as HourlyReport[]
     setShiftReports(list)
     return list

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
@@ -192,6 +192,7 @@ export default function OperatorReport() {
   const [showFinishOrder, setShowFinishOrder] = useState(false)
   const [finishNotes,          setFinishNotes]          = useState('')
   const [savingFinish,         setSavingFinish]         = useState(false)
+  const reportsRequestSeq = useRef(0)
 
   useEffect(() => {
     if (!activeShift) { navigate('/operator/shift'); return }
@@ -229,9 +230,16 @@ export default function OperatorReport() {
       .subscribe()
 
     const fallback = window.setInterval(reloadShiftData, 45000)
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') reloadShiftData()
+    }
+    window.addEventListener('focus', reloadShiftData)
+    document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
       window.clearInterval(fallback)
+      window.removeEventListener('focus', reloadShiftData)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
     }
   }, [activeShift?.id, activeShift?.machine_id, loadActiveShift])
@@ -249,9 +257,13 @@ export default function OperatorReport() {
 
   const loadReports = async () => {
     if (!activeShift) return
-    const { data } = await supabase.from('hourly_reports').select('*').eq('shift_id', activeShift.id).is('deleted_at', null).order('hour_start')
+    const requestId = ++reportsRequestSeq.current
+    const shiftId = activeShift.id
+    const shiftType = activeShift.shift_type
+    const { data, error } = await supabase.from('hourly_reports').select('*').eq('shift_id', shiftId).is('deleted_at', null).order('hour_start')
+    if (error || requestId !== reportsRequestSeq.current) return
     if (data) {
-      const hours = testMode ? TEST_SLOTS : getShiftHours(activeShift.shift_type)
+      const hours = testMode ? TEST_SLOTS : getShiftHours(shiftType)
       setExistingReports((data as ReportExt[]).sort((a, b) => hours.indexOf(a.hour_start) - hours.indexOf(b.hour_start)))
     }
   }
