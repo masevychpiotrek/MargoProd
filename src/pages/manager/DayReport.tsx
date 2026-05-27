@@ -66,6 +66,10 @@ function pieces(value: number) {
   return value.toLocaleString('pl-PL')
 }
 
+function timeLine(summary: ShiftSummary) {
+  return `praca ${mins(summary.runtime)} | got. ${mins(summary.ready)} | alarm/postoj ${mins(summary.alarm + summary.downtime)}`
+}
+
 function noteText(report: ReportWithContext) {
   return [report.downtime_reason, report.notes]
     .map(value => value?.trim())
@@ -265,6 +269,29 @@ export default function ManagerDayReport() {
         ))}
       </div>
 
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        {SHIFTS.map(shift => (
+          <div key={shift} className="kpi-card">
+            <div className="kpi-label">Czasy - zmiana {shift}</div>
+            <div className="grid grid-cols-3 gap-2">
+              <div>
+                <div className="text-xs text-navy-500">Praca</div>
+                <div className="font-mono text-lg font-bold text-green-400">{loading ? '...' : mins(shiftTotals[shift].runtime)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-navy-500">Gotowosc</div>
+                <div className="font-mono text-lg font-bold text-cyan-300">{loading ? '...' : mins(shiftTotals[shift].ready)}</div>
+              </div>
+              <div>
+                <div className="text-xs text-navy-500">Alarm/postoj</div>
+                <div className="font-mono text-lg font-bold text-amber-400">{loading ? '...' : mins(shiftTotals[shift].alarm + shiftTotals[shift].downtime)}</div>
+              </div>
+            </div>
+            <div className="kpi-sub mt-2">{pieces(shiftTotals[shift].good)} szt | {shiftTotals[shift].reports} wpisow</div>
+          </div>
+        ))}
+      </div>
+
       <div className="card">
         <div className="card-header">
           <div>
@@ -299,6 +326,11 @@ export default function ManagerDayReport() {
                             odrzut <span className="font-mono text-red-300">{pieces(row.shifts[shift].reject)}</span>
                             {' '}| wpisy {row.shifts[shift].reports}
                           </div>
+                          <div className="mt-2 rounded-lg bg-navy-900 px-2 py-1.5 text-xs leading-relaxed text-navy-300">
+                            <span className="font-mono text-green-300">praca {mins(row.shifts[shift].runtime)}</span>
+                            <br />
+                            got. {mins(row.shifts[shift].ready)} | alarm/postoj {mins(row.shifts[shift].alarm + row.shifts[shift].downtime)}
+                          </div>
                         </div>
                       ) : (
                         <span className="italic text-navy-500">Brak produkcji</span>
@@ -308,6 +340,9 @@ export default function ManagerDayReport() {
                   <td className="py-3 px-3 text-center bg-brand/10">
                     <div className="font-mono text-xl font-bold text-brand">{pieces(row.total.good)} szt</div>
                     <div className="mt-1 text-xs text-navy-300">odrzut {pieces(row.total.reject)} | wpisy {row.total.reports}</div>
+                    <div className="mt-2 rounded-lg bg-navy-900/70 px-2 py-1.5 text-xs leading-relaxed text-navy-200">
+                      {timeLine(row.total)}
+                    </div>
                   </td>
                 </tr>
               ))}
@@ -318,11 +353,13 @@ export default function ManagerDayReport() {
                     <td key={shift} className="py-3 px-3 text-center">
                       <div className="font-mono text-lg font-bold text-white">{pieces(shiftTotals[shift].good)} szt</div>
                       <div className="mt-1 text-xs text-navy-400">odrzut {pieces(shiftTotals[shift].reject)}</div>
+                      <div className="mt-2 text-xs text-navy-300">{timeLine(shiftTotals[shift])}</div>
                     </td>
                   ))}
                   <td className="py-3 px-3 text-center bg-brand/20">
                     <div className="font-mono text-xl font-bold text-brand">{pieces(totals.good)} szt</div>
                     <div className="mt-1 text-xs text-navy-300">odrzut {pieces(totals.reject)}</div>
+                    <div className="mt-2 text-xs text-navy-200">{timeLine(totals)}</div>
                   </td>
                 </tr>
               )}
