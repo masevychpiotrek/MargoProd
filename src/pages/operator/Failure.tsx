@@ -82,6 +82,89 @@ async function sendTeamsNotification(params: {
 
 // ─── Komponent ────────────────────────────────────────────────────────────────
 
+async function sendTeamsAdaptiveNotification(params: {
+  machine: string; category: string; severity: Severity
+  station: string; description: string; reporter: string
+  photoUrls: string[]
+}) {
+  const url = import.meta.env.VITE_TEAMS_WEBHOOK_URL
+  if (!url) return
+
+  const sevLabel = { low: 'Niska', medium: 'Srednia', high: 'Wysoka', critical: 'Krytyczna' }[params.severity]
+  const sevColor = { low: 'good', medium: 'warning', high: 'attention', critical: 'attention' }[params.severity]
+  const now = new Date().toLocaleString('pl-PL')
+
+  const payload = {
+    type: 'message',
+    attachments: [{
+      contentType: 'application/vnd.microsoft.card.adaptive',
+      contentUrl: null,
+      content: {
+        '$schema': 'http://adaptivecards.io/schemas/adaptive-card.json',
+        type: 'AdaptiveCard',
+        version: '1.4',
+        body: [
+          {
+            type: 'TextBlock',
+            text: `Awaria - ${params.machine}`,
+            weight: 'Bolder',
+            size: 'Large',
+            color: sevColor,
+            wrap: true
+          },
+          {
+            type: 'FactSet',
+            facts: [
+              { title: 'Zglosil', value: params.reporter },
+              { title: 'Czas', value: now },
+              { title: 'Kategoria', value: params.category },
+              { title: 'Stacja', value: params.station || '-' },
+              { title: 'Pilnosc', value: sevLabel }
+            ]
+          },
+          {
+            type: 'TextBlock',
+            text: params.description,
+            wrap: true
+          },
+          ...(params.photoUrls.length > 0 ? [{
+            type: 'TextBlock',
+            text: `Zdjecia: ${params.photoUrls.join(' ')}`,
+            wrap: true,
+            size: 'Small',
+            color: 'Accent'
+          }] : [])
+        ]
+      }
+    }]
+  }
+
+  try {
+    const response = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    })
+    if (!response.ok) {
+      console.warn('Teams notification failed', response.status, await response.text())
+      await sendTeamsNotification(params)
+    }
+  } catch (error) {
+    console.warn('Teams notification failed', error)
+    await sendTeamsNotification(params)
+  }
+}
+
+function getErrorMessage(error: unknown) {
+  if (error instanceof Error) return error.message
+  if (error && typeof error === 'object' && 'message' in error) {
+    const message = (error as { message?: unknown }).message
+    if (typeof message === 'string' && message.trim()) return message
+  }
+  if (typeof error === 'string' && error.trim()) return error
+  return 'Blad zglaszania awarii'
+}
+
 export default function OperatorFailure() {
   const { activeShift, activeMachine } = useShiftStore()
   const { profile } = useAuthStore()
@@ -128,13 +211,14 @@ export default function OperatorFailure() {
     const { error } = await supabase.storage.from('failure-photos').upload(path, file, {
       cacheControl: '3600', upsert: false
     })
-    if (error) return null
+    if (error) throw new Error(`Nie udalo sie dodac zdjecia: ${error.message}`)
     return supabase.storage.from('failure-photos').getPublicUrl(path).data.publicUrl
   }
 
   async function handleSubmit() {
     if (!machineId) { setError('Wybierz maszynę.'); return }
     if (!description.trim()) { setError('Wpisz opis awarii.'); return }
+    if (!profile?.id) { setError('Brak aktywnego profilu operatora. Zaloguj sie ponownie.'); return }
     setLoading(true); setError('')
 
     try {
@@ -144,7 +228,7 @@ export default function OperatorFailure() {
         .insert({
           machine_id:   machineId,
           shift_id:     activeShift?.id ?? null,
-          reporter_id:  profile!.id,
+          reporter_id:  profile.id,
           category,
           severity,
           status:       'new',
@@ -164,7 +248,11 @@ export default function OperatorFailure() {
         if (url) photoUrls.push(url)
       }
       if (photoUrls.length > 0) {
-        await supabase.from('failure_reports').update({ photo_urls: photoUrls }).eq('id', report.id)
+        const { error: photoUpdateError } = await supabase
+          .from('failure_reports')
+          .update({ photo_urls: photoUrls })
+          .eq('id', report.id)
+        if (photoUpdateError) throw photoUpdateError
       }
 
       // 3. Powiadomienia in-app dla specjalistów
@@ -194,7 +282,7 @@ export default function OperatorFailure() {
 
       // 4. Audit log
       await supabase.from('audit_logs').insert({
-        user_id:    profile!.id,
+        user_id:    profile.id,
         action:     'failure_report_create',
         table_name: 'failure_reports',
         record_id:  report.id,
@@ -202,7 +290,7 @@ export default function OperatorFailure() {
       })
 
       // 5. Teams
-      await sendTeamsNotification({
+      await sendTeamsAdaptiveNotification({
         machine:     machineName,
         category:    catLabel,
         severity,
@@ -213,7 +301,9 @@ export default function OperatorFailure() {
       })
 
       setSuccess(true)
-    } catch (e: unknown) {
+    } catch (e: any) {
+      setError(getErrorMessage(e))
+      return
       setError(e instanceof Error ? e.message : 'Błąd zgłaszania awarii')
     } finally {
       setLoading(false)
