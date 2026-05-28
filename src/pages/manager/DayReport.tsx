@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import type { HourlyReport, Machine, ShiftType } from '@/types/database'
 
-// ─── Types ──────────────────────────────────────────────────────────────────
+// ─── Types ───────────────────────────────────────────────────────────────────
 
 const SHIFTS: ShiftType[] = ['I', 'II', 'III']
 
@@ -26,9 +26,7 @@ type MachineDayRow = {
   total: ShiftSummary
 }
 
-type Kontekst = { material: string; settings: string; infra: string; other: string }
-
-// ─── Helpers ────────────────────────────────────────────────────────────────
+// ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function one<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value
@@ -55,13 +53,13 @@ function mins(value: number) {
 function pieces(value: number) { return value.toLocaleString('pl-PL') }
 function pct(o: number, t: number) { return t ? ((o / t) * 100).toFixed(1) + '%' : '-' }
 function timeLine(s: ShiftSummary) {
-  return `praca ${mins(s.runtime)} | got. ${mins(s.ready)} | alarm/postoj ${mins(s.alarm + s.downtime)}`
+  return `praca ${mins(s.runtime)} | got. ${mins(s.ready)} | alarm/postój ${mins(s.alarm + s.downtime)}`
 }
 function noteText(report: ReportWithContext) {
   return [report.downtime_reason, report.notes].map(v => v?.trim()).filter(Boolean).join(' - ')
 }
 
-// ─── Email HTML Builder ──────────────────────────────────────────────────────
+// ─── Email HTML builder ───────────────────────────────────────────────────────
 
 function buildEmailHtml(params: {
   date: string
@@ -69,30 +67,25 @@ function buildEmailHtml(params: {
   totals: ShiftSummary
   shiftTotals: Record<ShiftType, ShiftSummary>
   shiftsHtml: string
-  kontekst: Kontekst
 }) {
-  const { date, rows, totals, shiftTotals, shiftsHtml, kontekst } = params
-
+  const { date, rows, totals, shiftTotals, shiftsHtml } = params
   const K = {
     navy: '#1B2A4A', blue: '#4A7EC7', blueLt: '#EEF4FF', blueBr: '#C2D4F0', blueTx: '#1B3A6B',
     teal: '#1A7F6E', tealLt: '#EDFAF6', tealBr: '#A0D9CE', tealTx: '#0D5247',
     red: '#C0392B', gold: '#B8860B', gray1: '#F7F8FA', gray2: '#E4E8EE', gray3: '#6B7280',
     s1bg: '#EEF0FF', s1tx: '#3730A3', s2bg: '#EDFAF6', s2tx: '#0D5247', s3bg: '#FFF7ED', s3tx: '#92400E',
-    amber: '#D97706', amberLt: '#FFF7ED',
   }
-
   const tt = totals.good, to = totals.reject
   const dateFormatted = new Date(`${date}T12:00:00`).toLocaleDateString('pl-PL', {
     day: '2-digit', month: '2-digit', year: 'numeric'
   })
 
   function TH(extra = '') {
-    return `style="background:${K.blue};color:#ffffff;padding:10px 12px;font-size:12px;font-weight:bold;letter-spacing:.5px;font-family:Arial,sans-serif;${extra}"`
+    return `style="background:${K.blue};color:#fff;padding:10px 12px;font-size:12px;font-weight:bold;letter-spacing:.5px;font-family:Arial,sans-serif;${extra}"`
   }
   function TD(bg: string, br: string, tx: string, extra = '') {
     return `style="background:${bg};border:1px solid ${br};padding:10px 12px;color:${tx};font-family:Arial,sans-serif;vertical-align:middle;${extra}"`
   }
-
   function fmtCell(p: number, o: number) {
     if (!p && !o) return `<em style="color:${K.gray3};font-family:Arial,sans-serif">Brak produkcji</em>`
     return `<span style="font-size:14px;font-weight:bold;color:${K.navy};font-family:Arial,sans-serif">${pieces(p)} szt.</span>`
@@ -100,19 +93,17 @@ function buildEmailHtml(params: {
       + `<br><span style="color:${K.gold};font-size:12px;font-weight:bold;font-family:Arial,sans-serif">${pct(o, p)}</span>`
   }
 
-  // Build production table rows from actual machines
   const machineRows = rows.map((row, idx) => {
-    const isFirst = idx % 2 === 0
-    const bg = isFirst ? K.blueLt : K.tealLt
-    const br = isFirst ? K.blueBr : K.tealBr
-    const tx = isFirst ? K.blueTx : K.tealTx
-    const ac = isFirst ? K.blue : K.teal
+    const bg = idx % 2 === 0 ? K.blueLt : K.tealLt
+    const br = idx % 2 === 0 ? K.blueBr : K.tealBr
+    const tx = idx % 2 === 0 ? K.blueTx : K.tealTx
+    const ac = idx % 2 === 0 ? K.blue : K.teal
     return `<tr>
   <td ${TD(bg, br, tx, 'font-weight:bold')}>${row.machineName}</td>
   <td align="center" ${TD(bg, br, tx)}>${fmtCell(row.shifts.I.good, row.shifts.I.reject)}</td>
   <td align="center" ${TD(bg, br, tx)}>${fmtCell(row.shifts.II.good, row.shifts.II.reject)}</td>
   <td align="center" ${TD(bg, br, tx)}>${fmtCell(row.shifts.III.good, row.shifts.III.reject)}</td>
-  <td align="center" style="background:${ac};border:1px solid ${ac};padding:10px 12px;color:#fff;font-weight:bold;font-size:15px;font-family:Arial,sans-serif;text-align:center">${pieces(row.total.good)}<br><span style="font-size:11px;font-weight:normal;color:#fff;font-family:Arial,sans-serif">szt.</span></td>
+  <td align="center" style="background:${ac};border:1px solid ${ac};padding:10px 12px;color:#fff;font-weight:bold;font-size:15px;font-family:Arial,sans-serif;text-align:center">${pieces(row.total.good)}<br><span style="font-size:11px;font-weight:normal;color:#fff">szt.</span></td>
 </tr>`
   }).join('\n')
 
@@ -132,48 +123,26 @@ ${machineRows}
   <td align="center" ${TD(K.gray1, K.gray2, K.navy)}><strong>${pieces(shiftTotals.I.good)}</strong> szt.</td>
   <td align="center" ${TD(K.gray1, K.gray2, K.navy)}><strong>${pieces(shiftTotals.II.good)}</strong> szt.</td>
   <td align="center" ${TD(K.gray1, K.gray2, K.navy)}><strong>${pieces(shiftTotals.III.good)}</strong> szt.</td>
-  <td align="center" style="background:${K.blue};border:1px solid ${K.blue};padding:10px 12px;color:#fff;font-weight:bold;font-size:15px;font-family:Arial,sans-serif;text-align:center">${pieces(tt)}<br><span style="font-size:11px;font-weight:normal;color:#fff;font-family:Arial,sans-serif">szt.</span></td>
+  <td align="center" style="background:${K.blue};border:1px solid ${K.blue};padding:10px 12px;color:#fff;font-weight:bold;font-size:15px;font-family:Arial,sans-serif;text-align:center">${pieces(tt)}<br><span style="font-size:11px;font-weight:normal;color:#fff">szt.</span></td>
 </tr>
 </tbody></table>
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px">
 <tr><td style="padding:10px 14px;background:${K.gray1};border-left:4px solid ${K.blue};font-family:Arial,sans-serif;font-size:13px;color:${K.navy}">
-  \u0141\u0105czna produkcja: <strong style="color:${K.navy};font-family:Arial,sans-serif">${pieces(tt)} szt.</strong>
-  &nbsp;|&nbsp;
-  \u0141\u0105czny odrzut: <strong style="color:${K.red};font-family:Arial,sans-serif">${pieces(to)} szt. (${pct(to, tt)})</strong>
+  \u0141\u0105czna produkcja: <strong>${pieces(tt)} szt.</strong> &nbsp;|&nbsp; \u0141\u0105czny odrzut: <strong style="color:${K.red}">${pieces(to)} szt. (${pct(to, tt)})</strong>
 </td></tr></table>`
 
-  // Kontekst section
-  const hasKontekst = kontekst.material || kontekst.settings || kontekst.infra || kontekst.other
-  let kontekstHtml = ''
-  if (hasKontekst) {
-    const lines = [
-      kontekst.material && `<li style="margin-bottom:4px;font-size:13px;color:#1B2A4A;font-family:Arial,sans-serif"><strong>Zmiana materia\u0142u/surowca:</strong> ${kontekst.material}</li>`,
-      kontekst.settings && `<li style="margin-bottom:4px;font-size:13px;color:#1B2A4A;font-family:Arial,sans-serif"><strong>Zmiana ustawie\u0144/parametr\u00f3w:</strong> ${kontekst.settings}</li>`,
-      kontekst.infra && `<li style="margin-bottom:4px;font-size:13px;color:#1B2A4A;font-family:Arial,sans-serif"><strong>Problemy infrastrukturalne:</strong> ${kontekst.infra}</li>`,
-      kontekst.other && `<li style="margin-bottom:4px;font-size:13px;color:#1B2A4A;font-family:Arial,sans-serif"><strong>Inne:</strong> ${kontekst.other}</li>`,
-    ].filter(Boolean).join('')
-    kontekstHtml = `
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 12px 0"><tr><td style="border-bottom:2px solid ${K.amber};padding-bottom:6px">
-  <span style="font-size:14px;font-weight:bold;color:${K.amber};font-family:Arial,sans-serif">2. Kontekst dnia</span>
-</td></tr></table>
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:16px">
-<tr><td style="background:${K.amberLt};border-left:4px solid ${K.amber};padding:12px 16px;font-family:Arial,sans-serif">
-  <ul style="margin:0;padding-left:18px">${lines}</ul>
-</td></tr></table>`
-  }
-
-  // Convert shifts HTML (from AI or fallback) to email-safe inline styles
+  // Convert shifts HTML to email-safe inline styles
   function convertShiftsToEmail(html: string): string {
     const tmp = document.createElement('div')
     tmp.innerHTML = html
-    function convertNode(node: ChildNode, mc: string): string {
+    function cn2(node: ChildNode, mc: string): string {
       if (node.nodeType === 3) return (node as Text).textContent || ''
       if (node.nodeType !== 1) return ''
       const el = node as Element
       const tag = el.tagName.toLowerCase()
       const cls = el.className || ''
       const curMC = cls.includes('mc-box') ? (cls.includes('m3') ? 'm3' : 'm4') : mc
-      const kids = () => Array.from(el.childNodes).map(c => convertNode(c, curMC)).join('')
+      const kids = () => Array.from(el.childNodes).map(c => cn2(c, curMC)).join('')
       if (cls.includes('shift-bar')) {
         const sc = cls.includes('s1') ? 's1' : cls.includes('s2') ? 's2' : 's3'
         const c = { s1: { bg: K.s1bg, tx: K.s1tx }, s2: { bg: K.s2bg, tx: K.s2tx }, s3: { bg: K.s3bg, tx: K.s3tx } }[sc]
@@ -203,32 +172,30 @@ ${machineRows}
       if (tag === 'br') return '<br>'
       return kids()
     }
-    return Array.from(tmp.childNodes).map(n => convertNode(n, '')).join('')
+    return Array.from(tmp.childNodes).map(n => cn2(n, '')).join('')
   }
 
   const emailShifts = convertShiftsToEmail(shiftsHtml)
-  const sectionNum = hasKontekst ? '3' : '2'
 
   return `<!DOCTYPE html><html><head><meta charset="utf-8"></head>
-<body style="font-family:Arial,sans-serif;color:${K.navy};margin:0;padding:0;background:#ffffff">
-<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:0">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;margin-bottom:0">
+<body style="font-family:Arial,sans-serif;color:${K.navy};margin:0;padding:0;background:#fff">
+<table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0">
   <tr><td style="background:${K.blue};padding:14px 20px">
-    <p style="margin:0;font-size:15px;font-weight:bold;color:#ffffff;font-family:Arial,sans-serif">Wydzia\u0142 Monta\u017cu Automatycznego</p>
+    <p style="margin:0;font-size:15px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">Wydzia\u0142 Monta\u017cu Automatycznego</p>
     <p style="margin:3px 0 0;font-size:12px;color:#E8F0FA;font-family:Arial,sans-serif">Raport produkcyjny &bull; ${dateFormatted} r.</p>
   </td></tr></table>
   <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:16px 0 24px 0">
     <p style="font-size:14px;line-height:1.8;margin:0 0 20px;color:${K.navy};font-family:Arial,sans-serif">
       Szanowni Pa&nacute;stwo,<br>
-      W za&lstrok;&aogon;czeniu przekazuj&eogon; raport z wynik&oacute;w produkcyjnych oraz zestawienie kluczowych zdarze&nacute; na Wydziale Monta&zdot;u Automatycznego z dnia <strong style="color:${K.navy};font-family:Arial,sans-serif">${dateFormatted} r.</strong>
+      W za&lstrok;&aogon;czeniu przekazuj&eogon; raport z wynik&oacute;w produkcyjnych oraz zestawienie kluczowych zdarze&nacute; na Wydziale Monta&zdot;u Automatycznego z dnia <strong>${dateFormatted} r.</strong>
     </p>
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:12px"><tr><td style="border-bottom:2px solid ${K.blue};padding-bottom:6px">
       <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">1. Wyniki produkcyjne</span>
     </td></tr></table>
     ${prodTable}
-    ${kontekstHtml}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 12px 0"><tr><td style="border-bottom:2px solid ${K.blue};padding-bottom:6px">
-      <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">${sectionNum}. Kluczowe zdarzenia</span>
+      <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">2. Kluczowe zdarzenia</span>
     </td></tr></table>
     ${emailShifts}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px"><tr><td style="border-top:1px solid ${K.gray2};padding-top:12px">
@@ -239,56 +206,47 @@ ${machineRows}
 </body></html>`
 }
 
-// ─── AI Prompt Builder ───────────────────────────────────────────────────────
+// ─── AI prompt ────────────────────────────────────────────────────────────────
 
 function buildAiPrompt(
   eventsByShift: Record<ShiftType, { machine: string; hour: string; text: string; operator: string }[]>,
   shiftTotals: Record<ShiftType, ShiftSummary>,
   machineNames: string[]
 ): string {
-  const machineList = machineNames.map((n, i) => {
-    const cls = i % 2 === 0 ? 'm3' : 'm4'
-    return `${n} (klasa CSS: ${cls})`
-  }).join(', ')
-
   const notesBlock = SHIFTS.map(shift => {
     const events = eventsByShift[shift]
-    const machineNotes: Record<string, string[]> = {}
+    const byMachine: Record<string, string[]> = {}
     events.forEach(e => {
-      if (!machineNotes[e.machine]) machineNotes[e.machine] = []
-      machineNotes[e.machine].push(`[${e.hour}] ${e.text} (operator: ${e.operator})`)
+      if (!byMachine[e.machine]) byMachine[e.machine] = []
+      byMachine[e.machine].push(`[${e.hour}] ${e.text} (op: ${e.operator})`)
     })
-    const parts = machineNames.map(name => {
-      const notes = machineNotes[name] || []
-      return `${name}:\n${notes.length ? notes.join('\n') : '(brak zdarzen)'}`
-    }).join('\n\n')
     const st = shiftTotals[shift]
-    return `ZMIANA ${shift} (produkcja lacznie: ${pieces(st.good)} szt., odrzut: ${pieces(st.reject)} szt., czas pracy: ${mins(st.runtime)}):\n${parts}`
+    const parts = machineNames.map(name => {
+      const notes = byMachine[name] || []
+      return `${name}:\n${notes.length ? notes.join('\n') : '(brak zdarzeń)'}`
+    }).join('\n\n')
+    return `ZMIANA ${shift} — produkcja: ${pieces(st.good)} szt., odrzut: ${pieces(st.reject)}, czas pracy: ${mins(st.runtime)}\n${parts}`
   }).join('\n\n---\n\n')
 
-  return `Przepisujesz surowe notatki operatorów na profesjonalny raport zmianowy. Nie dodajesz nic od siebie — tylko poprawiasz ortografię, interpunkcję i układasz w strukturę. Każdy fakt z notatki musi znaleźć się w raporcie. Nic nie pomijasz, nic nie dodajesz.
-
-MASZYNY W HALI: ${machineList}
+  return `Przepisujesz surowe notatki operatorów na profesjonalny raport zmianowy. Poprawiasz tylko ortografię i interpunkcję — treść zostaje. Nic nie dodajesz, nic nie pomijasz.
 
 ZASADY:
-- Jeden fakt = jedno zdanie lub jeden punkt listy
-- Popraw tylko ortografię i interpunkcję — treść zostaje
+- Produkcja >= 18000 szt. per automat na zmianę → "Produkcja przebiegała prawidłowo."
+- Jeden fakt = jedno zdanie lub punkt listy
 - Słownictwo: stacja (st.10), transfer, zacięcie, automat
-- Jeśli coś się powtarza → jeden punkt z dopiskiem "(powtarzające się)"
-- Produkcja zmiana >= 18000 szt. per automat → "Produkcja przebiegała prawidłowo."
+- Powtarzające się zdarzenia → jeden punkt z "(powtarzające się)"
 
 STRUKTURA każdego automatu:
-1. Jedno zdanie otwierające — prawidłowa / zakłócona / awaryjna
+1. Zdanie otwierające (prawidłowa / zakłócona / awaryjna)
 2. Opóźniony start → "Start automatu o godz. HH:MM — [przyczyna]."
 3. "W trakcie zmiany odnotowano:" → lista faktów
 4. "Podjęte działania:" → lista działań
-5. "Postoje:" → jeśli godzina i przyczyna w notatkach
-6. Jedno zdanie zamykające
-7. Czasy jeśli podane
+5. Zdanie zamykające
+6. Czasy — tylko jeśli podane w notatce
 
-ZWRÓĆ TYLKO HTML od pierwszego <div class="shift-bar ..."> — zero tekstu przed ani po.
+ZWRÓĆ TYLKO HTML zaczynając od pierwszego <div class="shift-bar ..."> — zero tekstu przed ani po.
 
-Format HTML (dla każdej zmiany i każdej maszyny):
+Format:
 <div class="shift-bar s1">Zmiana I</div>
 <div class="mc-box m3">
   <div class="mc-name">NAZWA_MASZYNY</div>
@@ -299,50 +257,69 @@ Format HTML (dla każdej zmiany i każdej maszyny):
     <p class="sub-h">Podjęte działania:</p>
     <ul><li>[działanie]</li></ul>
     <p>[zdanie zamykające]</p>
-    <p class="times">Czas pracy: <strong>X h XX min</strong> | Czas w gotowości: <strong>XX min</strong> | Czas w alarmie: <strong>X h XX min</strong></p>
+    <p class="times">Czas pracy: <strong>Xh XXmin</strong> | Gotowość: <strong>XXmin</strong> | Alarm: <strong>XXmin</strong></p>
   </div>
 </div>
-[kolejne maszyny z odpowiednią klasą m3/m4/m5...]
+[kolejne maszyny — m3, m4, m5... naprzemiennie]
 <div class="shift-bar s2">Zmiana II</div>
 [analogicznie]
 <div class="shift-bar s3">Zmiana III</div>
 [analogicznie]
 
-Brak notatek dla maszyny: <em style="color:#6B7280">Brak zdarzeń do odnotowania.</em>
-Pomiń sub-h jeśli brak danych. Times tylko jeśli w notatce.
+Brak zdarzeń: <em style="color:#6B7280">Brak zdarzeń do odnotowania.</em>
+Pomiń sekcje sub-h jeśli brak danych. Times tylko jeśli w notatce.
 
-===== DANE DO PRZETWORZENIA =====
+===== DANE =====
 ${notesBlock}`
 }
 
-// ─── Fallback HTML (bez AI) ──────────────────────────────────────────────────
+// ─── API Key Modal ────────────────────────────────────────────────────────────
 
-function buildFallbackShiftsHtml(
-  eventsByShift: Record<ShiftType, { machine: string; hour: string; text: string; operator: string }[]>,
-  machineNames: string[]
-): string {
-  const shiftCfg = [
-    { shift: 'I' as ShiftType, cls: 's1', label: 'Zmiana I' },
-    { shift: 'II' as ShiftType, cls: 's2', label: 'Zmiana II' },
-    { shift: 'III' as ShiftType, cls: 's3', label: 'Zmiana III' },
-  ]
-  return shiftCfg.map(({ shift, cls, label }) => {
-    const events = eventsByShift[shift]
-    const machineCards = machineNames.map((name, idx) => {
-      const mcCls = idx % 2 === 0 ? 'm3' : 'm4'
-      const machineEvents = events.filter(e => e.machine === name)
-      const body = machineEvents.length
-        ? machineEvents.map(e => `<p><strong>${e.hour}</strong> — ${e.text}</p>`).join('')
-        : '<em style="color:#6B7280">Brak zdarzeń do odnotowania.</em>'
-      return `<div class="mc-box ${mcCls}"><div class="mc-name">${name}</div><div class="mc-body">${body}</div></div>`
-    }).join('')
-    return `<div class="shift-bar ${cls}">${label}</div>${machineCards}`
-  }).join('')
+function ApiKeyModal({ onSave }: { onSave: (key: string) => void }) {
+  const [key, setKey] = useState('')
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="w-full max-w-md bg-navy-800 border border-navy-600 rounded-2xl shadow-2xl p-6 space-y-4">
+        <div className="flex items-center gap-3">
+          <div className="w-10 h-10 rounded-xl bg-brand/20 flex items-center justify-center text-xl">🔑</div>
+          <div>
+            <h2 className="text-white font-bold">Klucz API Anthropic</h2>
+            <p className="text-navy-400 text-xs">Jednorazowa konfiguracja — zostanie zapamiętany</p>
+          </div>
+        </div>
+        <div>
+          <input
+            type="password"
+            className="input font-mono text-xs"
+            placeholder="sk-ant-api03-..."
+            value={key}
+            onChange={e => setKey(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && key.trim() && onSave(key.trim())}
+            autoFocus
+          />
+          <p className="text-navy-500 text-xs mt-2">
+            Pobierz na{' '}
+            <a href="https://console.anthropic.com" target="_blank" rel="noopener" className="text-brand hover:underline">
+              console.anthropic.com
+            </a>
+            {' '}→ API Keys
+          </p>
+        </div>
+        <button
+          onClick={() => key.trim() && onSave(key.trim())}
+          disabled={!key.trim()}
+          className="btn-primary w-full py-3 font-bold disabled:opacity-50"
+        >
+          Zapisz i wygeneruj raport
+        </button>
+      </div>
+    </div>
+  )
 }
 
-// ─── Email Modal ─────────────────────────────────────────────────────────────
+// ─── Report Modal ─────────────────────────────────────────────────────────────
 
-interface EmailModalProps {
+interface ReportModalProps {
   date: string
   rows: MachineDayRow[]
   totals: ShiftSummary
@@ -351,76 +328,65 @@ interface EmailModalProps {
   onClose: () => void
 }
 
-function EmailModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }: EmailModalProps) {
-  const [step, setStep] = useState<'form' | 'preview'>('form')
-  const [apiKey, setApiKey] = useState(() => localStorage.getItem('margoline_api_key') || '')
-  const [useAi, setUseAi] = useState(true)
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState('')
+function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }: ReportModalProps) {
+  const [step, setStep] = useState<'loading' | 'done' | 'error'>('loading')
   const [emailHtml, setEmailHtml] = useState('')
+  const [errorMsg, setErrorMsg] = useState('')
   const [copied, setCopied] = useState(false)
-  const [kontekst, setKontekst] = useState<Kontekst>({ material: '', settings: '', infra: '', other: '' })
+  const generated = useRef(false)
 
+  const apiKey = localStorage.getItem('margoline_api_key') || ''
   const machineNames = rows.map(r => r.machineName)
 
-  function setK(field: keyof Kontekst, val: string) {
-    setKontekst(prev => ({ ...prev, [field]: val }))
-  }
+  useEffect(() => {
+    if (generated.current) return
+    generated.current = true
+    generate()
+  }, [])
 
   async function generate() {
-    setError('')
-    setLoading(true)
+    setStep('loading')
     try {
-      let shiftsHtml = ''
-      if (useAi) {
-        if (!apiKey.trim()) { setError('Wpisz klucz API Anthropic.'); setLoading(false); return }
-        localStorage.setItem('margoline_api_key', apiKey.trim())
-        const prompt = buildAiPrompt(eventsByShift, shiftTotals, machineNames)
-        const resp = await fetch('https://api.anthropic.com/v1/messages', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'x-api-key': apiKey.trim(),
-            'anthropic-version': '2023-06-01',
-            'anthropic-dangerous-direct-browser-access': 'true',
-          },
-          body: JSON.stringify({
-            model: 'claude-haiku-4-5-20251001',
-            max_tokens: 5000,
-            messages: [{ role: 'user', content: prompt }]
-          })
+      const prompt = buildAiPrompt(eventsByShift, shiftTotals, machineNames)
+      const resp = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: 'claude-haiku-4-5-20251001',
+          max_tokens: 5000,
+          messages: [{ role: 'user', content: prompt }]
         })
-        if (!resp.ok) {
-          const err = await resp.json().catch(() => ({})) as { error?: { message?: string } }
-          throw new Error(err.error?.message || `Błąd API: ${resp.status}`)
-        }
-        const data = await resp.json() as { content: { type: string; text?: string }[] }
-        let full = data.content.map(c => c.text || '').join('').trim()
-        // Usuń markdown backticks jeśli AI je doda
-        while (full.startsWith('```')) { full = full.slice(full.indexOf('\n') + 1).trim() }
-        while (full.endsWith('```')) { full = full.slice(0, full.lastIndexOf('\n')).trim() }
-        shiftsHtml = full
-      } else {
-        shiftsHtml = buildFallbackShiftsHtml(eventsByShift, machineNames)
+      })
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({})) as { error?: { message?: string } }
+        throw new Error(err.error?.message || `Błąd API: ${resp.status}`)
       }
-      const html = buildEmailHtml({ date, rows, totals, shiftTotals, shiftsHtml, kontekst })
+      const data = await resp.json() as { content: { type: string; text?: string }[] }
+      let shiftsHtml = data.content.map(c => c.text || '').join('').trim()
+      while (shiftsHtml.startsWith('```')) { shiftsHtml = shiftsHtml.slice(shiftsHtml.indexOf('\n') + 1).trim() }
+      while (shiftsHtml.endsWith('```')) { shiftsHtml = shiftsHtml.slice(0, shiftsHtml.lastIndexOf('\n')).trim() }
+      const html = buildEmailHtml({ date, rows, totals, shiftTotals, shiftsHtml })
       setEmailHtml(html)
-      setStep('preview')
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Nieznany błąd')
-    } finally {
-      setLoading(false)
+      setStep('done')
+    } catch (e) {
+      setErrorMsg(e instanceof Error ? e.message : 'Nieznany błąd')
+      setStep('error')
     }
   }
 
   function copyToClipboard() {
     const blob = new Blob([emailHtml], { type: 'text/html' })
     if (window.ClipboardItem && navigator.clipboard?.write) {
-      navigator.clipboard.write([new ClipboardItem({ 'text/html': blob })]).then(() => {
-        setCopied(true); setTimeout(() => setCopied(false), 3000)
-      }).catch(fallbackCopy)
-    } else { fallbackCopy() }
-    function fallbackCopy() {
+      navigator.clipboard.write([new ClipboardItem({ 'text/html': blob })])
+        .then(() => { setCopied(true); setTimeout(() => setCopied(false), 3000) })
+        .catch(fallback)
+    } else { fallback() }
+    function fallback() {
       const el = document.createElement('div')
       el.contentEditable = 'true'
       el.style.cssText = 'position:fixed;top:0;left:0;opacity:0;pointer-events:none'
@@ -429,8 +395,7 @@ function EmailModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }:
       const sel = window.getSelection()
       const range = document.createRange()
       range.selectNodeContents(el)
-      sel?.removeAllRanges()
-      sel?.addRange(range)
+      sel?.removeAllRanges(); sel?.addRange(range)
       document.execCommand('copy')
       sel?.removeAllRanges()
       document.body.removeChild(el)
@@ -438,7 +403,7 @@ function EmailModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }:
     }
   }
 
-  function openPreviewWindow() {
+  function openInWindow() {
     const w = window.open('', '_blank', 'width=900,height=700,scrollbars=yes')
     if (w) { w.document.write(emailHtml); w.document.close() }
   }
@@ -446,8 +411,6 @@ function EmailModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }:
   const dateFormatted = new Date(`${date}T12:00:00`).toLocaleDateString('pl-PL', {
     weekday: 'long', day: 'numeric', month: 'long', year: 'numeric'
   })
-
-  const hasNotes = SHIFTS.some(s => eventsByShift[s].length > 0)
 
   return (
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/70 backdrop-blur-sm overflow-y-auto p-4">
@@ -457,173 +420,94 @@ function EmailModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }:
         <div className="flex items-center justify-between px-6 py-4 border-b border-navy-700">
           <div>
             <h2 className="text-white font-bold text-base flex items-center gap-2">
-              <span className="text-lg">✉️</span>
-              {step === 'form' ? 'Generuj raport email' : 'Podgląd raportu'}
+              <span>✉️</span> Raport email
             </h2>
-            <p className="text-navy-400 text-xs mt-0.5">{dateFormatted}</p>
+            <p className="text-navy-400 text-xs mt-0.5 capitalize">{dateFormatted}</p>
           </div>
-          <button onClick={onClose} className="text-navy-400 hover:text-white transition-colors text-xl leading-none">✕</button>
+          <button onClick={onClose} className="text-navy-400 hover:text-white transition-colors text-xl">✕</button>
         </div>
 
-        {/* KROK 1: FORMULARZ */}
-        {step === 'form' && (
-          <div className="p-6 space-y-5">
+        <div className="p-6">
 
-            {/* Tryb */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => setUseAi(true)}
-                className={cn('flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all', useAi
-                  ? 'bg-brand text-white border-brand shadow-md shadow-brand/20'
-                  : 'bg-navy-700 text-navy-300 border-navy-600 hover:bg-navy-600'
-                )}
-              >✨ Z pomocą AI</button>
-              <button
-                onClick={() => setUseAi(false)}
-                className={cn('flex-1 py-2.5 rounded-xl text-sm font-semibold border transition-all', !useAi
-                  ? 'bg-navy-600 text-white border-navy-500'
-                  : 'bg-navy-700 text-navy-300 border-navy-600 hover:bg-navy-600'
-                )}
-              >Standardowy</button>
-            </div>
-
-            {/* API Key */}
-            {useAi && (
-              <div>
-                <label className="label">Klucz API Anthropic</label>
-                <input
-                  type="password"
-                  className="input font-mono text-xs"
-                  placeholder="sk-ant-api03-..."
-                  value={apiKey}
-                  onChange={e => setApiKey(e.target.value)}
-                />
-                <p className="text-navy-500 text-xs mt-1.5">
-                  Klucz jest zapisywany lokalnie w przeglądarce. Pobierz go z{' '}
-                  <a href="https://console.anthropic.com" target="_blank" rel="noopener" className="text-brand hover:underline">console.anthropic.com</a>.
-                </p>
+          {/* LOADING */}
+          {step === 'loading' && (
+            <div className="flex flex-col items-center gap-4 py-12">
+              <div className="relative">
+                <svg className="animate-spin h-12 w-12 text-brand" viewBox="0 0 24 24" fill="none">
+                  <circle className="opacity-20" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="3"/>
+                  <path className="opacity-90" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                </svg>
               </div>
-            )}
-
-            {/* Podsumowanie danych */}
-            <div className="rounded-xl bg-navy-900 border border-navy-700 p-4">
-              <div className="text-xs font-bold text-navy-400 uppercase tracking-wider mb-3">Dane z bazy</div>
-              <div className="grid grid-cols-3 gap-3">
-                {SHIFTS.map(s => (
-                  <div key={s} className="text-center">
-                    <div className="text-xs text-navy-500 mb-1">Zmiana {s}</div>
-                    <div className="font-mono font-bold text-white text-sm">{pieces(shiftTotals[s].good)} szt.</div>
-                    <div className="text-xs text-navy-500">{eventsByShift[s].length} zdarzeń</div>
-                  </div>
-                ))}
-              </div>
-              {!hasNotes && (
-                <p className="text-amber-400 text-xs mt-3 text-center">
-                  ⚠️ Brak notatek w żadnej zmianie — raport będzie zawierał tylko dane liczbowe.
-                </p>
-              )}
-            </div>
-
-            {/* Kontekst dnia */}
-            <div>
-              <div className="flex items-center gap-2 mb-3">
-                <div className="text-xs font-bold text-amber-400 uppercase tracking-wider">🔍 Kontekst dnia</div>
-                <span className="text-xs text-navy-500">— opcjonalnie, wstawiany po wynikach</span>
-              </div>
-              <div className="space-y-3">
-                {[
-                  { field: 'material' as const, label: 'Zmiana materiału / surowca / partii', placeholder: 'np. Zmiana partii filtrów — nowa partia wykazuje inne parametry...' },
-                  { field: 'settings' as const, label: 'Zmiana ustawień / parametrów / narzędzi', placeholder: 'np. Regulacja siłowników na st.51 na wszystkich zmianach...' },
-                  { field: 'infra' as const, label: 'Problemy infrastrukturalne / zewnętrzne', placeholder: 'np. Problemy z ciśnieniem sprężonego powietrza...' },
-                  { field: 'other' as const, label: 'Inne uwagi ogólne', placeholder: 'Zmiany organizacyjne, braki kadrowe, szkolenia...' },
-                ].map(({ field, label, placeholder }) => (
-                  <div key={field}>
-                    <label className="text-xs text-navy-400 block mb-1">{label}</label>
-                    <textarea
-                      rows={2}
-                      className="input resize-none text-xs py-2"
-                      placeholder={placeholder}
-                      value={kontekst[field]}
-                      onChange={e => setK(field, e.target.value)}
-                    />
-                  </div>
-                ))}
+              <div className="text-center">
+                <p className="text-white font-semibold">AI redaguje raport...</p>
+                <p className="text-navy-400 text-sm mt-1">Formatuję notatki operatorów</p>
               </div>
             </div>
+          )}
 
-            {/* Błąd */}
-            {error && (
-              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                {error}
+          {/* ERROR */}
+          {step === 'error' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
+                <div className="font-bold mb-1">Błąd generowania</div>
+                {errorMsg}
               </div>
-            )}
-
-            {/* Przycisk generuj */}
-            <button
-              onClick={generate}
-              disabled={loading}
-              className="btn-primary w-full py-3 text-sm font-bold disabled:opacity-60"
-            >
-              {loading ? (
-                <span className="flex items-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  {useAi ? 'AI redaguje notatki...' : 'Generuję raport...'}
-                </span>
-              ) : (
-                useAi ? '✨ Wygeneruj raport z AI' : 'Wygeneruj raport standardowy'
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* KROK 2: PODGLĄD */}
-        {step === 'preview' && (
-          <div className="p-6 space-y-4">
-            <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300 flex items-center gap-2">
-              <span>✓</span>
-              <span>Raport wygenerowany — gotowy do wysłania w Outlooku.</span>
+              <div className="flex gap-3">
+                <button onClick={onClose} className="btn-secondary flex-1">Zamknij</button>
+                <button onClick={() => { generated.current = false; generate() }} className="btn-primary flex-1">
+                  Spróbuj ponownie
+                </button>
+              </div>
             </div>
+          )}
 
-            {/* Preview iframe */}
-            <div className="rounded-xl border border-navy-600 overflow-hidden bg-white" style={{ height: 320 }}>
-              <iframe
-                srcDoc={emailHtml}
-                title="Podgląd emaila"
-                className="w-full h-full"
-                sandbox="allow-same-origin"
-              />
-            </div>
+          {/* DONE */}
+          {step === 'done' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300 flex items-center gap-2">
+                <span>✓</span> Raport gotowy — wklej do nowej wiadomości w Outlooku
+              </div>
 
-            {/* Przyciski */}
-            <div className="grid grid-cols-2 gap-3">
-              <button
-                onClick={() => setStep('form')}
-                className="btn-secondary py-2.5 text-sm"
-              >← Wróć i edytuj</button>
+              {/* Preview */}
+              <div className="rounded-xl border border-navy-600 overflow-hidden bg-white" style={{ height: 320 }}>
+                <iframe srcDoc={emailHtml} title="Podgląd" className="w-full h-full" sandbox="allow-same-origin" />
+              </div>
+
+              {/* Główny przycisk */}
               <button
                 onClick={copyToClipboard}
-                className={cn('py-2.5 text-sm font-bold rounded-xl border transition-all', copied
-                  ? 'bg-green-500/20 text-green-400 border-green-500/30'
-                  : 'bg-brand text-white border-brand hover:bg-brand-dark'
+                className={cn(
+                  'w-full py-3.5 rounded-xl font-bold text-sm transition-all',
+                  copied
+                    ? 'bg-green-500/20 text-green-400 border border-green-500/30'
+                    : 'bg-brand hover:bg-brand-dark text-white shadow-lg shadow-brand/20'
                 )}
               >
-                {copied ? '✓ Skopiowano!' : '📋 Kopiuj do schowka (Outlook)'}
+                {copied ? '✓ Skopiowano! Wklej w Outlook (Ctrl+V)' : '📋 Kopiuj do schowka'}
               </button>
-            </div>
-            <button
-              onClick={openPreviewWindow}
-              className="btn-secondary w-full py-2.5 text-sm"
-            >🔍 Otwórz podgląd w nowym oknie</button>
 
-            <p className="text-navy-500 text-xs text-center">
-              Skopiuj treść i wklej bezpośrednio do nowej wiadomości w Outlooku (Ctrl+V).
-              Formatowanie i kolory zostaną zachowane.
-            </p>
-          </div>
-        )}
+              {/* Dodatkowe opcje */}
+              <div className="grid grid-cols-2 gap-3">
+                <button onClick={openInWindow} className="btn-secondary py-2.5 text-sm">
+                  🔍 Podgląd w nowym oknie
+                </button>
+                <button
+                  onClick={() => {
+                    localStorage.removeItem('margoline_api_key')
+                    onClose()
+                  }}
+                  className="btn-secondary py-2.5 text-sm text-navy-400"
+                >
+                  🔑 Zmień klucz API
+                </button>
+              </div>
+
+              <p className="text-navy-500 text-xs text-center">
+                Otwórz Outlooka → Nowa wiadomość → Ctrl+V
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )
@@ -637,7 +521,7 @@ export default function ManagerDayReport() {
   const [reports, setReports] = useState<ReportWithContext[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [showEmailModal, setShowEmailModal] = useState(false)
+  const [modalState, setModalState] = useState<'closed' | 'apikey' | 'report'>('closed')
   const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
@@ -647,14 +531,12 @@ export default function ManagerDayReport() {
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
       supabase.from('hourly_reports')
         .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
-        .eq('report_date', date)
-        .is('deleted_at', null)
-        .order('machine_id')
-        .order('hour_start')
+        .eq('report_date', date).is('deleted_at', null)
+        .order('machine_id').order('hour_start')
     ])
     if (requestId !== loadSeq.current) return
     if (mRes.error || rRes.error) {
-      setError(mRes.error?.message || rRes.error?.message || 'Nie udało się załadować raportu dnia.')
+      setError(mRes.error?.message || rRes.error?.message || 'Błąd ładowania')
     } else {
       setMachines((mRes.data ?? []) as Machine[])
       setReports((rRes.data ?? []) as ReportWithContext[])
@@ -665,17 +547,17 @@ export default function ManagerDayReport() {
   useEffect(() => { load() }, [load])
 
   useEffect(() => {
-    const channel = supabase.channel(`manager-day-report-${date}`)
+    const channel = supabase.channel(`day-report-${date}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
       .subscribe()
     const onFocus = () => load()
-    const onVisibility = () => { if (document.visibilityState === 'visible') load() }
+    const onVis = () => { if (document.visibilityState === 'visible') load() }
     window.addEventListener('focus', onFocus)
-    document.addEventListener('visibilitychange', onVisibility)
+    document.addEventListener('visibilitychange', onVis)
     return () => {
       window.removeEventListener('focus', onFocus)
-      document.removeEventListener('visibilitychange', onVisibility)
+      document.removeEventListener('visibilitychange', onVis)
       supabase.removeChannel(channel)
     }
   }, [date, load])
@@ -704,13 +586,9 @@ export default function ManagerDayReport() {
       byMachine.set(report.machine_id, row)
       const shift = row.shifts[shiftType]
       ;[shift, row.total].forEach(s => {
-        s.good += report.good_count
-        s.reject += report.reject_count
-        s.reports += 1
-        s.runtime += report.runtime_min
-        s.ready += report.ready_min ?? 0
-        s.alarm += report.alarm_min ?? 0
-        s.downtime += reportDowntimeMinutes(report)
+        s.good += report.good_count; s.reject += report.reject_count; s.reports += 1
+        s.runtime += report.runtime_min; s.ready += report.ready_min ?? 0
+        s.alarm += report.alarm_min ?? 0; s.downtime += reportDowntimeMinutes(report)
       })
       const note = noteText(report)
       if (note) {
@@ -749,24 +627,40 @@ export default function ManagerDayReport() {
       if (!shiftType || !SHIFTS.includes(shiftType) || !text) return
       result[shiftType].push({
         machine: machineNameById[report.machine_id] ?? '-',
-        hour: report.hour_block,
-        text,
+        hour: report.hour_block, text,
         operator: one(report.operator)?.full_name ?? '-'
       })
     })
     return result
   }, [machineNameById, reports])
 
+  function handleGenerateClick() {
+    const key = localStorage.getItem('margoline_api_key')
+    if (!key) {
+      setModalState('apikey')
+    } else {
+      setModalState('report')
+    }
+  }
+
+  function handleApiKeySave(key: string) {
+    localStorage.setItem('margoline_api_key', key)
+    setModalState('report')
+  }
+
   return (
     <>
-      {showEmailModal && (
-        <EmailModal
+      {modalState === 'apikey' && (
+        <ApiKeyModal onSave={handleApiKeySave} />
+      )}
+      {modalState === 'report' && (
+        <ReportModal
           date={date}
           rows={rows}
           totals={totals}
           shiftTotals={shiftTotals}
           eventsByShift={eventsByShift}
-          onClose={() => setShowEmailModal(false)}
+          onClose={() => setModalState('closed')}
         />
       )}
 
@@ -778,14 +672,14 @@ export default function ManagerDayReport() {
             <p className="text-navy-400 mt-1">Produkcja, odrzut i przebieg zmian w jednym widoku</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, -1))}>Poprzedni dzień</button>
+            <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, -1))}>← Poprzedni</button>
             <input className="input w-[170px]" type="date" value={date} onChange={e => setDate(e.target.value)} />
-            <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, 1))}>Następny dzień</button>
-            <button className="btn-secondary text-xs py-2 px-3" onClick={load}>{loading ? 'Odświeżam...' : 'Odśwież'}</button>
+            <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, 1))}>Następny →</button>
+            <button className="btn-secondary text-xs py-2 px-3" onClick={load}>{loading ? '...' : 'Odśwież'}</button>
             <button
-              className="btn-primary text-xs py-2 px-3 flex items-center gap-1.5"
-              onClick={() => setShowEmailModal(true)}
+              onClick={handleGenerateClick}
               disabled={loading || reports.length === 0}
+              className="btn-primary text-xs py-2 px-4 flex items-center gap-2 disabled:opacity-40"
             >
               <svg width="14" height="14" viewBox="0 0 22 22" fill="none">
                 <rect x="2" y="4" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5"/>
@@ -800,14 +694,14 @@ export default function ManagerDayReport() {
           <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>
         )}
 
-        {/* KPI cards */}
+        {/* KPI */}
         <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
           {[
             { label: 'Produkcja łącznie', value: `${pieces(totals.good)} szt`, color: 'text-brand' },
             { label: 'Odrzut łącznie', value: `${pieces(totals.reject)} szt`, color: totals.reject ? 'text-red-400' : 'text-green-400' },
             { label: 'Wpisy', value: `${totals.reports}`, color: 'text-white' },
             { label: 'Czas pracy', value: mins(totals.runtime), color: 'text-green-400' },
-            { label: 'Alarm + postój', value: mins(totals.alarm + totals.downtime), color: totals.alarm + totals.downtime ? 'text-amber-400' : 'text-green-400' }
+            { label: 'Alarm + postój', value: mins(totals.alarm + totals.downtime), color: totals.alarm + totals.downtime ? 'text-amber-400' : 'text-green-400' },
           ].map(item => (
             <div key={item.label} className="kpi-card">
               <div className="kpi-label">{item.label}</div>
@@ -821,7 +715,7 @@ export default function ManagerDayReport() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {SHIFTS.map(shift => (
             <div key={shift} className="kpi-card">
-              <div className="kpi-label">Czasy - zmiana {shift}</div>
+              <div className="kpi-label">Czasy — zmiana {shift}</div>
               <div className="grid grid-cols-3 gap-2">
                 {[
                   { label: 'Praca', val: shiftTotals[shift].runtime, color: 'text-green-400' },
@@ -871,13 +765,11 @@ export default function ManagerDayReport() {
                           <div>
                             <div className="font-mono text-lg font-bold text-white">{pieces(row.shifts[s].good)} szt</div>
                             <div className="mt-1 text-xs text-navy-400">
-                              odrzut <span className="font-mono text-red-300">{pieces(row.shifts[s].reject)}</span>
-                              {' '}| wpisy {row.shifts[s].reports}
+                              odrzut <span className="font-mono text-red-300">{pieces(row.shifts[s].reject)}</span> | wpisy {row.shifts[s].reports}
                             </div>
                             <div className="mt-2 rounded-lg bg-navy-900 px-2 py-1.5 text-xs leading-relaxed text-navy-300">
-                              <span className="font-mono text-green-300">praca {mins(row.shifts[s].runtime)}</span>
-                              <br />
-                              got. {mins(row.shifts[s].ready)} | alarm/postój {mins(row.shifts[s].alarm + row.shifts[s].downtime)}
+                              <span className="font-mono text-green-300">praca {mins(row.shifts[s].runtime)}</span><br />
+                              got. {mins(row.shifts[s].ready)} | alarm {mins(row.shifts[s].alarm + row.shifts[s].downtime)}
                             </div>
                           </div>
                         ) : (
@@ -952,7 +844,7 @@ export default function ManagerDayReport() {
           <div className="card-header">
             <div>
               <div className="card-title">Pełny przebieg dnia</div>
-              <div className="card-sub">Wszystkie wpisy godzinowe bez ucinania uwag</div>
+              <div className="card-sub">Wszystkie wpisy godzinowe</div>
             </div>
           </div>
           <div className="space-y-2">
