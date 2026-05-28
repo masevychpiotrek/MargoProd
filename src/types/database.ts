@@ -1,18 +1,22 @@
 // Auto-generated types — odzwierciedlają schemat bazy
 // Można aktualizować przez: npx supabase gen types typescript --project-id TWOJ_ID
 
-export type UserRole = 'operator' | 'manager' | 'admin'
+export type UserRole = 'operator' | 'manager' | 'admin' | 'specialist'
 export type ShiftType = 'I' | 'II' | 'III'
 export type ReportStatus = 'pending' | 'submitted' | 'approved' | 'rejected'
 export type DowntimeCategory =
   | 'mechanical_failure' | 'electrical_failure' | 'material_shortage'
   | 'quality_control' | 'changeover' | 'no_operator' | 'cleaning'
   | 'process_issue' | 'logistics_issue' | 'other'
-export type NotificationType = 'report_due' | 'alarm' | 'system' | 'info'
+export type NotificationType = 'report_due' | 'alarm' | 'system' | 'info' | 'failure_report'
 export type AuditAction =
   | 'login' | 'logout' | 'report_create' | 'report_update' | 'report_delete'
   | 'user_create' | 'user_update' | 'user_delete' | 'password_change'
   | 'shift_start' | 'shift_end' | 'config_change'
+  | 'failure_report_create' | 'failure_report_update'
+
+export type FailureSeverity = 'low' | 'medium' | 'high' | 'critical'
+export type FailureStatus   = 'new' | 'acknowledged' | 'in_progress' | 'resolved'
 
 export interface Profile {
   id: string
@@ -148,6 +152,29 @@ export interface ProductionTarget {
   note: string | null
   created_by: string | null
   created_at: string
+}
+
+export interface FailureReport {
+  id:               string
+  machine_id:       string
+  shift_id:         string | null
+  reporter_id:      string
+  category:         DowntimeCategory
+  severity:         FailureSeverity
+  status:           FailureStatus
+  station:          string | null
+  description:      string
+  photo_urls:       string[]
+  resolution_notes: string | null
+  assigned_to:      string | null
+  acknowledged_at:  string | null
+  resolved_at:      string | null
+  created_at:       string
+  updated_at:       string
+  // joined
+  machine?:         Machine
+  reporter?:        Profile
+  assignee?:        Profile | null
 }
 
 // ---- Form / UI types ----
