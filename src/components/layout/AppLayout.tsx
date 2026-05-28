@@ -50,6 +50,10 @@ const NAV_MANAGER = [
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export }
 ]
 
+const NAV_SPECIALIST = [
+  { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
+]
+
 const NAV_ADMIN = [
   { to: '/admin',              label: 'Panel admina',     icon: Icons.admin,    end: true },
   { to: '/admin/users',        label: 'Użytkownicy',      icon: Icons.users },
@@ -63,7 +67,8 @@ const NAV_ADMIN = [
   { to: '/manager/day-report', label: '── Raport dnia',      icon: Icons.report },
   { to: '/manager/plan',       label: '── Plan produkcyjny', icon: Icons.plan },
   { to: '/manager/orders',     label: '── Zlecenia',         icon: Icons.orders },
-  { to: '/manager/export',     label: '── Eksport',          icon: Icons.export }
+  { to: '/manager/export',     label: '── Eksport',          icon: Icons.export },
+  { to: '/specialist',          label: '── Awarie (spec.)',   icon: Icons.failure },
 ]
 
 export default function AppLayout() {
@@ -119,8 +124,9 @@ export default function AppLayout() {
     }
   }, [profile?.id, profile?.role, activeShift?.id, loadActiveShift])
 
-  const navItems = profile?.role === 'admin' ? NAV_ADMIN
-    : profile?.role === 'manager' ? NAV_MANAGER
+  const navItems = profile?.role === 'admin'      ? NAV_ADMIN
+    : profile?.role === 'specialist' ? NAV_SPECIALIST
+    : profile?.role === 'manager'    ? NAV_MANAGER
     : NAV_OPERATOR
   const visibleActiveShift = profile?.role === 'operator' &&
     !shiftLoading &&
@@ -236,7 +242,7 @@ export default function AppLayout() {
         <nav className="flex-1 py-3 px-2 overflow-y-auto min-h-0">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
-              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : 'Operator'}
+              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'specialist' ? 'Specjalista' : 'Operator'}
             </div>
           )}
           {navItems.map(item => (

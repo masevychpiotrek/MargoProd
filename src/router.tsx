@@ -26,6 +26,7 @@ const AdminTargets       = lazy(() => import('@/pages/admin/Targets'))
 const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
 const AdminOrders        = lazy(() => import('@/pages/admin/Orders'))
 const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
+const SpecialistDashboard = lazy(() => import('@/pages/specialist/Dashboard'))
 
 function PageLoader() {
   return (
@@ -48,8 +49,9 @@ function Wrap({ children }: { children: React.ReactNode }) {
 
 function RoleRedirect() {
   const { profile } = useAuthStore()
-  if (profile?.role === 'admin') return <Navigate to="/admin" replace />
-  if (profile?.role === 'manager') return <Navigate to="/manager" replace />
+  if (profile?.role === 'admin')      return <Navigate to="/admin" replace />
+  if (profile?.role === 'manager')    return <Navigate to="/manager" replace />
+  if (profile?.role === 'specialist') return <Navigate to="/specialist" replace />
   return <Navigate to="/operator" replace />
 }
 
@@ -74,12 +76,12 @@ const router = createBrowserRouter([
         element: <RequireAuth roles='operator'><Outlet /></RequireAuth>,
         children: [
           { index: true, element: <Wrap><OperatorDashboard /></Wrap> },
-          { path: 'shift',   element: <Wrap><OperatorShift /></Wrap> },
-          { path: 'report',  element: <Wrap><OperatorReport /></Wrap> },
-          { path: 'failure', element: <Wrap><OperatorFailure /></Wrap> },
-          { path: 'tasks',   element: <Wrap><OperatorTasks /></Wrap> },
+          { path: 'shift',    element: <Wrap><OperatorShift /></Wrap> },
+          { path: 'report',   element: <Wrap><OperatorReport /></Wrap> },
+          { path: 'failure',  element: <Wrap><OperatorFailure /></Wrap> },
+          { path: 'tasks',    element: <Wrap><OperatorTasks /></Wrap> },
           { path: 'password', element: <Wrap><OperatorPassword /></Wrap> },
-          { path: 'history', element: <Wrap><OperatorHistory /></Wrap> }
+          { path: 'history',  element: <Wrap><OperatorHistory /></Wrap> }
         ]
       },
 
@@ -103,6 +105,12 @@ const router = createBrowserRouter([
       {
         path: 'manager/assortments',
         element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerAssortments /></Wrap></RequireAuth>
+      },
+
+      // ── SPECIALIST ──
+      {
+        path: 'specialist',
+        element: <RequireAuth roles={['specialist', 'admin']}><Wrap><SpecialistDashboard /></Wrap></RequireAuth>
       },
 
       // ── ADMIN ──
