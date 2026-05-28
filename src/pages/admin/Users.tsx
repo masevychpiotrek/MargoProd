@@ -7,7 +7,7 @@ interface UserRow extends Profile {
   email?: string
 }
 
-const ROLES: UserRole[] = ['operator', 'manager', 'admin']
+const ROLES: UserRole[] = ['operator', 'manager', 'specialist', 'admin']
 const OPERATORS = [
   'Marcel Pełczyński','Miłosz Pełczyński','Patryk Grelak','Damian Wiącek',
   'Agnieszka Kowalik','Kacper Wojciechowski','Michał Broniek','Szymon Jaślikowski',
@@ -116,6 +116,7 @@ export default function AdminUsers() {
   const roleColor = (role: UserRole) => ({
     admin:    'bg-purple-500/15 text-purple-400 border-purple-500/20',
     manager:  'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    specialist: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
     operator: 'bg-green-500/15 text-green-400 border-green-500/20'
   }[role])
 

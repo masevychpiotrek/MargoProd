@@ -62,6 +62,7 @@ export function RequireAuth({ children, roles }: Props) {
     if (!allowed.includes(profile.role)) {
       if (profile.role === 'admin')   return <Navigate to="/admin"    replace />
       if (profile.role === 'manager') return <Navigate to="/manager"  replace />
+      if (profile.role === 'specialist') return <Navigate to="/specialist" replace />
       return <Navigate to="/operator" replace />
     }
   }
@@ -81,6 +82,7 @@ export function PublicOnly({ children }: { children: React.ReactNode }) {
   if (user && profile) {
     if (profile.role === 'admin')   return <Navigate to="/admin"    replace />
     if (profile.role === 'manager') return <Navigate to="/manager"  replace />
+    if (profile.role === 'specialist') return <Navigate to="/specialist" replace />
     return <Navigate to="/operator" replace />
   }
 

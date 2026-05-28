@@ -26,7 +26,7 @@ const AdminTargets       = lazy(() => import('@/pages/admin/Targets'))
 const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
 const AdminOrders        = lazy(() => import('@/pages/admin/Orders'))
 const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
-const SpecialistDashboard = lazy(() => import('@/pages/specialist/Dashboard'))
+const SpecialistDashboard = lazy(() => import('@/pages/Specialist/Dashboard'))
 
 function PageLoader() {
   return (
