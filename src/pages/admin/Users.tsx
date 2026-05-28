@@ -7,6 +7,10 @@ interface UserRow extends Profile {
   email?: string
 }
 
+function isValidEmail(value: string) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
+}
+
 const ROLES: UserRole[] = ['operator', 'manager', 'specialist', 'admin']
 const OPERATORS = [
   'Marcel Pełczyński','Miłosz Pełczyński','Patryk Grelak','Damian Wiącek',
@@ -85,12 +89,18 @@ export default function AdminUsers() {
   }
 
   const handleAddUser = async () => {
-    if (!newName || !newEmail || !newPass) return
+    const email = newEmail.trim().toLowerCase()
+    if (!newName.trim() || !email || !newPass) return
+    if (!isValidEmail(email)) {
+      setMsg('Blad: wpisz poprawny adres e-mail, np. j.chargot@margomed.com')
+      setTimeout(() => setMsg(''), 5000)
+      return
+    }
     setSaving(true)
     const { error } = await supabase.rpc('create_user_with_profile', {
-      p_email: newEmail,
+      p_email: email,
       p_password: newPass,
-      p_name: newName,
+      p_name: newName.trim(),
       p_role: newRole
     })
     if (error) {
