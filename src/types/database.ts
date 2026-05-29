@@ -89,6 +89,7 @@ export interface HourlyReport {
   changeover_min: number
   failure_min: number
   downtime_reason: string | null
+  reject_reason?: string | null
   notes: string | null
   submitted_at: string
   updated_at: string

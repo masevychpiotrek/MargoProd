@@ -10,6 +10,7 @@ const SHIFTS: ShiftType[] = ['I', 'II', 'III']
 type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   ready_min?: number
   alarm_min?: number
+  reject_reason?: string | null
   operator?: { full_name: string } | { full_name: string }[] | null
   shift?: { shift_type: ShiftType; shift_date?: string } | { shift_type: ShiftType; shift_date?: string }[] | null
 }
@@ -66,7 +67,11 @@ function timeLine(s: ShiftSummary) {
   return `praca ${mins(s.runtime)} | got. ${mins(s.ready)} | alarm/postój ${mins(s.alarm + s.downtime)}`
 }
 function noteText(report: ReportWithContext) {
-  return [report.downtime_reason, report.notes].map(v => v?.trim()).filter(Boolean).join(' - ')
+  return [
+    report.downtime_reason?.trim() ? `Wynik: ${report.downtime_reason.trim()}` : '',
+    report.reject_reason?.trim() ? `Odrzut: ${report.reject_reason.trim()}` : '',
+    report.notes?.trim() ? `Uwagi: ${report.notes.trim()}` : ''
+  ].filter(Boolean).join(' - ')
 }
 
 function hasClosingSummary(shift: ShiftWithSummary) {

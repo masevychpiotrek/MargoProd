@@ -72,6 +72,7 @@ type EditState = {
   downtime_min: string
   failure_min: string
   downtime_reason: string
+  reject_reason: string
   notes: string
   reason: string
 }
@@ -374,6 +375,7 @@ export default function ManagerDashboard() {
       downtime_min: String(report.downtime_min ?? 0),
       failure_min: String(report.failure_min ?? 0),
       downtime_reason: report.downtime_reason ?? '',
+      reject_reason: report.reject_reason ?? '',
       notes: report.notes ?? '',
       reason: ''
     })
@@ -398,6 +400,7 @@ export default function ManagerDashboard() {
         runtimeMin + toInt(editState.ready_min) + toInt(editState.alarm_min) + toInt(editState.downtime_min) + toInt(editState.failure_min)
       ),
       downtime_reason: editState.downtime_reason.trim() || null,
+      reject_reason: editState.reject_reason.trim() || null,
       notes: editState.notes.trim() || null
     }
 
@@ -412,6 +415,7 @@ export default function ManagerDashboard() {
         downtime_min: editing.downtime_min,
         failure_min: editing.failure_min,
         downtime_reason: editing.downtime_reason,
+        reject_reason: editing.reject_reason,
         notes: editing.notes
       }, {
         ...payload,
@@ -457,6 +461,7 @@ export default function ManagerDashboard() {
         downtime_min: editing.downtime_min,
         failure_min: editing.failure_min,
         downtime_reason: editing.downtime_reason,
+        reject_reason: editing.reject_reason,
         notes: editing.notes
       }, {
         deleted_at: true,
@@ -834,8 +839,12 @@ export default function ManagerDashboard() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-3">
               <label className="block">
-                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Powod postoju</span>
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Komentarz do wyniku</span>
                 <input className="input mt-1" value={editState.downtime_reason} onChange={e => setEditState({ ...editState, downtime_reason: e.target.value })} />
+              </label>
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Komentarz do odrzutu</span>
+                <input className="input mt-1" value={editState.reject_reason} onChange={e => setEditState({ ...editState, reject_reason: e.target.value })} />
               </label>
               <label className="block">
                 <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Powod korekty</span>

@@ -64,6 +64,7 @@ function errorTargetSelector(error: string) {
   const text = error.toLowerCase()
   if (text.includes('blok') || text.includes('godzin') || text.includes('raport za')) return '[data-error-target="hour"]'
   if (text.includes('zlecen')) return '[data-error-target="order"]'
+  if (text.includes('odrzut')) return '[data-error-target="reject"]'
   if (text.includes('przyczyna') || text.includes('ponizej normy') || text.includes('poniżej normy')) return '[data-error-target="reason"]'
   if (text.includes('licznik dobrych') || text.includes('licznik odrzutu') || text.includes('przyrost') || text.includes('normy')) return '[data-error-target="production"]'
   return '[data-error-target="errors"]'
@@ -151,6 +152,7 @@ export default function OperatorReport() {
   const [counterReject,  setCounterReject]  = useState('')
 
   const [downtimeReason, setDowntimeReason] = useState('')
+  const [rejectReason,   setRejectReason]   = useState('')
   const [notes,          setNotes]          = useState('')
   const [existingReports, setExistingReports] = useState<ReportExt[]>([])
   const [saving,  setSaving]  = useState(false)
@@ -318,7 +320,6 @@ export default function OperatorReport() {
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
   const rejectAboveLimit = !testMode && rejectPct > 5
-  const reasonRequired = belowTarget || rejectAboveLimit
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
@@ -377,7 +378,7 @@ export default function OperatorReport() {
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej normy: przyrost ${incGood} szt przy normie ${reportTarget} szt`)
-    if (rejectAboveLimit && !downtimeReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
+    if (rejectAboveLimit && !rejectReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
     if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie moze malec')
@@ -420,7 +421,10 @@ export default function OperatorReport() {
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: null, counter_ready: null, counter_alarm: null,
         target: reportTarget,
-        downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
+        downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null),
+        reject_reason: rejectReason || null,
+        notes: notes || null,
+        status: 'submitted',
         order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
         order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
       })
@@ -433,7 +437,7 @@ export default function OperatorReport() {
       }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setCounterGood(''); setCounterReject('')
-      setDowntimeReason(''); setNotes(''); setOrderQty('')
+      setDowntimeReason(''); setRejectReason(''); setNotes(''); setOrderQty('')
       const nextReported = [...reportedHours, selectedHour]
       const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
       if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
@@ -657,22 +661,20 @@ export default function OperatorReport() {
           <div
             className={cn(
               'card',
-              reasonRequired && !downtimeReason.trim() && 'border-red-500/50 bg-red-500/5'
+              belowTarget && !downtimeReason.trim() && 'border-red-500/50 bg-red-500/5'
             )}
             data-error-target="reason"
           >
             <div className="card-header">
               <div>
-                <div className={cn('card-title', reasonRequired && 'text-red-300')}>Przyczyna / komentarz do wyniku</div>
+                <div className={cn('card-title', belowTarget && 'text-red-300')}>Komentarz do wyniku</div>
                 <div className="card-sub">
                   {belowTarget
                     ? `Wymagane, bo wynik jest ponizej normy: ${incGood.toLocaleString('pl-PL')} / ${reportTarget.toLocaleString('pl-PL')} szt`
-                    : rejectAboveLimit
-                      ? `Wymagane, bo odrzut przekracza 5%: ${rejectPct}%`
-                    : 'Opcjonalnie, ale warto wpisac gdy wynik wymaga wyjasnienia'}
+                    : 'Opcjonalnie, gdy wynik wymaga wyjasnienia'}
                 </div>
               </div>
-              {reasonRequired && (
+              {belowTarget && (
                 <span className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-300">
                   Wymagane
                 </span>
@@ -681,16 +683,55 @@ export default function OperatorReport() {
             <textarea
               value={downtimeReason}
               onChange={e => setDowntimeReason(e.target.value)}
-              placeholder={reasonRequired ? 'Np. problem jakosciowy, regulacja, material, uszkodzenie, kontrola...' : 'Np. spokojna praca, drobne uwagi, nietypowa sytuacja...'}
+              placeholder={belowTarget ? 'Np. brak materialu, regulacja, szkolenie, problem na stanowisku...' : 'Np. spokojna praca, drobne uwagi, nietypowa sytuacja...'}
               rows={3}
               className={cn(
                 'input text-sm font-normal resize-none',
-                reasonRequired && !downtimeReason.trim() && 'border-red-500/60'
+                belowTarget && !downtimeReason.trim() && 'border-red-500/60'
               )}
             />
-            {reasonRequired && !downtimeReason.trim() && (
+            {belowTarget && !downtimeReason.trim() && (
               <div className="mt-2 text-xs font-semibold text-red-300">
-                Bez tej przyczyny raport nie zostanie zapisany.
+                Bez komentarza do slabego wyniku raport nie zostanie zapisany.
+              </div>
+            )}
+          </div>
+
+          <div
+            className={cn(
+              'card',
+              rejectAboveLimit && !rejectReason.trim() && 'border-red-500/50 bg-red-500/5'
+            )}
+            data-error-target="reject"
+          >
+            <div className="card-header">
+              <div>
+                <div className={cn('card-title', rejectAboveLimit && 'text-red-300')}>Komentarz do odrzutu</div>
+                <div className="card-sub">
+                  {rejectAboveLimit
+                    ? `Wymagane, bo odrzut przekracza 5%: ${rejectPct}%`
+                    : 'Opcjonalnie, jezeli odrzut wymaga wyjasnienia'}
+                </div>
+              </div>
+              {rejectAboveLimit && (
+                <span className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-300">
+                  Wymagane
+                </span>
+              )}
+            </div>
+            <textarea
+              value={rejectReason}
+              onChange={e => setRejectReason(e.target.value)}
+              placeholder={rejectAboveLimit ? 'Np. uszkodzenie, regulacja, material, kontrola jakosci...' : 'Np. drobny odrzut, przyczyna znana...'}
+              rows={3}
+              className={cn(
+                'input text-sm font-normal resize-none',
+                rejectAboveLimit && !rejectReason.trim() && 'border-red-500/60'
+              )}
+            />
+            {rejectAboveLimit && !rejectReason.trim() && (
+              <div className="mt-2 text-xs font-semibold text-red-300">
+                Bez komentarza do odrzutu powyzej 5% raport nie zostanie zapisany.
               </div>
             )}
           </div>
