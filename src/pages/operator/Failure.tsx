@@ -237,6 +237,63 @@ export default function OperatorFailure() {
     return supabase.storage.from('failure-photos').getPublicUrl(path).data.publicUrl
   }
 
+  async function finishFailureReport(reportId: string, machineName: string, catLabel: string, sevLabel: string) {
+    try {
+      const photoUrls: string[] = []
+      for (const file of photos) {
+        const url = await uploadPhoto(file, reportId)
+        if (url) photoUrls.push(url)
+      }
+
+      if (photoUrls.length > 0) {
+        const { error: photoUpdateError } = await supabase
+          .from('failure_reports')
+          .update({ photo_urls: photoUrls })
+          .eq('id', reportId)
+        if (photoUpdateError) throw photoUpdateError
+      }
+
+      const { data: specialists } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('role', 'specialist')
+        .eq('is_active', true)
+        .is('deleted_at', null)
+
+      if (specialists && specialists.length > 0) {
+        await supabase.from('notifications').insert(
+          specialists.map(s => ({
+            user_id:    s.id,
+            type:       'failure_report',
+            title:      `Awaria - ${machineName}`,
+            body:       `${catLabel} - ${sevLabel}${station ? ' - ' + station : ''}`,
+            machine_id: machineId,
+          }))
+        )
+      }
+
+      await supabase.from('audit_logs').insert({
+        user_id:    profile!.id,
+        action:     'failure_report_create',
+        table_name: 'failure_reports',
+        record_id:  reportId,
+        new_values: { machine_id: machineId, severity, category },
+      })
+
+      await sendTeamsAdaptiveNotification({
+        machine:     machineName,
+        category:    catLabel,
+        severity,
+        station:     station.trim() || '-',
+        description: description.trim(),
+        reporter:    profile?.full_name ?? 'Operator',
+        photoUrls,
+      })
+    } catch (error) {
+      console.warn('Failure report background work failed', error)
+    }
+  }
+
   async function handleSubmit() {
     if (!machineId) { setError('Wybierz maszynę.'); return }
     if (!description.trim()) { setError('Wpisz opis awarii.'); return }
@@ -263,66 +320,15 @@ export default function OperatorFailure() {
 
       if (insErr) throw insErr
 
-      // 2. Upload zdjęć
-      const photoUrls: string[] = []
-      for (const file of photos) {
-        const url = await uploadPhoto(file, report.id)
-        if (url) photoUrls.push(url)
-      }
-      if (photoUrls.length > 0) {
-        const { error: photoUpdateError } = await supabase
-          .from('failure_reports')
-          .update({ photo_urls: photoUrls })
-          .eq('id', report.id)
-        if (photoUpdateError) throw photoUpdateError
-      }
+      const machineNameFast = machines.find(m => m.id === machineId)?.name
+        ?? activeMachine?.name ?? '-'
+      const catLabelFast = CATEGORIES.find(c => c.value === category)?.label ?? category
+      const sevLabelFast = SEVERITIES.find(s => s.value === severity)?.label ?? severity
 
-      // 3. Powiadomienia in-app dla specjalistów
-      const { data: specialists } = await supabase
-        .from('profiles')
-        .select('id')
-        .eq('role', 'specialist')
-        .eq('is_active', true)
-        .is('deleted_at', null)
-
-      const machineName = machines.find(m => m.id === machineId)?.name
-        ?? activeMachine?.name ?? '—'
-      const catLabel = CATEGORIES.find(c => c.value === category)?.label ?? category
-      const sevLabel = SEVERITIES.find(s => s.value === severity)?.label ?? severity
-
-      if (specialists && specialists.length > 0) {
-        await supabase.from('notifications').insert(
-          specialists.map(s => ({
-            user_id:    s.id,
-            type:       'failure_report',
-            title:      `Awaria — ${machineName}`,
-            body:       `${catLabel} · ${sevLabel}${station ? ' · ' + station : ''}`,
-            machine_id: machineId,
-          }))
-        )
-      }
-
-      // 4. Audit log
-      await supabase.from('audit_logs').insert({
-        user_id:    profile.id,
-        action:     'failure_report_create',
-        table_name: 'failure_reports',
-        record_id:  report.id,
-        new_values: { machine_id: machineId, severity, category },
-      })
-
-      // 5. Teams runs in the background so the operator is not blocked by Power Automate latency.
-      void sendTeamsAdaptiveNotification({
-        machine:     machineName,
-        category:    catLabel,
-        severity,
-        station:     station.trim() || '—',
-        description: description.trim(),
-        reporter:    profile?.full_name ?? 'Operator',
-        photoUrls,
-      })
-
+      void finishFailureReport(report.id, machineNameFast, catLabelFast, sevLabelFast)
       setSuccess(true)
+      return
+
     } catch (e: any) {
       setError(getErrorMessage(e))
     } finally {
