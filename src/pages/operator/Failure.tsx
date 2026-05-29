@@ -37,6 +37,17 @@ const SEVERITIES: {
     dotCls: 'bg-red-400' },
 ]
 
+function categoryEmoji(label: string) {
+  const text = label.toLowerCase()
+  if (text.includes('mechan')) return '⚙️'
+  if (text.includes('elektr')) return '⚡'
+  if (text.includes('jako')) return '🔎'
+  if (text.includes('mater')) return '📦'
+  if (text.includes('proces')) return '🛠️'
+  if (text.includes('logist')) return '🚚'
+  return '📌'
+}
+
 // ─── Teams webhook ────────────────────────────────────────────────────────────
 
 async function sendTeamsNotification(params: {
@@ -92,7 +103,11 @@ async function sendTeamsAdaptiveNotification(params: {
 
   const sevLabel = { low: 'Niska', medium: 'Srednia', high: 'Wysoka', critical: 'Krytyczna' }[params.severity]
   const sevColor = { low: 'good', medium: 'warning', high: 'attention', critical: 'attention' }[params.severity]
+  const sevBadge = { low: 'NISKA', medium: 'SREDNIA', high: 'WYSOKA', critical: 'KRYTYCZNA' }[params.severity]
+  const sevEmoji = { low: '🟢', medium: '🟡', high: '🟠', critical: '🔴' }[params.severity]
+  const catEmoji = categoryEmoji(params.category)
   const now = new Date().toLocaleString('pl-PL')
+  const appUrl = `${window.location.origin}/specialist`
 
   const payload = {
     type: 'message',
@@ -105,36 +120,80 @@ async function sendTeamsAdaptiveNotification(params: {
         version: '1.4',
         body: [
           {
-            type: 'TextBlock',
-            text: `Awaria - ${params.machine}`,
-            weight: 'Bolder',
-            size: 'Large',
-            color: sevColor,
-            wrap: true
+            type: 'Container',
+            style: 'emphasis',
+            items: [
+              {
+                type: 'TextBlock',
+                text: `${sevEmoji} ZGLOSZENIE AWARII - ${sevBadge}`,
+                weight: 'Bolder',
+                size: 'Small',
+                color: sevColor,
+                wrap: true,
+                spacing: 'Small'
+              },
+              {
+                type: 'TextBlock',
+                text: params.machine,
+                weight: 'Bolder',
+                size: 'Large',
+                wrap: true,
+                spacing: 'None'
+              },
+              {
+                type: 'TextBlock',
+                text: '📥 Nowe zadanie oczekuje na przyjecie w panelu specjalisty.',
+                isSubtle: true,
+                wrap: true,
+                spacing: 'Small'
+              }
+            ]
           },
           {
             type: 'FactSet',
             facts: [
-              { title: 'Zglosil', value: params.reporter },
-              { title: 'Czas', value: now },
-              { title: 'Kategoria', value: params.category },
-              { title: 'Stacja', value: params.station || '-' },
-              { title: 'Pilnosc', value: sevLabel }
+              { title: '📌 Status', value: 'Nowe zgloszenie' },
+              { title: '👤 Zglosil', value: params.reporter },
+              { title: '🕒 Czas', value: now },
+              { title: `${catEmoji} Kategoria`, value: params.category },
+              { title: '📍 Stacja', value: params.station || '-' },
+              { title: '🚦 Pilnosc', value: `${sevEmoji} ${sevLabel}` }
             ]
           },
           {
             type: 'TextBlock',
-            text: params.description,
+            text: '📝 Opis operatora',
+            weight: 'Bolder',
+            spacing: 'Medium',
             wrap: true
           },
-          ...(params.photoUrls.length > 0 ? [{
+          {
             type: 'TextBlock',
-            text: `Zdjecia: ${params.photoUrls.join(' ')}`,
-            wrap: true,
-            size: 'Small',
-            color: 'Accent'
-          }] : [])
-        ]
+            text: params.description || '-',
+            wrap: true
+          },
+          ...(params.photoUrls.length > 0 ? [
+            {
+              type: 'TextBlock',
+              text: '📷 Zdjecia',
+              weight: 'Bolder',
+              spacing: 'Medium',
+              wrap: true
+            },
+            ...params.photoUrls.slice(0, 3).map((photoUrl, index) => ({
+              type: 'Image',
+              url: photoUrl,
+              altText: `Zdjecie awarii ${index + 1}`,
+              size: 'Medium',
+              spacing: 'Small'
+            }))
+          ] : [])
+        ],
+        actions: [{
+          type: 'Action.OpenUrl',
+          title: '✅ Zaloguj sie, aby przyjac zadanie',
+          url: appUrl
+        }]
       }
     }]
   }
