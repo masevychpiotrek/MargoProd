@@ -165,6 +165,27 @@ function getErrorMessage(error: unknown) {
   return 'Blad zglaszania awarii'
 }
 
+async function compressImage(file: File) {
+  if (!file.type.startsWith('image/') || file.size < 700_000) return file
+
+  const bitmap = await createImageBitmap(file)
+  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
+  const width = Math.max(1, Math.round(bitmap.width * scale))
+  const height = Math.max(1, Math.round(bitmap.height * scale))
+  const canvas = document.createElement('canvas')
+  canvas.width = width
+  canvas.height = height
+  const ctx = canvas.getContext('2d')
+  if (!ctx) return file
+  ctx.drawImage(bitmap, 0, 0, width, height)
+
+  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78))
+  bitmap.close()
+  if (!blob) return file
+
+  return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })
+}
+
 export default function OperatorFailure() {
   const { activeShift, activeMachine } = useShiftStore()
   const { profile } = useAuthStore()
@@ -206,9 +227,10 @@ export default function OperatorFailure() {
   }
 
   async function uploadPhoto(file: File, reportId: string): Promise<string | null> {
-    const ext = file.name.split('.').pop() ?? 'jpg'
+    const uploadFile = await compressImage(file)
+    const ext = uploadFile.name.split('.').pop() ?? 'jpg'
     const path = `${reportId}/${Date.now()}_${Math.random().toString(36).slice(2)}.${ext}`
-    const { error } = await supabase.storage.from('failure-photos').upload(path, file, {
+    const { error } = await supabase.storage.from('failure-photos').upload(path, uploadFile, {
       cacheControl: '3600', upsert: false
     })
     if (error) throw new Error(`Nie udalo sie dodac zdjecia: ${error.message}`)
@@ -289,8 +311,8 @@ export default function OperatorFailure() {
         new_values: { machine_id: machineId, severity, category },
       })
 
-      // 5. Teams
-      await sendTeamsAdaptiveNotification({
+      // 5. Teams runs in the background so the operator is not blocked by Power Automate latency.
+      void sendTeamsAdaptiveNotification({
         machine:     machineName,
         category:    catLabel,
         severity,
@@ -303,8 +325,6 @@ export default function OperatorFailure() {
       setSuccess(true)
     } catch (e: any) {
       setError(getErrorMessage(e))
-      return
-      setError(e instanceof Error ? e.message : 'Błąd zgłaszania awarii')
     } finally {
       setLoading(false)
     }
