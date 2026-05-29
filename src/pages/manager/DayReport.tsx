@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import type { HourlyReport, Machine, ShiftType } from '@/types/database'
+import type { HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -24,6 +24,16 @@ type MachineDayRow = {
   machineId: string; machineName: string
   shifts: Record<ShiftType, ShiftSummary>
   total: ShiftSummary
+}
+
+type ShiftWithSummary = Shift & {
+  summary_good_count?: number | null
+  summary_reject_count?: number | null
+  summary_runtime_min?: number | null
+  summary_ready_min?: number | null
+  summary_alarm_min?: number | null
+  summary_downtime_min?: number | null
+  summary_notes?: string | null
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -57,6 +67,28 @@ function timeLine(s: ShiftSummary) {
 }
 function noteText(report: ReportWithContext) {
   return [report.downtime_reason, report.notes].map(v => v?.trim()).filter(Boolean).join(' - ')
+}
+
+function hasClosingSummary(shift: ShiftWithSummary) {
+  return [
+    shift.summary_good_count,
+    shift.summary_reject_count,
+    shift.summary_runtime_min,
+    shift.summary_ready_min,
+    shift.summary_alarm_min,
+    shift.summary_downtime_min
+  ].some(value => value !== null && value !== undefined)
+}
+
+function applyClosingSummary(target: ShiftSummary, shift: ShiftWithSummary) {
+  target.good = shift.summary_good_count ?? target.good
+  target.reject = shift.summary_reject_count ?? target.reject
+  target.runtime = shift.summary_runtime_min ?? target.runtime
+  target.ready = shift.summary_ready_min ?? target.ready
+  target.alarm = shift.summary_alarm_min ?? target.alarm
+  target.downtime = shift.summary_downtime_min ?? target.downtime
+  const note = shift.summary_notes?.trim()
+  if (note) target.notes.push(`Podsumowanie zmiany: ${note}`)
 }
 
 // ─── Email HTML builder ───────────────────────────────────────────────────────
@@ -519,6 +551,7 @@ export default function ManagerDayReport() {
   const [date, setDate] = useState(todayIso)
   const [machines, setMachines] = useState<Machine[]>([])
   const [reports, setReports] = useState<ReportWithContext[]>([])
+  const [shiftSummaries, setShiftSummaries] = useState<ShiftWithSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modalState, setModalState] = useState<'closed' | 'apikey' | 'report'>('closed')
@@ -527,19 +560,23 @@ export default function ManagerDayReport() {
   const load = useCallback(async () => {
     const requestId = ++loadSeq.current
     setLoading(true); setError('')
-    const [mRes, rRes] = await Promise.all([
+    const [mRes, rRes, sRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
       supabase.from('hourly_reports')
         .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
         .eq('report_date', date).is('deleted_at', null)
-        .order('machine_id').order('hour_start')
+        .order('machine_id').order('hour_start'),
+      supabase.from('shifts')
+        .select('*')
+        .eq('shift_date', date)
     ])
     if (requestId !== loadSeq.current) return
-    if (mRes.error || rRes.error) {
+    if (mRes.error || rRes.error || sRes.error) {
       setError(mRes.error?.message || rRes.error?.message || 'Błąd ładowania')
     } else {
       setMachines((mRes.data ?? []) as Machine[])
       setReports((rRes.data ?? []) as ReportWithContext[])
+      setShiftSummaries((sRes.data ?? []) as ShiftWithSummary[])
     }
     setLoading(false)
   }, [date])
@@ -597,15 +634,41 @@ export default function ManagerDayReport() {
         row.total.notes.push(`Zmiana ${shiftType}, ${entry}`)
       }
     })
+    shiftSummaries.filter(hasClosingSummary).forEach(summary => {
+      const shiftType = summary.shift_type
+      if (!SHIFTS.includes(shiftType)) return
+      const row = byMachine.get(summary.machine_id) ?? {
+        machineId: summary.machine_id,
+        machineName: machineNameById[summary.machine_id] ?? 'Nieznana maszyna',
+        shifts: { I: emptySummary(), II: emptySummary(), III: emptySummary() },
+        total: emptySummary()
+      }
+      byMachine.set(summary.machine_id, row)
+      applyClosingSummary(row.shifts[shiftType], summary)
+    })
+    byMachine.forEach(row => {
+      row.total = emptySummary()
+      SHIFTS.forEach(shiftType => {
+        const shift = row.shifts[shiftType]
+        row.total.good += shift.good
+        row.total.reject += shift.reject
+        row.total.reports += shift.reports
+        row.total.runtime += shift.runtime
+        row.total.ready += shift.ready
+        row.total.alarm += shift.alarm
+        row.total.downtime += shift.downtime
+        row.total.notes.push(...shift.notes.map(note => `Zmiana ${shiftType}, ${note}`))
+      })
+    })
     return Array.from(byMachine.values()).sort((a, b) => a.machineName.localeCompare(b.machineName))
-  }, [machineNameById, machines, reports])
+  }, [machineNameById, machines, reports, shiftSummaries])
 
-  const totals = useMemo(() => reports.reduce((acc, r) => {
-    acc.good += r.good_count; acc.reject += r.reject_count; acc.reports += 1
-    acc.runtime += r.runtime_min; acc.ready += r.ready_min ?? 0
-    acc.alarm += r.alarm_min ?? 0; acc.downtime += reportDowntimeMinutes(r)
+  const totals = useMemo(() => rows.reduce((acc, row) => {
+    acc.good += row.total.good; acc.reject += row.total.reject; acc.reports += row.total.reports
+    acc.runtime += row.total.runtime; acc.ready += row.total.ready
+    acc.alarm += row.total.alarm; acc.downtime += row.total.downtime
     return acc
-  }, emptySummary()), [reports])
+  }, emptySummary()), [rows])
 
   const shiftTotals = useMemo(() => {
     const result: Record<ShiftType, ShiftSummary> = { I: emptySummary(), II: emptySummary(), III: emptySummary() }
@@ -631,8 +694,18 @@ export default function ManagerDayReport() {
         operator: one(report.operator)?.full_name ?? '-'
       })
     })
+    shiftSummaries.forEach(summary => {
+      const text = summary.summary_notes?.trim()
+      if (!text || !SHIFTS.includes(summary.shift_type)) return
+      result[summary.shift_type].push({
+        machine: machineNameById[summary.machine_id] ?? '-',
+        hour: 'koniec zmiany',
+        text,
+        operator: '-'
+      })
+    })
     return result
-  }, [machineNameById, reports])
+  }, [machineNameById, reports, shiftSummaries])
 
   function handleGenerateClick() {
     const key = localStorage.getItem('margoline_api_key')

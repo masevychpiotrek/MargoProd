@@ -45,8 +45,6 @@ const NAV_OPERATOR = [
 const NAV_MANAGER = [
   { to: '/manager',              label: 'Live produkcja',   icon: Icons.live,    end: true },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
-  { to: '/manager/plan',         label: 'Plan produkcyjny', icon: Icons.plan },
-  { to: '/manager/orders',       label: 'Zlecenia',         icon: Icons.orders },
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export }
 ]
 
@@ -60,13 +58,10 @@ const NAV_ADMIN = [
   { to: '/admin/machines',     label: 'Maszyny',          icon: Icons.machines },
   { to: '/admin/targets',      label: 'Targety',          icon: Icons.targets },
   { to: '/admin/schedules',    label: 'Harmonogram',      icon: Icons.schedule },
-  { to: '/admin/orders',       label: 'Zlecenia (admin)', icon: Icons.orders },
   { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
   { to: '/manager',            label: '── Live produkcja',   icon: Icons.live },
   { to: '/manager/day-report', label: '── Raport dnia',      icon: Icons.report },
-  { to: '/manager/plan',       label: '── Plan produkcyjny', icon: Icons.plan },
-  { to: '/manager/orders',     label: '── Zlecenia',         icon: Icons.orders },
   { to: '/manager/export',     label: '── Eksport',          icon: Icons.export },
   { to: '/specialist',          label: '── Awarie (spec.)',   icon: Icons.failure },
 ]

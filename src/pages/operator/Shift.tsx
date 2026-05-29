@@ -20,6 +20,23 @@ function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
 }
 
+function parseHHMM(value: string): number | null {
+  const clean = value.trim()
+  const match = clean.match(/^(\d{1,2}):([0-5]\d)$/)
+  if (!match) return null
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+interface ShiftEndForm {
+  good: string
+  reject: string
+  runtime: string
+  ready: string
+  alarm: string
+  downtime: string
+  notes: string
+}
+
 function effectiveTarget(ratePerHour: number, runtimeMin: number) {
   return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
 }
@@ -61,13 +78,24 @@ export default function OperatorShift() {
   const [endConfirmText, setEndConfirmText] = useState('')
   const [missingHours,   setMissingHours]   = useState<number[]>([])
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
+  const [endForm, setEndForm] = useState<ShiftEndForm>({
+    good: '0',
+    reject: '0',
+    runtime: '00:00',
+    ready: '00:00',
+    alarm: '00:00',
+    downtime: '00:00',
+    notes: ''
+  })
   const reportsRequestSeq = useRef(0)
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
     getProfiles().then(({ data }) => { if (data) setOperators(data as Profile[]) })
-    supabase.from('assortments').select('*').eq('is_active', true).order('sort_order')
-      .then(({ data }) => { if (data) setAssortments(data as Assortment[]) })
+    if (ORDERS_ENABLED) {
+      supabase.from('assortments').select('*').eq('is_active', true).order('sort_order')
+        .then(({ data }) => { if (data) setAssortments(data as Assortment[]) })
+    }
     const h = new Date().getHours()
     if (h >= 6 && h < 14) setSelectedShift('I')
     else if (h >= 14 && h < 22) setSelectedShift('II')
@@ -75,7 +103,7 @@ export default function OperatorShift() {
   }, [])
 
   useEffect(() => {
-    if (selectedMachine) loadOrders(selectedMachine)
+    if (ORDERS_ENABLED && selectedMachine) loadOrders(selectedMachine)
   }, [selectedMachine])
 
   useEffect(() => {
@@ -231,7 +259,18 @@ export default function OperatorShift() {
     const missing = shiftHours.filter(h =>
       canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h) && !reportedHours.includes(h)
     )
+    const good = latestReports.reduce((s, r) => s + r.good_count, 0)
+    const reject = latestReports.reduce((s, r) => s + r.reject_count, 0)
     setMissingHours(missing)
+    setEndForm({
+      good: String(good),
+      reject: String(reject),
+      runtime: activeShift.summary_runtime_min != null ? minsToHHMM(activeShift.summary_runtime_min) : '00:00',
+      ready: activeShift.summary_ready_min != null ? minsToHHMM(activeShift.summary_ready_min) : '00:00',
+      alarm: activeShift.summary_alarm_min != null ? minsToHHMM(activeShift.summary_alarm_min) : '00:00',
+      downtime: activeShift.summary_downtime_min != null ? minsToHHMM(activeShift.summary_downtime_min) : '00:00',
+      notes: activeShift.notes ?? ''
+    })
     setEndConfirmText('')
     setShowEndWarning(true)
   }
@@ -241,9 +280,25 @@ export default function OperatorShift() {
       setError('Aby zakończyć zmianę, wpisz ZAMKNIJ w oknie potwierdzenia.')
       return
     }
+    const runtime = parseHHMM(endForm.runtime)
+    const ready = parseHHMM(endForm.ready)
+    const alarm = parseHHMM(endForm.alarm)
+    const downtime = parseHHMM(endForm.downtime)
+    if ([runtime, ready, alarm, downtime].some(value => value === null)) {
+      setError('Czasy wpisz w formacie GG:MM, np. 07:35.')
+      return
+    }
     setShowEndWarning(false)
     setEndConfirmText('')
-    const { error: endError } = await endShift()
+    const { error: endError } = await endShift({
+      summary_good_count: Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0),
+      summary_reject_count: Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0),
+      summary_runtime_min: runtime ?? 0,
+      summary_ready_min: ready ?? 0,
+      summary_alarm_min: alarm ?? 0,
+      summary_downtime_min: downtime ?? 0,
+      summary_notes: endForm.notes.trim() || null
+    })
     if (endError) setError('Nie udało się zakończyć zmiany: ' + endError)
   }
 
@@ -288,7 +343,7 @@ export default function OperatorShift() {
         {/* Ostrzeżenie przy kończeniu */}
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
-            <div className="bg-navy-800 border-2 border-amber-500/50 rounded-2xl p-6 w-full max-w-md">
+            <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-amber-500/50 bg-navy-800 p-6">
               <h2 className="text-xl font-bold text-amber-400 mb-2">Potwierdz zakonczenie zmiany</h2>
               <p className="text-navy-300 text-sm mb-4">
                 Zamkniesz aktywna zmiane na maszynie {activeMachine.name}. Po zamknieciu operator nie bedzie juz wpisywal wynikow w tej zmianie.
@@ -309,6 +364,79 @@ export default function OperatorShift() {
                   Otwarte raporty wygladaja na uzupelnione.
                 </div>
               )}
+              <div className="mb-5 rounded-xl border border-navy-700 bg-navy-900 p-4">
+                <div className="mb-3">
+                  <div className="text-sm font-bold text-white">Rozliczenie koncowe zmiany</div>
+                  <div className="text-xs text-navy-400">Produkcja i odrzut sa podpowiedziane z wpisow godzinowych. Czasy wpisujesz dopiero tutaj.</div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <label>
+                    <span className="label">Produkcja razem</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={endForm.good}
+                      onChange={e => setEndForm(prev => ({ ...prev, good: e.target.value }))}
+                      className="input mt-1 font-mono"
+                    />
+                  </label>
+                  <label>
+                    <span className="label">Odrzut razem</span>
+                    <input
+                      type="number"
+                      min="0"
+                      value={endForm.reject}
+                      onChange={e => setEndForm(prev => ({ ...prev, reject: e.target.value }))}
+                      className="input mt-1 font-mono"
+                    />
+                  </label>
+                  <label>
+                    <span className="label">Czas pracy</span>
+                    <input
+                      value={endForm.runtime}
+                      onChange={e => setEndForm(prev => ({ ...prev, runtime: e.target.value }))}
+                      className="input mt-1 font-mono"
+                      placeholder="07:35"
+                    />
+                  </label>
+                  <label>
+                    <span className="label">Gotowosc</span>
+                    <input
+                      value={endForm.ready}
+                      onChange={e => setEndForm(prev => ({ ...prev, ready: e.target.value }))}
+                      className="input mt-1 font-mono"
+                      placeholder="00:25"
+                    />
+                  </label>
+                  <label>
+                    <span className="label">Alarm</span>
+                    <input
+                      value={endForm.alarm}
+                      onChange={e => setEndForm(prev => ({ ...prev, alarm: e.target.value }))}
+                      className="input mt-1 font-mono"
+                      placeholder="00:00"
+                    />
+                  </label>
+                  <label>
+                    <span className="label">Postoj / awaria</span>
+                    <input
+                      value={endForm.downtime}
+                      onChange={e => setEndForm(prev => ({ ...prev, downtime: e.target.value }))}
+                      className="input mt-1 font-mono"
+                      placeholder="00:00"
+                    />
+                  </label>
+                </div>
+                <label className="mt-3 block">
+                  <span className="label">Uwagi do zmiany</span>
+                  <textarea
+                    value={endForm.notes}
+                    onChange={e => setEndForm(prev => ({ ...prev, notes: e.target.value }))}
+                    className="input mt-1 min-h-[88px]"
+                    placeholder="Np. przyczyna slabszej pracy, szkolenie, problem na stacji..."
+                  />
+                </label>
+              </div>
               <label className="block mb-5">
                 <span className="label">Wpisz ZAMKNIJ, aby potwierdzic</span>
                 <input

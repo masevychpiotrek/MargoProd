@@ -54,6 +54,13 @@ export interface Shift {
   started_at: string
   ended_at: string | null
   notes: string | null
+  summary_good_count?: number | null
+  summary_reject_count?: number | null
+  summary_runtime_min?: number | null
+  summary_ready_min?: number | null
+  summary_alarm_min?: number | null
+  summary_downtime_min?: number | null
+  summary_notes?: string | null
   created_at: string
   updated_at: string
   // joined

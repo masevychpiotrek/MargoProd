@@ -32,8 +32,6 @@ type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   counter_runtime?: number
   counter_ready?: number
   counter_alarm?: number
-  order_id?: string | null
-  order_qty?: number | null
   operator?: { full_name: string } | { full_name: string }[] | null
   shift?: { shift_type: string; shift_date?: string } | { shift_type: string; shift_date?: string }[] | null
 }
@@ -187,7 +185,6 @@ export default function ManagerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_orders' }, load)
       .subscribe()
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') load()

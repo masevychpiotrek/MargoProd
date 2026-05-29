@@ -28,7 +28,7 @@ function getPageHint(pathname: string, hasShift: boolean) {
   if (pathname.includes('/operator/shift')) {
     return hasShift
       ? 'Zmiana jest aktywna. Przed zakonczeniem sprawdz, czy wszystkie otwarte bloki maja raport.'
-      : 'Wybierz maszyne, zmiane i zlecenie. Ta sama zmiana na tej samej maszynie moze wystartowac tylko raz.'
+      : 'Wybierz maszyne i zmiane. Ta sama zmiana na tej samej maszynie moze wystartowac tylko raz.'
   }
   if (pathname.includes('/manager')) return 'Widok kierownika. Kontroluj W EPQ, odrzut, alarmy, wydajnosc i braki raportow.'
   if (pathname.includes('/admin')) return 'Strefa administracyjna. Zmiany tutaj wplywaja na prace calego systemu.'
@@ -44,7 +44,7 @@ function answerFor(text: string, hasShift: boolean) {
   if (has('raport', 'wynik')) return 'Raport dotyczy konkretnego bloku godziny. Liczniki wpisujesz jako stan calkowity, a system liczy przyrost.'
   if (has('czas', 'godzin', 'minut', '01:00', '60')) return 'W zwyklym raporcie suma czasu pracy, gotowosci i alarmu powinna dac 01:00.'
   if (has('licznik', 'narast', 'mniejsz')) return 'Licznik nie moze byc mniejszy od poprzedniego stanu. To oznaczaloby ujemny przyrost.'
-  if (has('zlecen', 'produkc')) return 'Przed zapisem raportu wybierz aktywne zlecenie. Sztuki na zlecenie nie moga przekraczac dobrego przyrostu.'
+  if (has('koniec', 'zakoncz', 'podsum')) return 'Na koncu zmiany wpisujesz rozliczenie calej zmiany: produkcje, odrzut, czasy i uwagi.'
   if (has('epq', 'wydajn', 'norm')) return 'W EPQ liczymy z dobrych sztuk wzgledem normy czasu rozliczanego. Wydajnosc maszyny liczymy z dobrych i odrzutu.'
   if (has('alarm', 'awaria', 'postoj')) return 'Czas zatrzymania wpisz jako alarm albo postoj. Jesli ma znaczenie, dodaj opis zdarzenia.'
   if (has('zmian', 'start')) return hasShift
@@ -130,7 +130,7 @@ export default function RobotAssistant() {
   const quickActions = [
     { label: 'Raport', text: 'Jak wpisac raport?' },
     { label: 'Czasy', text: 'Jak wpisac czasy?' },
-    { label: 'Zlecenie', text: 'Co ze zleceniem?' },
+    { label: 'Koniec', text: 'Co wpisac na koniec zmiany?' },
     { label: 'W EPQ', text: 'Jak liczymy W EPQ?' }
   ]
 

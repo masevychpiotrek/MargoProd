@@ -5,9 +5,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { formatHourBlock, efficiencyColor, efficiencyBg, DOWNTIME_LABELS, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
-import { TimeInput, isValidHHMM, parseHHMM, minsToHHMM } from '@/components/shared/FormControls'
-import type { HourlyReport, DowntimeCategory, ShiftType } from '@/types/database'
+import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
+import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 2100
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
@@ -23,26 +22,14 @@ function formatTestBlock(slot: number) {
   return `Test ${String(Math.floor(start / 60)).padStart(2, '0')}:${String(start % 60).padStart(2, '0')}-${String(Math.floor(end / 60)).padStart(2, '0')}:${String(end % 60).padStart(2, '0')}`
 }
 
-function effectiveTarget(ratePerHour: number, runtimeMin: number) {
-  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
-}
-
 function calcEfficiency(good: number, target: number) {
   return target > 0 ? Math.round(good / target * 100) : 0
 }
 
-function hourlyRate(pieces: number, runtimeMin: number) {
-  return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
-}
-
-function legacyDowntimeForSave(runtimeMin: number) {
-  return Math.max(0, 60 - runtimeMin)
-}
-
 function getRobotHint(errors: string[]) {
   const first = errors[0]?.toLowerCase() ?? ''
-  if (first.includes('suma')) return 'Czasy musza dac razem 01:00. Policz: praca + gotowosc + alarm, a ja puszcze raport dalej.'
   if (first.includes('target')) return 'Produkcja jest pod targetem. Dopisz krotko dlaczego, zeby kierownik nie musial zgadywac.'
+  if (first.includes('odrzut')) return 'Odrzut przekroczyl 5%. Dopisz krotko przyczyne, zeby bylo wiadomo co sie stalo.'
   if (first.includes('istnieje')) return 'Ten przedzial jest juz zapisany. Wybierz kolejna godzine z listy.'
   if (first.includes('male')) return 'Liczniki sa narastajace. Nowy stan nie moze byc mniejszy od poprzedniego.'
   if (first.includes('wpisz')) return 'Brakuje mi kilku pol. Uzupelnij je po kolei, a przestane marudzic.'
@@ -79,8 +66,6 @@ function errorTargetSelector(error: string) {
   if (text.includes('zlecen')) return '[data-error-target="order"]'
   if (text.includes('przyczyna') || text.includes('ponizej normy') || text.includes('poniżej normy')) return '[data-error-target="reason"]'
   if (text.includes('licznik dobrych') || text.includes('licznik odrzutu') || text.includes('przyrost') || text.includes('normy')) return '[data-error-target="production"]'
-  if (text.includes('czas') || text.includes('gotow') || text.includes('alarm')) return '[data-error-target="times"]'
-  if (text.includes('przestoj')) return '[data-error-target="downtime"]'
   return '[data-error-target="errors"]'
 }
 
@@ -116,7 +101,6 @@ function getSaveErrorMessage(message: string) {
   return message || 'Nie udalo sie zapisac raportu. Sprobuj ponownie.'
 }
 
-interface DowntimeEntry { category: DowntimeCategory; duration_min: number; description: string }
 interface ProductionOrder {
   id: string; order_number: string; machine_id: string
   target_qty: number; produced_qty: number
@@ -165,13 +149,9 @@ export default function OperatorReport() {
 
   const [counterGood,    setCounterGood]    = useState('')
   const [counterReject,  setCounterReject]  = useState('')
-  const [counterRuntime, setCounterRuntime] = useState('')
-  const [counterReady,   setCounterReady]   = useState('')
-  const [counterAlarm,   setCounterAlarm]   = useState('')
 
   const [downtimeReason, setDowntimeReason] = useState('')
   const [notes,          setNotes]          = useState('')
-  const [downtimes,      setDowntimes]      = useState<DowntimeEntry[]>([])
   const [existingReports, setExistingReports] = useState<ReportExt[]>([])
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
@@ -205,10 +185,10 @@ export default function OperatorReport() {
 
     const reloadShiftData = () => {
       loadReports()
-      loadOrders()
+      if (ORDERS_ENABLED) loadOrders()
     }
 
-    const channel = supabase
+    let channel = supabase
       .channel(`operator-report-${activeShift.id}`)
       .on('postgres_changes', {
         event: '*',
@@ -216,12 +196,17 @@ export default function OperatorReport() {
         table: 'hourly_reports',
         filter: `shift_id=eq.${activeShift.id}`
       }, reloadShiftData)
-      .on('postgres_changes', {
+
+    if (ORDERS_ENABLED) {
+      channel = channel.on('postgres_changes', {
         event: '*',
         schema: 'public',
         table: 'production_orders',
         filter: `machine_id=eq.${activeShift.machine_id}`
       }, loadOrders)
+    }
+
+    channel = channel
       .on('postgres_changes', {
         event: '*',
         schema: 'public',
@@ -321,31 +306,19 @@ export default function OperatorReport() {
   const prevReport = previousReports[previousReports.length - 1] as ReportExt | undefined
   const prevGood    = prevReport?.counter_good    ?? 0
   const prevReject  = prevReport?.counter_reject  ?? 0
-  const prevRuntime = prevReport?.counter_runtime ?? 0
-  const prevReady   = prevReport?.counter_ready   ?? 0
-  const prevAlarm   = prevReport?.counter_alarm   ?? 0
 
   const curGood    = parseInt(counterGood)    || 0
   const curReject  = parseInt(counterReject)  || 0
-  const curRuntime = parseHHMM(counterRuntime)
-  const curReady   = parseHHMM(counterReady)
-  const curAlarm   = parseHHMM(counterAlarm)
 
   const incGood    = counterGood    !== '' ? Math.max(0, curGood    - prevGood)    : 0
   const incReject  = counterReject  !== '' ? Math.max(0, curReject  - prevReject)  : 0
-  const incRuntime = counterRuntime !== '' ? Math.max(0, curRuntime - prevRuntime) : 0
-  const incReady   = counterReady   !== '' ? Math.max(0, curReady   - prevReady)   : 0
-  const incAlarm   = counterAlarm   !== '' ? Math.max(0, curAlarm   - prevAlarm)   : 0
 
-  const timeSum = incRuntime + incReady + incAlarm
-  const allTimesFilled = counterRuntime !== '' && counterReady !== '' && counterAlarm !== ''
-  const reportTarget = effectiveTarget(activeTarget, timeSum)
+  const reportTarget = activeTarget
   const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
-  const machineRate = hourlyRate(incGood + incReject, timeSum)
-  const goodRate = hourlyRate(incGood, timeSum)
-  const availability = timeSum > 0 ? Math.round(incRuntime / timeSum * 100) : 0
   const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
+  const rejectAboveLimit = !testMode && rejectPct > 5
+  const reasonRequired = belowTarget || rejectAboveLimit
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
@@ -395,13 +368,7 @@ export default function OperatorReport() {
   const validate = (): string[] => {
     const errs: string[] = []
     const orderQtyVal = parseInt(orderQty) || incGood
-    if (!counterGood)    errs.push('Wpisz stan licznika dobrych sztuk')
-    if (!counterRuntime) errs.push('Wpisz stan licznika czasu pracy (HH:MM)')
-    if (!counterReady)   errs.push('Wpisz stan licznika czasu gotowości (HH:MM)')
-    if (!counterAlarm)   errs.push('Wpisz stan licznika czasu alarmu (HH:MM)')
-    if (counterRuntime && !isValidHHMM(counterRuntime)) errs.push('Czas pracy wpisz w formacie HH:MM, z minutami 00-59')
-    if (counterReady && !isValidHHMM(counterReady)) errs.push('Czas gotowości wpisz w formacie HH:MM, z minutami 00-59')
-    if (counterAlarm && !isValidHHMM(counterAlarm)) errs.push('Czas alarmu wpisz w formacie HH:MM, z minutami 00-59')
+    if (!counterGood) errs.push('Wpisz stan licznika dobrych sztuk')
     if (!testMode && activeShift && isShiftPastAutoClose(activeShift.shift_date, activeShift.shift_type)) errs.push('Zmiana zostala automatycznie zamknieta po buforze 60 minut')
     if (!testMode && activeShift && !canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, selectedHour)) {
       const openAt = getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
@@ -409,19 +376,14 @@ export default function OperatorReport() {
     }
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
-    if (!testMode && allTimesFilled && timeSum !== 60) errs.push(`Suma przyrostów wynosi ${minsToHHMM(timeSum)} — musi być 01:00`)
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej normy: przyrost ${incGood} szt przy normie ${reportTarget} szt`)
-    if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} już istnieje`)
-    if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie mogą być większe niż przyrost dobrych sztuk')
-    if (downtimes.some(d => d.duration_min <= 0)) errs.push('Zdarzenie przestojowe musi mieć czas większy od 0 min')
-    if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie może maleć')
-    if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie może maleć')
-    if (counterRuntime !== '' && prevRuntime > 0 && curRuntime < prevRuntime) errs.push('Licznik czasu pracy nie może maleć')
-    if (counterReady !== '' && prevReady > 0 && curReady < prevReady) errs.push('Licznik czasu gotowości nie może maleć')
-    if (counterAlarm !== '' && prevAlarm > 0 && curAlarm < prevAlarm) errs.push('Licznik czasu alarmu nie może maleć')
+    if (rejectAboveLimit && !downtimeReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
+    if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
+    if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
+    if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie moze malec')
+    if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie moze malec')
     return errs
   }
-
   const handleSave = async () => {
     const errs = validate()
     if (errs.length) { setErrors(errs); reportValidationError(errs[0]); return }
@@ -449,19 +411,19 @@ export default function OperatorReport() {
         await loadReports()
         return
       }
-      const { data: report, error } = await supabase.from('hourly_reports').insert({
+      const { error } = await supabase.from('hourly_reports').insert({
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
         hour_block: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
         good_count: incGood, reject_count: incReject, total_count: curGood,
         counter_good: curGood, counter_reject: curReject,
-        runtime_min: incRuntime, ready_min: incReady, alarm_min: incAlarm,
-        downtime_min: legacyDowntimeForSave(incRuntime), micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
-        counter_runtime: curRuntime, counter_ready: curReady, counter_alarm: curAlarm,
+        runtime_min: 60, ready_min: 0, alarm_min: 0,
+        downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
+        counter_runtime: null, counter_ready: null, counter_alarm: null,
         target: reportTarget,
         downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null), notes: notes || null, status: 'submitted',
         order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
         order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
-      }).select().single()
+      })
       if (error) {
         const message = getSaveErrorMessage(error.message)
         setErrors([message])
@@ -469,22 +431,9 @@ export default function OperatorReport() {
         await loadReports()
         return
       }
-      if (downtimes.length && report) {
-        const { error: downtimeError } = await supabase.from('downtime_events').insert(downtimes.map(d => ({
-          report_id: report.id, shift_id: activeShift.id, machine_id: activeShift.machine_id,
-          category: d.category, duration_min: d.duration_min, description: d.description || null
-        })))
-        if (downtimeError) {
-          const message = getSaveErrorMessage(downtimeError.message)
-          setErrors([`Raport zapisany, ale zdarzenia przestojowe nie zostaly zapisane: ${message}`])
-          reportValidationError(message)
-          await loadReports()
-          return
-        }
-      }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
-      setCounterGood(''); setCounterReject(''); setCounterRuntime(''); setCounterReady(''); setCounterAlarm('')
-      setDowntimeReason(''); setNotes(''); setDowntimes([]); setOrderQty('')
+      setCounterGood(''); setCounterReject('')
+      setDowntimeReason(''); setNotes(''); setOrderQty('')
       const nextReported = [...reportedHours, selectedHour]
       const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
       if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
@@ -527,7 +476,7 @@ export default function OperatorReport() {
               <div>
                 <div className="card-title">Blok godziny</div>
                 {prevReport
-                  ? <div className="text-xs text-navy-400 mt-1">Poprzednia: dobre <span className="text-white font-mono font-bold">{prevGood.toLocaleString('pl-PL')}</span> · czas pracy <span className="text-green-400 font-mono font-bold">{minsToHHMM(prevRuntime)}</span></div>
+                  ? <div className="text-xs text-navy-400 mt-1">Poprzednia: dobre <span className="text-white font-mono font-bold">{prevGood.toLocaleString('pl-PL')}</span> · odrzut <span className="text-red-300 font-mono font-bold">{prevReject.toLocaleString('pl-PL')}</span></div>
                   : <div className="text-xs text-amber-400 mt-1">⚠ Pierwsza godzina zmiany</div>
                 }
               </div>
@@ -708,20 +657,22 @@ export default function OperatorReport() {
           <div
             className={cn(
               'card',
-              belowTarget && !downtimeReason.trim() && 'border-red-500/50 bg-red-500/5'
+              reasonRequired && !downtimeReason.trim() && 'border-red-500/50 bg-red-500/5'
             )}
             data-error-target="reason"
           >
             <div className="card-header">
               <div>
-                <div className={cn('card-title', belowTarget && 'text-red-300')}>Przyczyna / komentarz do wyniku</div>
+                <div className={cn('card-title', reasonRequired && 'text-red-300')}>Przyczyna / komentarz do wyniku</div>
                 <div className="card-sub">
                   {belowTarget
                     ? `Wymagane, bo wynik jest ponizej normy: ${incGood.toLocaleString('pl-PL')} / ${reportTarget.toLocaleString('pl-PL')} szt`
+                    : rejectAboveLimit
+                      ? `Wymagane, bo odrzut przekracza 5%: ${rejectPct}%`
                     : 'Opcjonalnie, ale warto wpisac gdy wynik wymaga wyjasnienia'}
                 </div>
               </div>
-              {belowTarget && (
+              {reasonRequired && (
                 <span className="rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1 text-xs font-bold text-red-300">
                   Wymagane
                 </span>
@@ -730,61 +681,27 @@ export default function OperatorReport() {
             <textarea
               value={downtimeReason}
               onChange={e => setDowntimeReason(e.target.value)}
-              placeholder={belowTarget ? 'Np. brak materialu, problem z forma, kontrola jakosci...' : 'Np. spokojna praca, drobne uwagi, nietypowa sytuacja...'}
+              placeholder={reasonRequired ? 'Np. problem jakosciowy, regulacja, material, uszkodzenie, kontrola...' : 'Np. spokojna praca, drobne uwagi, nietypowa sytuacja...'}
               rows={3}
               className={cn(
                 'input text-sm font-normal resize-none',
-                belowTarget && !downtimeReason.trim() && 'border-red-500/60'
+                reasonRequired && !downtimeReason.trim() && 'border-red-500/60'
               )}
             />
-            {belowTarget && !downtimeReason.trim() && (
+            {reasonRequired && !downtimeReason.trim() && (
               <div className="mt-2 text-xs font-semibold text-red-300">
                 Bez tej przyczyny raport nie zostanie zapisany.
               </div>
             )}
           </div>
 
-          {/* Liczniki czasów HH:MM */}
-          <div className="card" data-error-target="times">
-            <div className="card-header">
-              <div><div className="card-title">Liczniki czasów pracy</div><div className="card-sub">{testMode ? 'Tryb testowy — przyrost może mieć dowolną długość' : 'Format HH:MM — przyrost musi sumować się do 01:00'}</div></div>
-              {allTimesFilled && (
-                <div className={cn('font-bold font-mono text-lg', testMode || timeSum === 60 ? 'text-green-400' : timeSum > 60 ? 'text-red-400' : 'text-amber-400')}>
-                  {minsToHHMM(timeSum)}{testMode ? '' : ' / 01:00'}
-                </div>
-              )}
-            </div>
-            {allTimesFilled && (
-              <div className="mb-4">
-                <div className="flex gap-px h-3 rounded-xl overflow-hidden">
-                  <div className="bg-green-500 rounded-l" style={{ width: `${Math.min(incRuntime/60*100,100)}%` }} />
-                  <div className="bg-amber-400" style={{ width: `${Math.min(incReady/60*100,100)}%` }} />
-                  <div className="bg-red-500 rounded-r" style={{ width: `${Math.min(incAlarm/60*100,100)}%` }} />
-                </div>
-                <div className="flex gap-4 mt-1.5 text-xs">
-                  <span className="text-green-400">● Praca: {minsToHHMM(incRuntime)}</span>
-                  <span className="text-amber-400">● Gotowość: {minsToHHMM(incReady)}</span>
-                  <span className="text-red-400">● Alarm: {minsToHHMM(incAlarm)}</span>
-                  {(testMode || timeSum === 60) && <span className="text-green-400 ml-auto">✓ OK</span>}
-                </div>
-              </div>
-            )}
-            <div className="grid grid-cols-3 gap-4">
-              <TimeInput label="Czas pracy" sublabel="Maszyna produkuje" value={counterRuntime} onChange={setCounterRuntime} prevValue={prevRuntime} color="text-green-400" />
-              <TimeInput label="Czas gotowości" sublabel="Maszyna stoi, gotowa" value={counterReady} onChange={setCounterReady} prevValue={prevReady} color="text-amber-400" />
-              <TimeInput label="Czas alarmu" sublabel="Maszyna zatrzymana" value={counterAlarm} onChange={setCounterAlarm} prevValue={prevAlarm} color="text-red-400" />
-            </div>
-          </div>
-
           {/* Live KPI */}
-          {incGood > 0 && incRuntime > 0 && (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+          {incGood > 0 && (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
               {[
-                { l: 'W EPQ',        v: efficiency + '%',       c: efficiencyColor(efficiency) },
-                { l: '% odrzutu',    v: rejectPct + '%',        c: rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400' },
-                { l: 'Wyd. maszyny', v: machineRate + ' szt/h', c: 'text-cyan-400' },
-                { l: 'Wyd. dobrych', v: goodRate + ' szt/h',    c: 'text-green-400' },
-                { l: 'Dostępność',   v: availability + '%',     c: availability > 90 ? 'text-green-400' : availability > 75 ? 'text-amber-400' : 'text-red-400' },
+                { l: 'W EPQ', v: efficiency + '%', c: efficiencyColor(efficiency) },
+                { l: '% odrzutu', v: rejectPct + '%', c: rejectPct > 10 ? 'text-red-400' : rejectPct > 5 ? 'text-amber-400' : 'text-green-400' },
+                { l: 'Norma godziny', v: reportTarget.toLocaleString('pl-PL') + ' szt', c: 'text-cyan-400' },
               ].map(k => (
                 <div key={k.l} className="bg-navy-900 rounded-xl p-3 text-center">
                   <div className="text-xs text-navy-400 mb-1">{k.l}</div>
@@ -793,34 +710,8 @@ export default function OperatorReport() {
               ))}
             </div>
           )}
-
-          {/* Przestoje */}
-          <div className="card" data-error-target="downtime">
-            <div className="card-header">
-              <div><div className="card-title">Zdarzenia przestojowe</div><div className="card-sub">Opcjonalnie</div></div>
-              <button onClick={() => setDowntimes(p => [...p, { category: 'mechanical_failure', duration_min: 0, description: '' }])} className="btn-secondary text-xs py-1.5 px-3">+ Dodaj</button>
-            </div>
-            {downtimes.length === 0
-              ? <div className="text-center py-4 text-navy-500 text-sm">Brak zdarzeń</div>
-              : downtimes.map((d, i) => (
-                <div key={i} className="bg-navy-900 rounded-xl p-3 mb-2">
-                  <div className="grid grid-cols-3 gap-2 mb-2">
-                    <select value={d.category} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, category: e.target.value as DowntimeCategory} : x))} className="input text-sm col-span-2">
-                      {Object.entries(DOWNTIME_LABELS).map(([k,v]) => <option key={k} value={k}>{v}</option>)}
-                    </select>
-                    <input type="number" value={d.duration_min||''} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, duration_min: parseInt(e.target.value)||0} : x))} placeholder="min" className="input text-sm" />
-                  </div>
-                  <div className="flex gap-2">
-                    <input type="text" value={d.description} onChange={e => setDowntimes(p => p.map((x,j) => j===i ? {...x, description: e.target.value} : x))} placeholder="Opis..." className="input text-sm flex-1" />
-                    <button onClick={() => setDowntimes(p => p.filter((_,j) => j!==i))} className="text-red-400 px-2">✕</button>
-                  </div>
-                </div>
-              ))
-            }
-          </div>
-
           <div className="card">
-            <label className="label">Uwagi ogólne</label>
+            <label className="label">Uwagi ogolne</label>
             <textarea value={notes} onChange={e => setNotes(e.target.value)} placeholder="Opcjonalnie..." rows={2} className="input text-sm font-normal resize-none" />
           </div>
 
@@ -884,10 +775,6 @@ export default function OperatorReport() {
                         <span className="font-bold text-white font-mono">+{r.good_count.toLocaleString('pl-PL')} szt</span>
                         {r.reject_count > 0 && <span className="text-red-400 text-xs">{rj}% odrz.</span>}
                       </div>
-                      <div className="flex gap-2 mt-1 text-xs">
-                        <span className="text-green-400">⏱ {minsToHHMM(r.runtime_min)}</span>
-                        {(r as ReportExt).alarm_min != null && (r as ReportExt).alarm_min! > 0 && <span className="text-red-400">🔔 {minsToHHMM((r as ReportExt).alarm_min!)}</span>}
-                      </div>
                       {ORDERS_ENABLED && (r as ReportExt).order_id && (
                         <div className="text-xs text-brand mt-1">📋 {orders.find(o => o.id === (r as ReportExt).order_id)?.order_number ?? 'zlecenie'}</div>
                       )}
@@ -909,8 +796,6 @@ export default function OperatorReport() {
                   { l: 'Produkcja łącznie', v: existingReports.reduce((s,r)=>s+r.good_count,0).toLocaleString('pl-PL') + ' szt', c: 'text-white' },
                   { l: 'Śr. W EPQ', v: Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length) + '%', c: efficiencyColor(Math.round(existingReports.reduce((s,r)=>s+Number(r.efficiency_pct),0)/existingReports.length)) },
                   { l: 'Odrzut łącznie', v: existingReports.reduce((s,r)=>s+r.reject_count,0) + ' szt', c: 'text-red-400' },
-                  { l: 'Czas pracy łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+r.runtime_min,0)), c: 'text-green-400' },
-                  { l: 'Czas alarmu łącznie', v: minsToHHMM(existingReports.reduce((s,r)=>s+((r as ReportExt).alarm_min??0),0)), c: 'text-red-400' },
                 ].map(k => (
                   <div key={k.l} className="flex justify-between">
                     <span className="text-navy-400">{k.l}</span>

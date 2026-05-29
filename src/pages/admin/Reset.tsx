@@ -30,22 +30,6 @@ const OPTIONS: ResetOption[] = [
     warn: 'Usuwa wszystkie zmiany.'
   },
   {
-    id: 'orders',
-    label: 'Zlecenia produkcyjne',
-    desc: 'Usuwa wszystkie zlecenia produkcyjne',
-    color: 'border-red-500/30 hover:border-red-500/60',
-    tables: ['production_orders'],
-    warn: 'Usuwa wszystkie zlecenia.'
-  },
-  {
-    id: 'plans',
-    label: 'Plany miesięczne',
-    desc: 'Usuwa wszystkie plany miesięczne asortymentów',
-    color: 'border-navy-600 hover:border-navy-500',
-    tables: ['monthly_plans'],
-    warn: 'Usuwa wszystkie plany.'
-  },
-  {
     id: 'audit',
     label: 'Audit log',
     desc: 'Usuwa historię zdarzeń systemowych',
@@ -56,9 +40,9 @@ const OPTIONS: ResetOption[] = [
   {
     id: 'all',
     label: '🚨 RESET WSZYSTKICH DANYCH',
-    desc: 'Usuwa wszystkie dane produkcyjne — raporty, zmiany, zlecenia, plany, audit',
+    desc: 'Usuwa wszystkie dane produkcyjne - raporty, zmiany i audit',
     color: 'border-red-500/60 hover:border-red-500 bg-red-500/5',
-    tables: ['downtime_events', 'hourly_reports', 'shifts', 'production_orders', 'monthly_plans', 'audit_logs'],
+    tables: ['downtime_events', 'hourly_reports', 'shifts', 'audit_logs'],
     warn: 'To usunie WSZYSTKIE dane produkcyjne. Tej operacji nie można cofnąć!'
   }
 ]

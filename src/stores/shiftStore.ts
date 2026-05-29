@@ -24,9 +24,19 @@ interface ShiftState {
   isLoading: boolean
 
   startShift: (machineId: string, shiftType: ShiftType, operator2Id?: string) => Promise<{ error: string | null }>
-  endShift: () => Promise<{ error: string | null }>
+  endShift: (summary?: ShiftEndSummary) => Promise<{ error: string | null }>
   reopenShift: (shiftId: string) => Promise<{ error: string | null }>
   loadActiveShift: () => Promise<void>
+}
+
+export interface ShiftEndSummary {
+  summary_good_count: number
+  summary_reject_count: number
+  summary_runtime_min: number
+  summary_ready_min: number
+  summary_alarm_min: number
+  summary_downtime_min: number
+  summary_notes: string | null
 }
 
 async function autoCloseShiftIfExpired(shift: Shift): Promise<boolean> {
@@ -101,7 +111,7 @@ export const useShiftStore = create<ShiftState>()(
         }
       },
 
-      endShift: async () => {
+      endShift: async (summary) => {
         const { activeShift } = get()
         if (!activeShift) return { error: null }
 
@@ -109,7 +119,7 @@ export const useShiftStore = create<ShiftState>()(
         const endedAt = new Date().toISOString()
         const { error } = await supabase
           .from('shifts')
-          .update({ ended_at: endedAt })
+          .update({ ended_at: endedAt, ...(summary ?? {}) })
           .eq('id', activeShift.id)
 
         if (error) {
@@ -131,7 +141,7 @@ export const useShiftStore = create<ShiftState>()(
           }
         }
 
-        logAudit('shift_end', 'shifts', activeShift.id, undefined, { ended_at: endedAt }).catch(() => undefined)
+        logAudit('shift_end', 'shifts', activeShift.id, undefined, { ended_at: endedAt, ...(summary ?? {}) }).catch(() => undefined)
         set({ activeShift: null, activeMachine: null, isLoading: false })
         return { error: null }
       },

@@ -16,15 +16,12 @@ const OperatorPassword   = lazy(() => import('@/pages/operator/Password'))
 const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
-const ManagerOrders      = lazy(() => import('@/pages/manager/Orders'))
-const ManagerAssortments = lazy(() => import('@/pages/manager/Assortments'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
 const AdminUsers         = lazy(() => import('@/pages/admin/Users'))
 const AdminAudit         = lazy(() => import('@/pages/admin/Audit'))
 const AdminMachines      = lazy(() => import('@/pages/admin/Machines'))
 const AdminTargets       = lazy(() => import('@/pages/admin/Targets'))
 const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
-const AdminOrders        = lazy(() => import('@/pages/admin/Orders'))
 const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
 const SpecialistDashboard = lazy(() => import('@/pages/Specialist/Dashboard'))
 
@@ -98,15 +95,6 @@ const router = createBrowserRouter([
         path: 'manager/export',
         element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerExport /></Wrap></RequireAuth>
       },
-      {
-        path: 'manager/orders',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerOrders /></Wrap></RequireAuth>
-      },
-      {
-        path: 'manager/assortments',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerAssortments /></Wrap></RequireAuth>
-      },
-
       // ── SPECIALIST ──
       {
         path: 'specialist',
@@ -137,10 +125,6 @@ const router = createBrowserRouter([
       {
         path: 'admin/schedules',
         element: <RequireAuth roles="admin"><Wrap><AdminSchedules /></Wrap></RequireAuth>
-      },
-      {
-        path: 'admin/orders',
-        element: <RequireAuth roles="admin"><Wrap><AdminOrders /></Wrap></RequireAuth>
       },
       {
         path: 'admin/reset',

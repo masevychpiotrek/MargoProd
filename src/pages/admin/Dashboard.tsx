@@ -11,7 +11,6 @@ interface Stats {
   machines: number
   activeShifts: number
   reportsToday: number
-  openOrders: number
   auditToday: number
 }
 
@@ -60,7 +59,7 @@ export default function AdminDashboard() {
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const [stats, setStats] = useState<Stats>({
     users: 0, inactiveUsers: 0, operators: 0, machines: 0,
-    activeShifts: 0, reportsToday: 0, openOrders: 0, auditToday: 0
+    activeShifts: 0, reportsToday: 0, auditToday: 0
   })
   const [activities, setActivities] = useState<Activity[]>([])
   const [activeShifts, setActiveShifts] = useState<ActiveShiftRow[]>([])
@@ -70,7 +69,7 @@ export default function AdminDashboard() {
     setLoading(true)
     const today = todayISO()
     const dayStart = `${today}T00:00:00Z`
-    const [users, inactive, operators, machines, shifts, reports, orders, audit, activity] = await Promise.all([
+    const [users, inactive, operators, machines, shifts, reports, audit, activity] = await Promise.all([
       supabase.from('profiles').select('id', { count: 'exact' }).is('deleted_at', null),
       supabase.from('profiles').select('id', { count: 'exact' }).eq('is_active', false).is('deleted_at', null),
       supabase.from('profiles').select('id', { count: 'exact' }).eq('role', 'operator').is('deleted_at', null),
@@ -80,7 +79,6 @@ export default function AdminDashboard() {
         .is('ended_at', null)
         .order('started_at', { ascending: false }),
       supabase.from('hourly_reports').select('id', { count: 'exact' }).eq('report_date', today).is('deleted_at', null),
-      supabase.from('production_orders').select('id', { count: 'exact' }).in('status', ['active', 'paused']),
       supabase.from('audit_logs').select('id', { count: 'exact' }).gte('created_at', dayStart),
       supabase.from('audit_logs')
         .select('*, profile:profiles(full_name)')
@@ -95,7 +93,6 @@ export default function AdminDashboard() {
       machines: machines.count ?? 0,
       activeShifts: shifts.data?.length ?? 0,
       reportsToday: reports.count ?? 0,
-      openOrders: orders.count ?? 0,
       auditToday: audit.count ?? 0
     })
     setActiveShifts((shifts.data ?? []) as ActiveShiftRow[])
@@ -110,7 +107,6 @@ export default function AdminDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'audit_logs' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'production_orders' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, load)
       .subscribe()
     return () => { channel.current?.unsubscribe() }
@@ -120,7 +116,6 @@ export default function AdminDashboard() {
     const list: { label: string; desc: string; to: string; tone: string }[] = []
     if (stats.inactiveUsers > 0) list.push({ label: 'Nieaktywne konta', desc: `${stats.inactiveUsers} kont do sprawdzenia`, to: '/admin/users', tone: 'amber' })
     if (stats.activeShifts > 0) list.push({ label: 'Aktywne zmiany', desc: `${stats.activeShifts} zmian w toku`, to: '/manager', tone: 'green' })
-    if (stats.openOrders > 0) list.push({ label: 'Otwarte zlecenia', desc: `${stats.openOrders} aktywnych lub zapauzowanych`, to: '/manager/orders', tone: 'cyan' })
     if (list.length === 0) list.push({ label: 'System spokojny', desc: 'Brak rzeczy wymagajacych reakcji', to: '/admin/audit', tone: 'green' })
     return list
   }, [stats])
