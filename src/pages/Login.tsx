@@ -22,8 +22,9 @@ const HexLogo = () => (
 
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { signIn, isLoading } = useAuthStore()
+  const { signIn } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
+  const [submitting, setSubmitting] = useState(false)
   const [showForm, setShowForm] = useState(() => !!sessionStorage.getItem('ml-intro-shown'))
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
@@ -31,15 +32,19 @@ export default function LoginPage() {
   })
 
   const onSubmit = async (data: FormData) => {
+    if (submitting) return
+    setSubmitting(true)
     setServerError(null)
-    localStorage.removeItem('margoline-auth')
-    sessionStorage.removeItem('margoline-auth')
-    const { error } = await signIn(data.email, data.password)
-    if (error) {
-      setServerError(error)
-      return
+    try {
+      const { error } = await signIn(data.email, data.password)
+      if (error) {
+        setServerError(error)
+        return
+      }
+      navigate('/', { replace: true })
+    } finally {
+      setSubmitting(false)
     }
-    navigate('/', { replace: true })
   }
 
   // Najpierw animacja — po 14s pojawia się formularz
@@ -137,7 +142,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={isLoading}
+              disabled={submitting}
               className="w-full font-semibold py-3.5 rounded-xl transition-all mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: 'linear-gradient(135deg, #c9a84c, #9a7a2e)',
@@ -145,7 +150,7 @@ export default function LoginPage() {
                 boxShadow: '0 4px 20px rgba(201,168,76,0.25)'
               }}
             >
-              {isLoading ? (
+              {submitting ? (
                 <span className="flex items-center justify-center gap-2">
                   <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
