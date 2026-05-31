@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { canEnterHourlyReport, cn, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
+import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -37,17 +37,12 @@ interface ShiftEndForm {
   notes: string
 }
 
-function effectiveTarget(ratePerHour: number, runtimeMin: number) {
-  return Math.round(Math.max(0, ratePerHour) * Math.max(0, runtimeMin) / 60)
-}
-
-function reportWepq(good: number, ratePerHour: number, runtimeMin: number) {
-  const target = effectiveTarget(ratePerHour, runtimeMin)
-  return target > 0 ? Math.round(good / target * 100) : 0
-}
-
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
+}
+
+function rejectPct(good: number, reject: number) {
+  return good + reject > 0 ? Math.round(reject / (good + reject) * 1000) / 10 : 0
 }
 
 // Godziny poszczególnych zmian
@@ -276,6 +271,10 @@ export default function OperatorShift() {
   }
 
   const handleEndConfirm = async () => {
+    if (missingHours.length > 0) {
+      setError('Nie mozna zakonczyc zmiany, dopoki brakuje otwartych raportow godzinowych.')
+      return
+    }
     if (endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ') {
       setError('Aby zakończyć zmianę, wpisz ZAMKNIJ w oknie potwierdzenia.')
       return
@@ -288,11 +287,25 @@ export default function OperatorShift() {
       setError('Czasy wpisz w formacie GG:MM, np. 07:35.')
       return
     }
+    const good = Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
+    const reject = Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
+    const totalTime = (runtime ?? 0) + (ready ?? 0) + (alarm ?? 0) + (downtime ?? 0)
+    const expected = activeMachine ? activeMachine.target_per_hour * shiftReports.length : 0
+    const lowResult = expected > 0 && good < Math.round(expected * 0.85)
+    const highReject = rejectPct(good, reject) > 5
+    if (totalTime <= 0) {
+      setError('Wpisz rozliczenie czasu zmiany. Suma czasu nie moze wynosic 00:00.')
+      return
+    }
+    if ((lowResult || highReject) && !endForm.notes.trim()) {
+      setError('Dopisz uwagi do zmiany, bo wynik jest slaby albo odrzut przekracza 5%.')
+      return
+    }
     setShowEndWarning(false)
     setEndConfirmText('')
     const { error: endError } = await endShift({
-      summary_good_count: Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0),
-      summary_reject_count: Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0),
+      summary_good_count: good,
+      summary_reject_count: reject,
       summary_runtime_min: runtime ?? 0,
       summary_ready_min: ready ?? 0,
       summary_alarm_min: alarm ?? 0,
@@ -315,14 +328,10 @@ export default function OperatorShift() {
     : null
   const totalGood = shiftReports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = shiftReports.reduce((s, r) => s + r.reject_count, 0)
-  const totalRuntime = shiftReports.reduce((s, r) => s + r.runtime_min, 0)
-  const totalReady = shiftReports.reduce((s, r) => s + ((r as HourlyReport & { ready_min?: number }).ready_min ?? 0), 0)
-  const totalAlarm = shiftReports.reduce((s, r) => s + ((r as HourlyReport & { alarm_min?: number }).alarm_min ?? 0), 0)
-  const totalDowntime = shiftReports.reduce((s, r) => s + r.downtime_min + r.failure_min, 0)
-  const totalAccountable = totalRuntime + totalReady + totalAlarm + totalDowntime
-  const machineRate = hourlyRate(totalGood + totalReject, totalAccountable)
+  const totalExpected = activeMachine ? shiftReports.length * activeMachine.target_per_hour : 0
+  const shiftRejectPct = rejectPct(totalGood, totalReject)
   const avgEff = shiftReports.length && activeMachine
-    ? reportWepq(totalGood, activeMachine.target_per_hour, totalAccountable)
+    ? Math.round(totalGood / totalExpected * 100)
     : 0
   const completePct = activeShiftHours.length
     ? Math.round(shiftReports.length / activeShiftHours.length * 100)
@@ -331,6 +340,18 @@ export default function OperatorShift() {
   const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
   const shiftOperator1 = activeShift?.operator_1?.full_name ?? profile?.full_name ?? 'Operator 1'
   const shiftOperator2 = activeShift?.operator_2?.full_name ?? null
+  const endFormGood = Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
+  const endFormReject = Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
+  const endFormRejectPct = rejectPct(endFormGood, endFormReject)
+  const endFormRuntime = parseHHMM(endForm.runtime) ?? 0
+  const endFormReady = parseHHMM(endForm.ready) ?? 0
+  const endFormAlarm = parseHHMM(endForm.alarm) ?? 0
+  const endFormDowntime = parseHHMM(endForm.downtime) ?? 0
+  const endFormTotalTime = endFormRuntime + endFormReady + endFormAlarm + endFormDowntime
+  const endFormMachineRate = hourlyRate(endFormGood + endFormReject, endFormRuntime)
+  const endExpected = activeMachine ? shiftReports.length * activeMachine.target_per_hour : 0
+  const endEff = endExpected > 0 ? Math.round(endFormGood / endExpected * 100) : 0
+  const endNeedsNotes = (endExpected > 0 && endFormGood < Math.round(endExpected * 0.85)) || endFormRejectPct > 5
 
   if (activeShift && !activeShift.ended_at && activeMachine) {
     return (
@@ -350,8 +371,10 @@ export default function OperatorShift() {
               </p>
               {missingHours.length > 0 ? (
                 <>
-                  <p className="text-navy-300 text-sm mb-4">Brakuje raportow za nastepujace godziny:</p>
-                  <div className="bg-navy-900 rounded-xl p-3 mb-4">
+                  <p className="text-red-300 text-sm font-semibold mb-4">
+                    Nie mozna zamknac zmiany, bo brakuje otwartych raportow za nastepujace godziny:
+                  </p>
+                  <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 mb-4">
                     {missingHours.map(h => (
                       <div key={h} className="text-amber-400 font-mono text-sm">
                         - {String(h).padStart(2,'0')}:00 - {String((h+1)%24).padStart(2,'0')}:00
@@ -368,6 +391,24 @@ export default function OperatorShift() {
                 <div className="mb-3">
                   <div className="text-sm font-bold text-white">Rozliczenie koncowe zmiany</div>
                   <div className="text-xs text-navy-400">Produkcja i odrzut sa podpowiedziane z wpisow godzinowych. Czasy wpisujesz dopiero tutaj.</div>
+                </div>
+                <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+                  <div className="rounded-lg bg-navy-800 p-3">
+                    <div className="text-xs text-navy-400">Wynik</div>
+                    <div className={cn('font-mono text-lg font-bold', efficiencyColor(endEff))}>{endEff || '-'}{endEff ? '%' : ''}</div>
+                  </div>
+                  <div className="rounded-lg bg-navy-800 p-3">
+                    <div className="text-xs text-navy-400">Odrzut</div>
+                    <div className={cn('font-mono text-lg font-bold', endFormRejectPct > 5 ? 'text-red-400' : 'text-green-400')}>{endFormRejectPct}%</div>
+                  </div>
+                  <div className="rounded-lg bg-navy-800 p-3">
+                    <div className="text-xs text-navy-400">Czas razem</div>
+                    <div className={cn('font-mono text-lg font-bold', endFormTotalTime > 0 ? 'text-cyan-300' : 'text-red-300')}>{minsToHHMM(endFormTotalTime)}</div>
+                  </div>
+                  <div className="rounded-lg bg-navy-800 p-3">
+                    <div className="text-xs text-navy-400">Wyd. maszyny</div>
+                    <div className="font-mono text-lg font-bold text-cyan-300">{endFormMachineRate ? endFormMachineRate.toLocaleString('pl-PL') : '-'}</div>
+                  </div>
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label>
@@ -435,6 +476,11 @@ export default function OperatorShift() {
                     className="input mt-1 min-h-[88px]"
                     placeholder="Np. przyczyna slabszej pracy, szkolenie, problem na stacji..."
                   />
+                  {endNeedsNotes && !endForm.notes.trim() && (
+                    <div className="mt-2 text-xs font-semibold text-red-300">
+                      Uwagi sa wymagane, bo wynik jest niski albo odrzut przekracza 5%.
+                    </div>
+                  )}
                 </label>
               </div>
               <label className="block mb-5">
@@ -453,7 +499,7 @@ export default function OperatorShift() {
                 </button>
                 <button
                   onClick={handleEndConfirm}
-                  disabled={endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ' || isLoading}
+                  disabled={missingHours.length > 0 || endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ' || endFormTotalTime <= 0 || (endNeedsNotes && !endForm.notes.trim()) || isLoading}
                   className="btn-danger px-5 py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
                   {isLoading ? 'Zamykanie...' : 'Zakoncz zmiane'}
@@ -528,27 +574,28 @@ export default function OperatorShift() {
             <div className="h-2 rounded-full bg-navy-700">
               <div className="h-full rounded-full bg-brand" style={{ width: `${completePct}%` }} />
             </div>
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-5">
+            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
               <div className="rounded-lg bg-navy-800 p-3">
                 <div className="text-xs text-navy-400">Dobre</div>
                 <div className="font-mono text-lg font-bold text-green-400">{totalGood.toLocaleString('pl-PL')}</div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
                 <div className="text-xs text-navy-400">Odrzut</div>
-                <div className="font-mono text-lg font-bold text-red-400">{totalReject.toLocaleString('pl-PL')}</div>
+                <div className={cn('font-mono text-lg font-bold', shiftRejectPct > 5 ? 'text-red-400' : 'text-green-400')}>
+                  {totalReject.toLocaleString('pl-PL')} ({shiftRejectPct}%)
+                </div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
-                <div className="text-xs text-navy-400">Czas pracy</div>
-                <div className="font-mono text-lg font-bold text-cyan-300">{minsToHHMM(totalRuntime)}</div>
-              </div>
-              <div className="rounded-lg bg-navy-800 p-3">
-                <div className="text-xs text-navy-400">Wyd. maszyny</div>
-                <div className="font-mono text-lg font-bold text-cyan-300">{machineRate.toLocaleString('pl-PL')}</div>
+                <div className="text-xs text-navy-400">Norma wpisow</div>
+                <div className="font-mono text-lg font-bold text-cyan-300">{totalExpected.toLocaleString('pl-PL')}</div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
                 <div className="text-xs text-navy-400">Srednie W EPQ</div>
                 <div className="font-mono text-lg font-bold text-white">{avgEff}%</div>
               </div>
+            </div>
+            <div className="mt-3 rounded-lg border border-blue-500/25 bg-blue-500/10 p-3 text-xs text-blue-200">
+              Czasy pracy, gotowosci, alarmow i postojow wpisujesz dopiero przy zakonczeniu zmiany.
             </div>
             {missingOpenHours.length > 0 ? (
               <div className="mt-3 rounded-lg border border-amber-500/30 bg-amber-500/10 p-3 text-xs text-amber-300">
