@@ -32,7 +32,7 @@ const CAT_LABELS: Record<string, string> = {
 }
 
 type FilterStatus = 'all' | FailureStatus
-type ViewMode = 'centrum' | 'rejestr' | 'produkcja' | 'tpm'
+type ViewMode = 'awarie' | 'zadania' | 'produkcja' | 'tpm' | 'historia'
 type ExpandedReport = { id: string; notes: string; saving: boolean }
 type FailureRow = FailureReport & {
   machine?: Pick<Machine, 'id' | 'name' | 'code'> | null
@@ -82,7 +82,7 @@ export default function SpecialistDashboard() {
   const [machines, setMachines] = useState<Machine[]>([])
   const [loading, setLoading] = useState(true)
   const [filter, setFilter] = useState<FilterStatus>('all')
-  const [view, setView] = useState<ViewMode>('centrum')
+  const [view, setView] = useState<ViewMode>('awarie')
   const [search, setSearch] = useState('')
   const [expanded, setExpanded] = useState<Record<string, boolean>>({})
   const [editNotes, setEditNotes] = useState<Record<string, ExpandedReport>>({})
@@ -204,10 +204,20 @@ export default function SpecialistDashboard() {
     [openReports]
   )
 
-  const filteredReports = useMemo(() => {
+  const myTasks = useMemo(() =>
+    openReports.filter(r => r.assigned_to === profile?.id),
+    [openReports, profile?.id]
+  )
+
+  const historyReports = useMemo(() =>
+    reports.filter(r => r.status === 'resolved'),
+    [reports]
+  )
+
+  const filteredOpenReports = useMemo(() => {
     const q = search.trim().toLowerCase()
-    return reports.filter(r => {
-      if (filter !== 'all' && r.status !== filter) return false
+    return openReports.filter(r => {
+      if (filter !== 'all' && filter !== 'resolved' && r.status !== filter) return false
       if (!q) return true
       return [
         r.machine?.name,
@@ -219,7 +229,24 @@ export default function SpecialistDashboard() {
         r.resolution_notes
       ].some(value => value?.toLowerCase().includes(q))
     })
-  }, [filter, reports, search])
+  }, [filter, openReports, search])
+
+  const filteredHistoryReports = useMemo(() => {
+    const q = search.trim().toLowerCase()
+    return historyReports.filter(r => {
+      if (!q) return true
+      return [
+        r.machine?.name,
+        r.machine?.code,
+        r.reporter?.full_name,
+        r.assignee?.full_name,
+        r.station,
+        CAT_LABELS[r.category],
+        r.description,
+        r.resolution_notes
+      ].some(value => value?.toLowerCase().includes(q))
+    })
+  }, [historyReports, search])
 
   const counts = {
     all: reports.length,
@@ -283,10 +310,11 @@ export default function SpecialistDashboard() {
 
         <div className="flex flex-wrap gap-2 border-b border-navy-700 pb-2">
           {[
-            ['centrum', 'Centrum'],
-            ['rejestr', 'Rejestr awarii'],
-            ['produkcja', 'Problemy produkcji'],
+            ['awarie', `Awarie (${openReports.length})`],
+            ['zadania', `Moje zadania (${myTasks.length})`],
+            ['produkcja', `Produkcja (${issues.length})`],
             ['tpm', 'TPM / obszary'],
+            ['historia', `Historia (${counts.resolved})`],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -298,65 +326,111 @@ export default function SpecialistDashboard() {
           ))}
         </div>
 
-        {view === 'centrum' && (
+        {view === 'awarie' && (
           <div className="grid gap-4 xl:grid-cols-3">
             <div className="card xl:col-span-2">
               <div className="card-header">
                 <div>
-                  <div className="card-title">Kolejka reakcji</div>
-                  <div className="card-sub">Najpierw krytyczne, potem najstarsze otwarte</div>
+                  <div className="card-title">Otwarte awarie</div>
+                  <div className="card-sub">Kolejka reakcji: najpierw krytyczne i najstarsze</div>
                 </div>
               </div>
+              <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="flex flex-wrap gap-2">
+                  {(['all', 'new', 'acknowledged', 'in_progress'] as FilterStatus[]).map(status => (
+                    <button
+                      key={status}
+                      onClick={() => setFilter(status)}
+                      className={cn('rounded-xl border px-3 py-2 text-xs font-bold transition-all', filter === status ? 'border-brand bg-brand/15 text-brand' : 'border-navy-600 bg-navy-900 text-navy-300 hover:border-navy-500')}
+                    >
+                      {status === 'all' ? `Wszystkie (${openReports.length})` : `${STATUS_CFG[status].label} (${counts[status]})`}
+                    </button>
+                  ))}
+                </div>
+                <input value={search} onChange={e => setSearch(e.target.value)} className="input max-w-sm" placeholder="Szukaj: maszyna, stacja, opis..." />
+              </div>
               <div className="space-y-3">
-                {urgentQueue.length === 0 && <div className="py-8 text-center text-navy-500">Brak otwartych awarii</div>}
-                {urgentQueue.map(r => <FailureCard key={r.id} report={r} compact onStatus={updateStatus} onPhoto={setPhotoModal} />)}
+                {filteredOpenReports.length === 0 && <div className="py-8 text-center text-navy-500">Brak otwartych awarii</div>}
+                {filteredOpenReports.map(r => (
+                  <FailureCard
+                    key={r.id}
+                    report={r}
+                    expanded={!!expanded[r.id]}
+                    editEntry={editNotes[r.id]}
+                    onToggle={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
+                    onStatus={updateStatus}
+                    onPhoto={setPhotoModal}
+                    onStartNotes={startEditNotes}
+                    onSaveNotes={saveNotes}
+                    onNotesChange={(id, notes) => setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], notes } }))}
+                    onCancelNotes={id => setEditNotes(prev => { const n = { ...prev }; delete n[id]; return n })}
+                  />
+                ))}
               </div>
             </div>
 
             <div className="space-y-4">
               <div className="card">
-                <div className="card-title">Szybkie sygnaly produkcji</div>
-                <div className="card-sub mb-3">Niski wynik i odrzut z dzisiejszych wpisow</div>
+                <div className="card-title">Najpilniejsze</div>
+                <div className="card-sub mb-3">Krytyczne i wysokie priorytety</div>
                 <div className="space-y-2">
-                  {issues.slice(0, 6).map(issue => <ProductionIssueRow key={issue.id} issue={issue} />)}
-                  {issues.length === 0 && <div className="py-6 text-center text-sm text-navy-500">Brak ostrzezen produkcyjnych</div>}
+                  {urgentQueue.map(r => <FailureCard key={r.id} report={r} compact onStatus={updateStatus} onPhoto={setPhotoModal} />)}
+                  {urgentQueue.length === 0 && <div className="py-6 text-center text-sm text-navy-500">Brak pilnych awarii</div>}
                 </div>
               </div>
 
               <div className="card">
-                <div className="card-title">TPM - priorytety</div>
-                <div className="card-sub mb-3">Maszyny wymagajace kontroli</div>
+                <div className="card-title">Szybkie sygnaly produkcji</div>
+                <div className="card-sub mb-3">Niski wynik i odrzut z dzisiejszych wpisow</div>
                 <div className="space-y-2">
-                  {machineTpm.filter(row => row.score > 0).slice(0, 5).map(row => <TpmRow key={row.machine.id} row={row} />)}
-                  {machineTpm.every(row => row.score === 0) && <div className="py-6 text-center text-sm text-navy-500">Brak maszyn do pilnej kontroli</div>}
+                  {issues.slice(0, 5).map(issue => <ProductionIssueRow key={issue.id} issue={issue} />)}
+                  {issues.length === 0 && <div className="py-6 text-center text-sm text-navy-500">Brak ostrzezen produkcyjnych</div>}
                 </div>
               </div>
             </div>
           </div>
         )}
 
-        {view === 'rejestr' && (
+        {view === 'zadania' && (
+          <div className="space-y-4">
+            <div className="card">
+              <div className="card-title">Moje zadania</div>
+              <div className="card-sub">Awarie przypisane do Ciebie albo przyjete przez Ciebie</div>
+            </div>
+            {myTasks.length === 0 && <div className="card py-10 text-center text-navy-500">Nie masz teraz przypisanych zadan</div>}
+            {myTasks.map(r => (
+              <FailureCard
+                key={r.id}
+                report={r}
+                expanded={!!expanded[r.id]}
+                editEntry={editNotes[r.id]}
+                onToggle={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
+                onStatus={updateStatus}
+                onPhoto={setPhotoModal}
+                onStartNotes={startEditNotes}
+                onSaveNotes={saveNotes}
+                onNotesChange={(id, notes) => setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], notes } }))}
+                onCancelNotes={id => setEditNotes(prev => { const n = { ...prev }; delete n[id]; return n })}
+              />
+            ))}
+          </div>
+        )}
+
+        {view === 'historia' && (
           <div className="space-y-4">
             <div className="card">
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex flex-wrap gap-2">
-                  {(['all', 'new', 'acknowledged', 'in_progress', 'resolved'] as FilterStatus[]).map(status => (
-                    <button
-                      key={status}
-                      onClick={() => setFilter(status)}
-                      className={cn('rounded-xl border px-3 py-2 text-xs font-bold transition-all', filter === status ? 'border-brand bg-brand/15 text-brand' : 'border-navy-600 bg-navy-900 text-navy-300 hover:border-navy-500')}
-                    >
-                      {status === 'all' ? `Wszystkie (${counts.all})` : `${STATUS_CFG[status].label} (${counts[status]})`}
-                    </button>
-                  ))}
+                <div>
+                  <div className="card-title">Historia awarii</div>
+                  <div className="card-sub">Zamkniete zgloszenia i notatki reakcji</div>
                 </div>
                 <input value={search} onChange={e => setSearch(e.target.value)} className="input max-w-sm" placeholder="Szukaj: maszyna, stacja, opis..." />
               </div>
             </div>
 
             <div className="space-y-3">
-              {!loading && filteredReports.length === 0 && <div className="card py-10 text-center text-navy-500">Brak zgloszen w tym widoku</div>}
-              {filteredReports.map(r => (
+              {!loading && filteredHistoryReports.length === 0 && <div className="card py-10 text-center text-navy-500">Brak historii w tym widoku</div>}
+              {filteredHistoryReports.map(r => (
                 <FailureCard
                   key={r.id}
                   report={r}
@@ -549,20 +623,6 @@ function ProductionIssueCard({ issue }: { issue: ProductionIssue }) {
           {issue.notes && <div><span className="text-navy-500">Uwagi:</span> {issue.notes}</div>}
         </div>
       )}
-    </div>
-  )
-}
-
-function TpmRow({ row }: { row: ReturnType<typeof useTpmShape> }) {
-  return (
-    <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
-      <div className="flex justify-between gap-3">
-        <div>
-          <div className="font-bold text-white">{row.machine.name}</div>
-          <div className="text-xs text-navy-400">Awarie {row.machineFailures.length} - odrzut {row.rejectIssues} - wydajnosc {row.lowEffIssues}</div>
-        </div>
-        <div className={cn('font-mono font-bold', row.score >= 6 ? 'text-red-300' : row.score >= 3 ? 'text-amber-300' : 'text-green-300')}>{row.score}</div>
-      </div>
     </div>
   )
 }
