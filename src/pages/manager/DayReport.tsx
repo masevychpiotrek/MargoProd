@@ -19,6 +19,7 @@ type ShiftSummary = {
   good: number; reject: number; reports: number
   runtime: number; ready: number; alarm: number; downtime: number
   notes: string[]
+  hasSummary: boolean
 }
 
 type MachineDayRow = {
@@ -48,12 +49,7 @@ function addDays(date: string, days: number) {
   return d.toISOString().slice(0, 10)
 }
 function emptySummary(): ShiftSummary {
-  return { good: 0, reject: 0, reports: 0, runtime: 0, ready: 0, alarm: 0, downtime: 0, notes: [] }
-}
-function reportDowntimeMinutes(report: ReportWithContext) {
-  const downtime = report.downtime_min + report.failure_min
-  const readyAndAlarm = (report.ready_min ?? 0) + (report.alarm_min ?? 0)
-  return downtime === readyAndAlarm && report.failure_min === 0 ? 0 : downtime
+  return { good: 0, reject: 0, reports: 0, runtime: 0, ready: 0, alarm: 0, downtime: 0, notes: [], hasSummary: false }
 }
 function mins(value: number) {
   const rounded = Math.max(0, Math.round(value || 0))
@@ -64,6 +60,7 @@ function mins(value: number) {
 function pieces(value: number) { return value.toLocaleString('pl-PL') }
 function pct(o: number, t: number) { return t ? ((o / t) * 100).toFixed(1) + '%' : '-' }
 function timeLine(s: ShiftSummary) {
+  if (!s.hasSummary) return 'brak rozliczenia czasu'
   return `praca ${mins(s.runtime)} | got. ${mins(s.ready)} | alarm/postój ${mins(s.alarm + s.downtime)}`
 }
 function noteText(report: ReportWithContext) {
@@ -86,6 +83,7 @@ function hasClosingSummary(shift: ShiftWithSummary) {
 }
 
 function applyClosingSummary(target: ShiftSummary, shift: ShiftWithSummary) {
+  target.hasSummary = true
   target.good = shift.summary_good_count ?? target.good
   target.reject = shift.summary_reject_count ?? target.reject
   target.runtime = shift.summary_runtime_min ?? target.runtime
@@ -629,8 +627,6 @@ export default function ManagerDayReport() {
       const shift = row.shifts[shiftType]
       ;[shift, row.total].forEach(s => {
         s.good += report.good_count; s.reject += report.reject_count; s.reports += 1
-        s.runtime += report.runtime_min; s.ready += report.ready_min ?? 0
-        s.alarm += report.alarm_min ?? 0; s.downtime += reportDowntimeMinutes(report)
       })
       const note = noteText(report)
       if (note) {
@@ -662,6 +658,7 @@ export default function ManagerDayReport() {
         row.total.ready += shift.ready
         row.total.alarm += shift.alarm
         row.total.downtime += shift.downtime
+        row.total.hasSummary = row.total.hasSummary || shift.hasSummary
         row.total.notes.push(...shift.notes.map(note => `Zmiana ${shiftType}, ${note}`))
       })
     })
@@ -672,6 +669,7 @@ export default function ManagerDayReport() {
     acc.good += row.total.good; acc.reject += row.total.reject; acc.reports += row.total.reports
     acc.runtime += row.total.runtime; acc.ready += row.total.ready
     acc.alarm += row.total.alarm; acc.downtime += row.total.downtime
+    acc.hasSummary = acc.hasSummary || row.total.hasSummary
     return acc
   }, emptySummary()), [rows])
 
@@ -682,8 +680,21 @@ export default function ManagerDayReport() {
       result[s].reports += row.shifts[s].reports; result[s].runtime += row.shifts[s].runtime
       result[s].ready += row.shifts[s].ready; result[s].alarm += row.shifts[s].alarm
       result[s].downtime += row.shifts[s].downtime
+      result[s].hasSummary = result[s].hasSummary || row.shifts[s].hasSummary
     }))
     return result
+  }, [rows])
+
+  const summaryStats = useMemo(() => {
+    let closed = 0
+    let missing = 0
+    rows.forEach(row => SHIFTS.forEach(shift => {
+      const item = row.shifts[shift]
+      if (!item.reports && !item.hasSummary) return
+      if (item.hasSummary) closed += 1
+      else missing += 1
+    }))
+    return { closed, missing }
   }, [rows])
 
   const eventsByShift = useMemo(() => {
@@ -773,12 +784,13 @@ export default function ManagerDayReport() {
         )}
 
         {/* KPI */}
-        <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
           {[
             { label: 'Produkcja łącznie', value: `${pieces(totals.good)} szt`, color: 'text-brand' },
             { label: 'Odrzut łącznie', value: `${pieces(totals.reject)} szt`, color: totals.reject ? 'text-red-400' : 'text-green-400' },
             { label: 'Wpisy', value: `${totals.reports}`, color: 'text-white' },
-            { label: 'Czas pracy', value: mins(totals.runtime), color: 'text-green-400' },
+            { label: 'Rozliczone zmiany', value: `${summaryStats.closed}`, color: summaryStats.missing ? 'text-amber-400' : 'text-green-400' },
+            { label: 'Czas pracy', value: totals.hasSummary ? mins(totals.runtime) : '-', color: 'text-green-400' },
             { label: 'Alarm + postój', value: mins(totals.alarm + totals.downtime), color: totals.alarm + totals.downtime ? 'text-amber-400' : 'text-green-400' },
           ].map(item => (
             <div key={item.label} className="kpi-card">
@@ -806,7 +818,9 @@ export default function ManagerDayReport() {
                   </div>
                 ))}
               </div>
-              <div className="kpi-sub mt-2">{pieces(shiftTotals[shift].good)} szt | {shiftTotals[shift].reports} wpisów</div>
+              <div className="kpi-sub mt-2">
+                {pieces(shiftTotals[shift].good)} szt | {shiftTotals[shift].reports} wpisow | {shiftTotals[shift].hasSummary ? 'rozliczone' : 'brak rozliczenia'}
+              </div>
             </div>
           ))}
         </div>
@@ -839,15 +853,21 @@ export default function ManagerDayReport() {
                     <td className="py-3 px-3 font-bold text-white">{row.machineName}</td>
                     {SHIFTS.map(s => (
                       <td key={s} className="py-3 px-3 text-center">
-                        {row.shifts[s].reports ? (
+                        {row.shifts[s].reports || row.shifts[s].hasSummary ? (
                           <div>
                             <div className="font-mono text-lg font-bold text-white">{pieces(row.shifts[s].good)} szt</div>
                             <div className="mt-1 text-xs text-navy-400">
                               odrzut <span className="font-mono text-red-300">{pieces(row.shifts[s].reject)}</span> | wpisy {row.shifts[s].reports}
                             </div>
                             <div className="mt-2 rounded-lg bg-navy-900 px-2 py-1.5 text-xs leading-relaxed text-navy-300">
-                              <span className="font-mono text-green-300">praca {mins(row.shifts[s].runtime)}</span><br />
-                              got. {mins(row.shifts[s].ready)} | alarm {mins(row.shifts[s].alarm + row.shifts[s].downtime)}
+                              {row.shifts[s].hasSummary ? (
+                                <>
+                                  <span className="font-mono text-green-300">praca {mins(row.shifts[s].runtime)}</span><br />
+                                  got. {mins(row.shifts[s].ready)} | alarm {mins(row.shifts[s].alarm + row.shifts[s].downtime)}
+                                </>
+                              ) : (
+                                <span className="text-amber-300">brak rozliczenia czasu</span>
+                              )}
                             </div>
                           </div>
                         ) : (
@@ -892,7 +912,7 @@ export default function ManagerDayReport() {
                 <div>
                   <div className="card-title">Zmiana {shift}</div>
                   <div className="card-sub">
-                    {pieces(shiftTotals[shift].good)} szt | odrzut {pieces(shiftTotals[shift].reject)} | praca {mins(shiftTotals[shift].runtime)}
+                    {pieces(shiftTotals[shift].good)} szt | odrzut {pieces(shiftTotals[shift].reject)} | {shiftTotals[shift].hasSummary ? `praca ${mins(shiftTotals[shift].runtime)}` : 'brak rozliczenia'}
                   </div>
                 </div>
               </div>
@@ -932,7 +952,7 @@ export default function ManagerDayReport() {
               const text = noteText(report)
               return (
                 <div key={report.id} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
-                  <div className="grid grid-cols-2 gap-2 md:grid-cols-[130px_1fr_110px_110px_120px] md:items-center">
+                  <div className="grid grid-cols-2 gap-2 md:grid-cols-[130px_1fr_110px_110px] md:items-center">
                     <div className="font-mono text-sm font-bold text-white">{report.hour_block}</div>
                     <div>
                       <div className="font-bold text-white">{machineNameById[report.machine_id] ?? '-'}</div>
@@ -940,7 +960,6 @@ export default function ManagerDayReport() {
                     </div>
                     <div className="font-mono font-bold text-green-300">{pieces(report.good_count)} szt</div>
                     <div className="font-mono text-red-300">odrz. {pieces(report.reject_count)}</div>
-                    <div className="font-mono text-navy-300">praca {mins(report.runtime_min)}</div>
                   </div>
                   {text && <p className="mt-3 whitespace-pre-wrap break-words rounded-lg bg-navy-800 px-3 py-2 text-sm leading-relaxed text-navy-200">{text}</p>}
                 </div>
