@@ -78,6 +78,7 @@ function toneClasses(tone: string) {
 export default function SpecialistDashboard() {
   const { profile } = useAuthStore()
   const readOnly = profile?.role === 'manager'
+  const canSeeAllHistory = profile?.role === 'manager' || profile?.role === 'admin'
   const [reports, setReports] = useState<FailureRow[]>([])
   const [issues, setIssues] = useState<ProductionIssue[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -174,7 +175,10 @@ export default function SpecialistDashboard() {
       updates.assigned_to = profile?.id ?? null
     }
     if (status === 'in_progress' && profile?.id) updates.assigned_to = profile.id
-    if (status === 'resolved') updates.resolved_at = new Date().toISOString()
+    if (status === 'resolved') {
+      updates.resolved_at = new Date().toISOString()
+      if (profile?.role === 'specialist' && profile.id) updates.assigned_to = profile.id
+    }
 
     await supabase.from('failure_reports').update(updates).eq('id', id)
     setReports(prev => prev.map(r => r.id === id ? { ...r, ...updates } : r))
@@ -210,10 +214,11 @@ export default function SpecialistDashboard() {
     [openReports, profile?.id]
   )
 
-  const historyReports = useMemo(() =>
-    reports.filter(r => r.status === 'resolved'),
-    [reports]
-  )
+  const historyReports = useMemo(() => {
+    const resolved = reports.filter(r => r.status === 'resolved')
+    if (canSeeAllHistory) return resolved
+    return resolved.filter(r => r.assigned_to === profile?.id)
+  }, [canSeeAllHistory, profile?.id, reports])
 
   const filteredOpenReports = useMemo(() => {
     const q = search.trim().toLowerCase()
@@ -254,7 +259,7 @@ export default function SpecialistDashboard() {
     new: reports.filter(r => r.status === 'new').length,
     acknowledged: reports.filter(r => r.status === 'acknowledged').length,
     in_progress: reports.filter(r => r.status === 'in_progress').length,
-    resolved: reports.filter(r => r.status === 'resolved').length,
+    resolved: historyReports.length,
     critical: openReports.filter(r => r.severity === 'critical').length,
   }
 
@@ -315,7 +320,7 @@ export default function SpecialistDashboard() {
             ...readOnly ? [] : [['zadania', `Moje zadania (${myTasks.length})`]],
             ['produkcja', `Produkcja (${issues.length})`],
             ['tpm', 'TPM / obszary'],
-            ['historia', `Historia (${counts.resolved})`],
+            ['historia', `Historia (${historyReports.length})`],
           ].map(([key, label]) => (
             <button
               key={key}
@@ -425,7 +430,9 @@ export default function SpecialistDashboard() {
               <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div>
                   <div className="card-title">Historia awarii</div>
-                  <div className="card-sub">Zamkniete zgloszenia i notatki reakcji</div>
+                  <div className="card-sub">
+                    {canSeeAllHistory ? 'Wszystkie zamkniete zgloszenia i notatki reakcji' : 'Tylko Twoje zamkniete zgloszenia i notatki reakcji'}
+                  </div>
                 </div>
                 <input value={search} onChange={e => setSearch(e.target.value)} className="input max-w-sm" placeholder="Szukaj: maszyna, stacja, opis..." />
               </div>
