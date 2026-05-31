@@ -56,6 +56,10 @@ export function RequireAuth({ children, roles }: Props) {
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 
+  if (profile.must_change_password && location.pathname !== '/password') {
+    return <Navigate to="/password" replace />
+  }
+
   // Sprawdź rolę
   if (roles) {
     const allowed = Array.isArray(roles) ? roles : [roles]
@@ -80,6 +84,7 @@ export function PublicOnly({ children }: { children: React.ReactNode }) {
   if (!isInitialized || isLoading) return LOADING_SCREEN
 
   if (user && profile) {
+    if (profile.must_change_password) return <Navigate to="/password" replace />
     if (profile.role === 'admin')   return <Navigate to="/admin"    replace />
     if (profile.role === 'manager') return <Navigate to="/manager"  replace />
     if (profile.role === 'specialist') return <Navigate to="/specialist" replace />

@@ -1,9 +1,11 @@
 import { useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
 export default function OperatorPassword() {
-  const { user } = useAuthStore()
+  const navigate = useNavigate()
+  const { user, profile, refreshProfile } = useAuthStore()
   const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
@@ -54,11 +56,27 @@ export default function OperatorPassword() {
         return
       }
 
+      const { error: profileError } = await supabase
+        .from('profiles')
+        .update({ must_change_password: false })
+        .eq('id', user.id)
+      if (profileError) {
+        setError('Haslo zmienione, ale nie udalo sie zdjac blokady pierwszego logowania. Skontaktuj sie z administratorem.')
+        return
+      }
+
       await logAudit('password_change')
+      await refreshProfile()
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
       setSuccess('Haslo zostalo zmienione. Uzyj nowego hasla przy kolejnym logowaniu.')
+      setTimeout(() => {
+        if (profile?.role === 'admin') navigate('/admin', { replace: true })
+        else if (profile?.role === 'manager') navigate('/manager', { replace: true })
+        else if (profile?.role === 'specialist') navigate('/specialist', { replace: true })
+        else navigate('/operator', { replace: true })
+      }, 900)
     } finally {
       setSaving(false)
     }
@@ -68,7 +86,11 @@ export default function OperatorPassword() {
     <div className="mx-auto max-w-xl space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-white">Zmien haslo</h1>
-        <p className="mt-1 text-navy-400">Aktualizacja hasla do konta operatora.</p>
+        <p className="mt-1 text-navy-400">
+          {profile?.must_change_password
+            ? 'System wymaga ustawienia nowego hasla przed dalsza praca.'
+            : 'Aktualizacja hasla do konta.'}
+        </p>
       </div>
 
       <form onSubmit={handleSubmit} className="card space-y-4">

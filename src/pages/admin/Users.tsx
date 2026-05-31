@@ -80,7 +80,8 @@ export default function AdminUsers() {
       })
       setMsg(`Hasło ${resetUser.full_name} zostało zaznaczone do resetu — wykonaj w SQL Editor`)
     } else {
-      setMsg(`Hasło ${resetUser.full_name} zmienione pomyślnie`)
+      await supabase.from('profiles').update({ must_change_password: true }).eq('id', resetUser.id)
+      setMsg(`Haslo ${resetUser.full_name} zmienione pomyslnie. Uzytkownik bedzie musial ustawic nowe haslo po logowaniu.`)
     }
     setResetUser(null)
     setNewPassword('')
@@ -160,14 +161,14 @@ export default function AdminUsers() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Użytkownik','Rola','Status','Akcje'].map(h => (
+                {['Użytkownik','Rola','Status','Haslo','Akcje'].map(h => (
                   <th key={h} className="text-left py-3 px-4 text-xs font-bold text-navy-400 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={4} className="text-center py-8 text-navy-500">Ładowanie...</td></tr>
+                <tr><td colSpan={5} className="text-center py-8 text-navy-500">Ładowanie...</td></tr>
               ) : filtered.map(u => (
                 <tr key={u.id} className="border-b border-navy-800 hover:bg-navy-800/40">
                   <td className="py-3 px-4">
@@ -200,6 +201,16 @@ export default function AdminUsers() {
                       )}>
                       {u.is_active ? '✓ Aktywny' : '✕ Nieaktywny'}
                     </button>
+                  </td>
+                  <td className="py-3 px-4">
+                    <span className={cn(
+                      'inline-flex rounded-lg border px-3 py-1.5 text-xs font-bold',
+                      u.must_change_password
+                        ? 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                        : 'border-green-500/20 bg-green-500/10 text-green-400'
+                    )}>
+                      {u.must_change_password ? 'Wymagana zmiana' : 'OK'}
+                    </span>
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">

@@ -66,6 +66,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <RoleRedirect /> },
+      { path: 'password', element: <RequireAuth><Wrap><OperatorPassword /></Wrap></RequireAuth> },
 
       // ── OPERATOR ──
       {

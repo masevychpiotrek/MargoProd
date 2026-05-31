@@ -23,6 +23,7 @@ export interface Profile {
   full_name: string
   role: UserRole
   is_active: boolean
+  must_change_password?: boolean
   avatar_url: string | null
   phone: string | null
   department: string
