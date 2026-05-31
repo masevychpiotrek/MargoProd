@@ -3,6 +3,17 @@ import { useNavigate } from 'react-router-dom'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
+const REQUEST_TIMEOUT_MS = 15000
+
+function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), REQUEST_TIMEOUT_MS)
+  })
+
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timeoutId))
+}
+
 export default function OperatorPassword() {
   const navigate = useNavigate()
   const { user, profile, refreshProfile } = useAuthStore()
@@ -41,32 +52,44 @@ export default function OperatorPassword() {
 
     setSaving(true)
     try {
-      const { error: verifyError } = await supabase.auth.signInWithPassword({
-        email: user.email,
-        password: currentPassword
-      })
+      const { error: verifyError } = await withTimeout(
+        supabase.auth.signInWithPassword({
+          email: user.email,
+          password: currentPassword
+        }),
+        'Logowanie kontrolne trwa zbyt dlugo. Sprawdz internet i sprobuj ponownie.'
+      )
       if (verifyError) {
         setError('Obecne haslo jest nieprawidlowe')
         return
       }
 
-      const { error: updateError } = await supabase.auth.updateUser({ password: newPassword })
+      const { error: updateError } = await withTimeout(
+        supabase.auth.updateUser({ password: newPassword }),
+        'Zmiana hasla trwa zbyt dlugo. Sprobuj ponownie za chwile.'
+      )
       if (updateError) {
         setError(updateError.message)
         return
       }
 
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .update({ must_change_password: false })
-        .eq('id', user.id)
+      const { error: profileError } = await withTimeout(
+        supabase
+          .from('profiles')
+          .update({ must_change_password: false })
+          .eq('id', user.id),
+        'Haslo zmienione, ale system zbyt dlugo zdejmowal blokade pierwszego logowania.'
+      )
       if (profileError) {
         setError('Haslo zmienione, ale nie udalo sie zdjac blokady pierwszego logowania. Skontaktuj sie z administratorem.')
         return
       }
 
-      await logAudit('password_change')
-      await refreshProfile()
+      void logAudit('password_change')
+      await withTimeout(
+        refreshProfile(),
+        'Haslo zmienione, ale odswiezenie profilu trwa zbyt dlugo. Odswiez strone i zaloguj sie nowym haslem.'
+      )
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
@@ -77,6 +100,8 @@ export default function OperatorPassword() {
         else if (profile?.role === 'specialist') navigate('/specialist', { replace: true })
         else navigate('/operator', { replace: true })
       }, 900)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Nie udalo sie zmienic hasla. Sprobuj ponownie.')
     } finally {
       setSaving(false)
     }
