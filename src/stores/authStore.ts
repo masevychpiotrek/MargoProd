@@ -79,24 +79,35 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
     if (!authListenerSet) {
       authListenerSet = true
-      supabase.auth.onAuthStateChange(async (event, session) => {
+      supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
           set({ user: null, session: null, profile: null, isInitialized: true })
           return
         }
 
         if (session?.user && ['SIGNED_IN', 'TOKEN_REFRESHED', 'USER_UPDATED'].includes(event)) {
-          try {
-            const profile = await loadProfile(session.user.id)
-            set({
-              user: session.user,
-              session,
-              profile: isUsableProfile(profile) ? profile : null,
-              isInitialized: true
-            })
-          } catch {
-            set({ user: session.user, session, profile: null, isInitialized: true })
-          }
+          const currentProfile = get().profile
+          set({
+            user: session.user,
+            session,
+            profile: currentProfile?.id === session.user.id ? currentProfile : null,
+            isInitialized: true
+          })
+
+          window.setTimeout(() => {
+            loadProfile(session.user.id)
+              .then(profile => {
+                set({
+                  user: session.user,
+                  session,
+                  profile: isUsableProfile(profile) ? profile : null,
+                  isInitialized: true
+                })
+              })
+              .catch(() => {
+                set({ user: session.user, session, profile: currentProfile?.id === session.user.id ? currentProfile : null, isInitialized: true })
+              })
+          }, 0)
         }
       })
     }
