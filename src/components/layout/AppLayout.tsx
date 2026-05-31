@@ -46,11 +46,13 @@ const NAV_MANAGER = [
   { to: '/manager',              label: 'Live produkcja',   icon: Icons.live,    end: true },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
   { to: '/manager/failures',      label: 'Awarie i technik', icon: Icons.failure },
+  { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export }
 ]
 
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
+  { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
 ]
 
 const NAV_ADMIN = [
@@ -61,6 +63,7 @@ const NAV_ADMIN = [
   { to: '/admin/schedules',    label: 'Harmonogram',      icon: Icons.schedule },
   { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
+  { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager',            label: '── Live produkcja',   icon: Icons.live },
   { to: '/manager/day-report', label: '── Raport dnia',      icon: Icons.report },
   { to: '/manager/export',     label: '── Eksport',          icon: Icons.export },
