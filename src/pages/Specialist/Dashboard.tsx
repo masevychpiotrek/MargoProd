@@ -77,6 +77,7 @@ function toneClasses(tone: string) {
 
 export default function SpecialistDashboard() {
   const { profile } = useAuthStore()
+  const readOnly = profile?.role === 'manager'
   const [reports, setReports] = useState<FailureRow[]>([])
   const [issues, setIssues] = useState<ProductionIssue[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -311,7 +312,7 @@ export default function SpecialistDashboard() {
         <div className="flex flex-wrap gap-2 border-b border-navy-700 pb-2">
           {[
             ['awarie', `Awarie (${openReports.length})`],
-            ['zadania', `Moje zadania (${myTasks.length})`],
+            ...readOnly ? [] : [['zadania', `Moje zadania (${myTasks.length})`]],
             ['produkcja', `Produkcja (${issues.length})`],
             ['tpm', 'TPM / obszary'],
             ['historia', `Historia (${counts.resolved})`],
@@ -360,6 +361,7 @@ export default function SpecialistDashboard() {
                     onToggle={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
                     onStatus={updateStatus}
                     onPhoto={setPhotoModal}
+                    readOnly={readOnly}
                     onStartNotes={startEditNotes}
                     onSaveNotes={saveNotes}
                     onNotesChange={(id, notes) => setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], notes } }))}
@@ -374,7 +376,7 @@ export default function SpecialistDashboard() {
                 <div className="card-title">Najpilniejsze</div>
                 <div className="card-sub mb-3">Krytyczne i wysokie priorytety</div>
                 <div className="space-y-2">
-                  {urgentQueue.map(r => <FailureCard key={r.id} report={r} compact onStatus={updateStatus} onPhoto={setPhotoModal} />)}
+                  {urgentQueue.map(r => <FailureCard key={r.id} report={r} compact onStatus={updateStatus} onPhoto={setPhotoModal} readOnly={readOnly} />)}
                   {urgentQueue.length === 0 && <div className="py-6 text-center text-sm text-navy-500">Brak pilnych awarii</div>}
                 </div>
               </div>
@@ -407,6 +409,7 @@ export default function SpecialistDashboard() {
                 onToggle={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
                 onStatus={updateStatus}
                 onPhoto={setPhotoModal}
+                readOnly={readOnly}
                 onStartNotes={startEditNotes}
                 onSaveNotes={saveNotes}
                 onNotesChange={(id, notes) => setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], notes } }))}
@@ -439,6 +442,7 @@ export default function SpecialistDashboard() {
                   onToggle={() => setExpanded(prev => ({ ...prev, [r.id]: !prev[r.id] }))}
                   onStatus={updateStatus}
                   onPhoto={setPhotoModal}
+                  readOnly={readOnly}
                   onStartNotes={startEditNotes}
                   onSaveNotes={saveNotes}
                   onNotesChange={(id, notes) => setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], notes } }))}
@@ -469,6 +473,7 @@ export default function SpecialistDashboard() {
 function FailureCard(props: {
   report: FailureRow
   compact?: boolean
+  readOnly?: boolean
   expanded?: boolean
   editEntry?: ExpandedReport
   onToggle?: () => void
@@ -507,9 +512,13 @@ function FailureCard(props: {
         </div>
 
         <div className="flex flex-wrap gap-2">
+          {!props.readOnly && (
+            <>
           {r.status === 'new' && <button onClick={() => props.onStatus(r.id, 'acknowledged')} className="btn-primary px-3 py-2 text-xs">Przyjmij</button>}
           {r.status !== 'resolved' && <button onClick={() => props.onStatus(r.id, 'in_progress')} className="btn-secondary px-3 py-2 text-xs">W trakcie</button>}
           {r.status !== 'resolved' && <button onClick={() => props.onStatus(r.id, 'resolved')} className="rounded-xl bg-green-500 px-3 py-2 text-xs font-bold text-white hover:bg-green-400">Zamknij</button>}
+            </>
+          )}
           {props.onToggle && <button onClick={props.onToggle} className="btn-secondary px-3 py-2 text-xs">{props.expanded ? 'Mniej' : 'Szczegoly'}</button>}
         </div>
       </div>
@@ -526,7 +535,8 @@ function FailureCard(props: {
 
       {props.expanded && (
         <div className="mt-4 space-y-4 border-t border-navy-700 pt-4">
-          <div>
+          {!props.readOnly && (
+            <div>
             <div className="mb-2 text-xs font-bold uppercase tracking-wider text-navy-400">Status</div>
             <div className="flex flex-wrap gap-2">
               {(Object.entries(STATUS_CFG) as [FailureStatus, typeof STATUS_CFG[FailureStatus]][]).map(([status, cfg]) => (
@@ -540,10 +550,15 @@ function FailureCard(props: {
               ))}
             </div>
           </div>
+          )}
 
           <div>
             <div className="mb-2 text-xs font-bold uppercase tracking-wider text-navy-400">Notatki reakcji</div>
-            {props.editEntry ? (
+            {props.readOnly ? (
+              <div className="rounded-xl border border-navy-700 bg-navy-900 px-3 py-3 text-sm text-navy-200">
+                {r.resolution_notes || 'Brak notatki reakcji technika.'}
+              </div>
+            ) : props.editEntry ? (
               <div className="space-y-2">
                 <textarea
                   className="input min-h-[90px] resize-none text-sm"
