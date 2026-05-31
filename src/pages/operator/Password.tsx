@@ -86,20 +86,20 @@ export default function OperatorPassword() {
       }
 
       void logAudit('password_change')
-      await withTimeout(
-        refreshProfile(),
-        'Haslo zmienione, ale odswiezenie profilu trwa zbyt dlugo. Odswiez strone i zaloguj sie nowym haslem.'
-      )
+      if (profile) {
+        useAuthStore.setState({ profile: { ...profile, must_change_password: false } })
+      }
+      void refreshProfile()
       setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
       setSuccess('Haslo zostalo zmienione. Uzyj nowego hasla przy kolejnym logowaniu.')
-      setTimeout(() => {
-        if (profile?.role === 'admin') navigate('/admin', { replace: true })
-        else if (profile?.role === 'manager') navigate('/manager', { replace: true })
-        else if (profile?.role === 'specialist') navigate('/specialist', { replace: true })
-        else navigate('/operator', { replace: true })
-      }, 900)
+      const nextPath =
+        profile?.role === 'admin' ? '/admin' :
+        profile?.role === 'manager' ? '/manager' :
+        profile?.role === 'specialist' ? '/specialist' :
+        '/operator'
+      window.setTimeout(() => navigate(nextPath, { replace: true }), 500)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Nie udalo sie zmienic hasla. Sprobuj ponownie.')
     } finally {
