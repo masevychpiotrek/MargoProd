@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -15,9 +14,7 @@ function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise<T> {
 }
 
 export default function OperatorPassword() {
-  const navigate = useNavigate()
   const { user, profile, refreshProfile } = useAuthStore()
-  const [currentPassword, setCurrentPassword] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
   const [saving, setSaving] = useState(false)
@@ -29,12 +26,8 @@ export default function OperatorPassword() {
     setError('')
     setSuccess('')
 
-    if (!user?.email) {
+    if (!user?.id) {
       setError('Brak aktywnej sesji operatora')
-      return
-    }
-    if (!currentPassword) {
-      setError('Wpisz obecne haslo')
       return
     }
     if (newPassword.length < 8) {
@@ -45,25 +38,9 @@ export default function OperatorPassword() {
       setError('Nowe haslo i potwierdzenie nie sa takie same')
       return
     }
-    if (currentPassword === newPassword) {
-      setError('Nowe haslo musi byc inne niz obecne')
-      return
-    }
 
     setSaving(true)
     try {
-      const { error: verifyError } = await withTimeout(
-        supabase.auth.signInWithPassword({
-          email: user.email,
-          password: currentPassword
-        }),
-        'Logowanie kontrolne trwa zbyt dlugo. Sprawdz internet i sprobuj ponownie.'
-      )
-      if (verifyError) {
-        setError('Obecne haslo jest nieprawidlowe')
-        return
-      }
-
       const { error: updateError } = await withTimeout(
         supabase.auth.updateUser({ password: newPassword }),
         'Zmiana hasla trwa zbyt dlugo. Sprobuj ponownie za chwile.'
@@ -90,7 +67,6 @@ export default function OperatorPassword() {
         useAuthStore.setState({ profile: { ...profile, must_change_password: false } })
       }
       void refreshProfile()
-      setCurrentPassword('')
       setNewPassword('')
       setConfirmPassword('')
       setSuccess('Haslo zostalo zmienione. Uzyj nowego hasla przy kolejnym logowaniu.')
@@ -99,7 +75,7 @@ export default function OperatorPassword() {
         profile?.role === 'manager' ? '/manager' :
         profile?.role === 'specialist' ? '/specialist' :
         '/operator'
-      window.setTimeout(() => navigate(nextPath, { replace: true }), 500)
+      window.location.replace(nextPath)
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Nie udalo sie zmienic hasla. Sprobuj ponownie.')
     } finally {
@@ -118,25 +94,17 @@ export default function OperatorPassword() {
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="card space-y-4">
-        <div>
-          <label className="label">Obecne haslo</label>
-          <input
-            type="password"
-            value={currentPassword}
-            onChange={e => setCurrentPassword(e.target.value)}
-            autoComplete="current-password"
-            className="input"
-          />
-        </div>
-
+      <form onSubmit={handleSubmit} className="card space-y-4" autoComplete="off">
         <div>
           <label className="label">Nowe haslo</label>
           <input
             type="password"
+            name="ml_access_code_new"
             value={newPassword}
             onChange={e => setNewPassword(e.target.value)}
-            autoComplete="new-password"
+            autoComplete="one-time-code"
+            data-lpignore="true"
+            data-1p-ignore="true"
             className="input"
           />
           <div className="mt-1 text-xs text-navy-500">Minimum 8 znakow.</div>
@@ -146,9 +114,12 @@ export default function OperatorPassword() {
           <label className="label">Powtorz nowe haslo</label>
           <input
             type="password"
+            name="ml_access_code_confirm"
             value={confirmPassword}
             onChange={e => setConfirmPassword(e.target.value)}
-            autoComplete="new-password"
+            autoComplete="one-time-code"
+            data-lpignore="true"
+            data-1p-ignore="true"
             className="input"
           />
         </div>
