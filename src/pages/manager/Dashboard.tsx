@@ -21,6 +21,21 @@ const CHART_OPTS = {
   }
 }
 
+const PERCENT_CHART_OPTS = {
+  ...CHART_OPTS,
+  scales: {
+    ...CHART_OPTS.scales,
+    y: {
+      ...CHART_OPTS.scales.y,
+      beginAtZero: true,
+      ticks: {
+        ...CHART_OPTS.scales.y.ticks,
+        callback: (value: string | number) => `${value}%`
+      }
+    }
+  }
+}
+
 type Mode = 'day' | 'range' | 'month'
 type ShiftFilter = 'all' | ShiftType
 
@@ -512,6 +527,79 @@ export default function ManagerDashboard() {
     }
   }, [groups])
 
+  const machineComparison = useMemo(() => {
+    const map = groups.reduce<Record<string, {
+      machineId: string
+      machineName: string
+      good: number
+      reject: number
+      target: number
+      runtime: number
+      rows: number
+    }>>((acc, row) => {
+      if (!acc[row.machineId]) {
+        acc[row.machineId] = {
+          machineId: row.machineId,
+          machineName: row.machineName,
+          good: 0,
+          reject: 0,
+          target: 0,
+          runtime: 0,
+          rows: 0
+        }
+      }
+      acc[row.machineId].good += row.good
+      acc[row.machineId].reject += row.reject
+      acc[row.machineId].target += row.target
+      acc[row.machineId].runtime += row.runtime
+      acc[row.machineId].rows += 1
+      return acc
+    }, {})
+
+    return Object.values(map)
+      .filter(row => row.good > 0 || row.reject > 0 || row.target > 0)
+      .map(row => ({
+        ...row,
+        wEpq: pct(row.good, row.target),
+        wEpqTotal: pct(row.good + row.reject, row.target),
+        rejectPct: pct1(row.reject, row.good + row.reject),
+        machineRate: hourlyRate(row.good + row.reject, row.runtime)
+      }))
+      .sort((a, b) => b.wEpq - a.wEpq || a.rejectPct - b.rejectPct || a.machineName.localeCompare(b.machineName))
+  }, [groups])
+
+  const machineEfficiencyChart = useMemo(() => ({
+    labels: machineComparison.map(row => row.machineName),
+    datasets: [
+      {
+        label: 'W EPQ',
+        data: machineComparison.map(row => row.wEpq),
+        backgroundColor: 'rgba(34,197,94,0.78)',
+        borderRadius: 4
+      },
+      {
+        label: 'WEPQ TOTAL',
+        data: machineComparison.map(row => row.wEpqTotal),
+        backgroundColor: 'rgba(59,130,246,0.78)',
+        borderRadius: 4
+      }
+    ]
+  }), [machineComparison])
+
+  const machineRejectChart = useMemo(() => ({
+    labels: machineComparison.map(row => row.machineName),
+    datasets: [
+      {
+        label: 'Odrzut %',
+        data: machineComparison.map(row => row.rejectPct),
+        backgroundColor: machineComparison.map(row =>
+          row.rejectPct > 5 ? 'rgba(248,113,113,0.82)' : row.rejectPct > 2 ? 'rgba(251,191,36,0.82)' : 'rgba(34,197,94,0.78)'
+        ),
+        borderRadius: 4
+      }
+    ]
+  }), [machineComparison])
+
   const hourlyChart = useMemo(() => {
     const hours = Array.from({ length: 24 }, (_, hour) => hour).filter(hour =>
       dayReports.some(report => report.hour_start === hour)
@@ -520,7 +608,7 @@ export default function ManagerDashboard() {
       machineFilter === 'all' || machine.id === machineFilter
     )
     return {
-      labels: hours.map(hour => `${String(hour).padStart(2, '0')}:00`),
+      labels: hours.map(hour => hourLabel(hour + 1)),
       datasets: visibleMachines.map((machine, index) => ({
         label: machine.name,
         data: hours.map(hour => dayReports
@@ -870,6 +958,75 @@ export default function ManagerDashboard() {
                 datasets: [{ label: 'Produkcja', data: dailyTrend.values, borderColor: '#3B82F6', tension: 0.35, pointRadius: 3 }]
               }} options={CHART_OPTS as never} />
               : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak trendu</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Porownanie wydajnosci</div>
+              <div className="card-sub">W EPQ i WEPQ TOTAL wedlug automatu</div>
+            </div>
+          </div>
+          <div style={{ height: 240 }}>
+            {machineComparison.length
+              ? <Bar data={machineEfficiencyChart} options={PERCENT_CHART_OPTS as never} />
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak danych do porownania</div>}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Porownanie odrzutu</div>
+              <div className="card-sub">Odrzut procentowy automat do automatu</div>
+            </div>
+          </div>
+          <div style={{ height: 240 }}>
+            {machineComparison.length
+              ? <Bar data={machineRejectChart} options={PERCENT_CHART_OPTS as never} />
+              : <div className="flex items-center justify-center h-full text-navy-500 text-sm">Brak odrzutu do porownania</div>}
+          </div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Ranking automatow</div>
+              <div className="card-sub">Szybki odczyt: wynik, odrzut, tempo</div>
+            </div>
+          </div>
+          <div className="space-y-2">
+            {machineComparison.length === 0 && <div className="py-8 text-center text-navy-500 text-sm">Brak danych w zakresie</div>}
+            {machineComparison.map((row, index) => (
+              <div key={row.machineId} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider text-navy-500">#{index + 1}</div>
+                    <div className="font-bold text-white">{row.machineName}</div>
+                  </div>
+                  <div className={cn('font-mono text-xl font-bold', efficiencyColor(row.wEpq))}>{row.wEpq || '-'}{row.wEpq ? '%' : ''}</div>
+                </div>
+                <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                  <div>
+                    <div className="text-navy-500">produkcja</div>
+                    <div className="font-mono font-bold text-white">{row.good.toLocaleString('pl-PL')}</div>
+                  </div>
+                  <div>
+                    <div className="text-navy-500">odrzut</div>
+                    <div className={cn('font-mono font-bold', row.rejectPct > 5 ? 'text-red-400' : row.rejectPct > 2 ? 'text-amber-400' : 'text-green-400')}>
+                      {row.rejectPct}%
+                    </div>
+                  </div>
+                  <div>
+                    <div className="text-navy-500">tempo</div>
+                    <div className="font-mono font-bold text-cyan-300">{row.machineRate ? row.machineRate.toLocaleString('pl-PL') : '-'}</div>
+                  </div>
+                </div>
+              </div>
+            ))}
           </div>
         </div>
       </div>
