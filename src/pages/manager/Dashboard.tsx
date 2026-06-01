@@ -124,6 +124,18 @@ function minsToHHMM(value: number) {
   return `${String(Math.floor(m / 60)).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`
 }
 
+function hourLabel(hour: number) {
+  return `${String(hour % 24).padStart(2, '0')}:00`
+}
+
+function reportEndHourLabel(report: Pick<ReportWithContext, 'hour_start'>) {
+  return hourLabel(report.hour_start + 1)
+}
+
+function reportBlockLabel(report: Pick<ReportWithContext, 'hour_start' | 'hour_block'>) {
+  return report.hour_block || `${hourLabel(report.hour_start)}-${hourLabel(report.hour_start + 1)}`
+}
+
 function toInt(value: string) {
   const parsed = Number.parseInt(value || '0', 10)
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
@@ -866,7 +878,7 @@ export default function ManagerDashboard() {
         <div className="card-header">
           <div>
             <div className="card-title">Odtworzenie calego dnia</div>
-            <div className="card-sub">{selectedDate} | kolejnosc wpisow po maszynie, zmianie i godzinie</div>
+            <div className="card-sub">{selectedDate} | kolejnosc wpisow po maszynie, zmianie i godzinie zakonczenia</div>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -898,7 +910,10 @@ export default function ManagerDashboard() {
             return (
               <div key={report.id} className="bg-navy-900 rounded-xl p-3 border border-navy-700">
                 <div className="flex items-center justify-between gap-3">
-                  <div className="font-mono text-white font-bold">{report.hour_block}</div>
+                  <div>
+                    <div className="font-mono text-white font-bold">do {reportEndHourLabel(report)}</div>
+                    <div className="mt-0.5 text-[11px] font-mono text-navy-500">blok {reportBlockLabel(report)}</div>
+                  </div>
                   <div className={cn('font-mono font-bold', efficiencyColor(eff))}>{eff}%</div>
                 </div>
                 <div className="text-xs text-navy-400 mt-1">
@@ -936,7 +951,7 @@ export default function ManagerDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Data', 'Godzina', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Komentarz wyniku', 'Komentarz odrzutu', 'Akcja'].map(header => (
+                {['Data', 'Do godz.', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Komentarz wyniku', 'Komentarz odrzutu', 'Akcja'].map(header => (
                   <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                 ))}
               </tr>
@@ -951,7 +966,10 @@ export default function ManagerDashboard() {
                 return (
                   <tr key={report.id} className="border-b border-navy-800 hover:bg-navy-800/50">
                     <td className="py-2 px-3 font-mono text-xs text-navy-300">{report.report_date}</td>
-                    <td className="py-2 px-3 font-mono text-xs text-white">{report.hour_block}</td>
+                    <td className="py-2 px-3">
+                      <div className="font-mono text-xs font-bold text-white">{reportEndHourLabel(report)}</div>
+                      <div className="font-mono text-[10px] text-navy-500">{reportBlockLabel(report)}</div>
+                    </td>
                     <td className="py-2 px-3"><span className="status-info text-xs">{machineNameById[report.machine_id] ?? '-'}</span></td>
                     <td className="py-2 px-3 font-bold text-white">Zmiana {one(report.shift)?.shift_type ?? '-'}</td>
                     <td className="py-2 px-3 text-navy-200 max-w-[150px] truncate">{one(report.operator)?.full_name ?? '-'}</td>
@@ -978,7 +996,7 @@ export default function ManagerDashboard() {
               <div>
                 <div className="card-title">Korekta wpisu kierownika</div>
                 <div className="card-sub">
-                  {editing.report_date} | {editing.hour_block} | {machineNameById[editing.machine_id] ?? '-'} | Zmiana {one(editing.shift)?.shift_type ?? '-'}
+                  {editing.report_date} | do {reportEndHourLabel(editing)} | blok {reportBlockLabel(editing)} | {machineNameById[editing.machine_id] ?? '-'} | Zmiana {one(editing.shift)?.shift_type ?? '-'}
                 </div>
               </div>
               <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => { setEditing(null); setEditError('') }}>Zamknij</button>
