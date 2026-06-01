@@ -305,9 +305,8 @@ export default function OperatorReport() {
     .filter(r => getHourIndex(r.hour_start) !== -1)
     .sort((a,b) => getHourIndex(a.hour_start) - getHourIndex(b.hour_start))
   const previousReports = orderedReports.filter(r => getHourIndex(r.hour_start) < selectedHourIndex)
-  const prevReport = previousReports[previousReports.length - 1] as ReportExt | undefined
-  const prevGood    = prevReport?.counter_good    ?? 0
-  const prevReject  = prevReport?.counter_reject  ?? 0
+  const prevGood = previousReports.reduce((sum, report) => sum + (report.good_count ?? 0), 0)
+  const prevReject = previousReports.reduce((sum, report) => sum + (report.reject_count ?? 0), 0)
 
   const curGood    = parseInt(counterGood)    || 0
   const curReject  = parseInt(counterReject)  || 0
@@ -479,7 +478,7 @@ export default function OperatorReport() {
             <div className="flex items-center justify-between flex-wrap gap-3">
               <div>
                 <div className="card-title">Blok godziny</div>
-                {prevReport
+                {previousReports.length > 0
                   ? <div className="text-xs text-navy-400 mt-1">Poprzednia: dobre <span className="text-white font-mono font-bold">{prevGood.toLocaleString('pl-PL')}</span> · odrzut <span className="text-red-300 font-mono font-bold">{prevReject.toLocaleString('pl-PL')}</span></div>
                   : <div className="text-xs text-amber-400 mt-1">⚠ Pierwsza godzina zmiany</div>
                 }
