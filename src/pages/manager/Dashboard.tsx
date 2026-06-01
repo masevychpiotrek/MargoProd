@@ -112,6 +112,8 @@ type EditState = {
   reason: string
 }
 
+type CounterRow = Pick<ReportWithContext, 'id' | 'hour_start' | 'good_count' | 'reject_count'>
+
 function one<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
@@ -638,6 +640,36 @@ export default function ManagerDashboard() {
     })
   }
 
+  const recalculateShiftCounters = async (shiftId: string) => {
+    const { data, error } = await supabase
+      .from('hourly_reports')
+      .select('id, hour_start, good_count, reject_count')
+      .eq('shift_id', shiftId)
+      .is('deleted_at', null)
+      .order('hour_start')
+
+    if (error) throw error
+
+    let counterGood = 0
+    let counterReject = 0
+    const updates = ((data ?? []) as CounterRow[]).map(report => {
+      counterGood += report.good_count ?? 0
+      counterReject += report.reject_count ?? 0
+      return supabase
+        .from('hourly_reports')
+        .update({
+          counter_good: counterGood,
+          counter_reject: counterReject,
+          total_count: counterGood
+        })
+        .eq('id', report.id)
+    })
+
+    const results = await Promise.all(updates)
+    const failed = results.find(result => result.error)
+    if (failed?.error) throw failed.error
+  }
+
   const saveEdit = async () => {
     if (!editing || !editState) return
     setSaving(true)
@@ -654,6 +686,16 @@ export default function ManagerDashboard() {
 
     const { error } = await supabase.from('hourly_reports').update(payload).eq('id', editing.id)
     if (!error) {
+      try {
+        await recalculateShiftCounters(editing.shift_id)
+      } catch (counterError) {
+        setEditError(counterError instanceof Error
+          ? `Korekta zapisana, ale nie udalo sie przeliczyc licznika narastajacego: ${counterError.message}`
+          : 'Korekta zapisana, ale nie udalo sie przeliczyc licznika narastajacego.')
+        await load()
+        setSaving(false)
+        return
+      }
       await logAudit('manager_report_update', 'hourly_reports', editing.id, {
         good_count: editing.good_count,
         reject_count: editing.reject_count,
@@ -695,6 +737,16 @@ export default function ManagerDashboard() {
       .eq('id', editing.id)
 
     if (!error) {
+      try {
+        await recalculateShiftCounters(editing.shift_id)
+      } catch (counterError) {
+        setEditError(counterError instanceof Error
+          ? `Wpis usuniety, ale nie udalo sie przeliczyc licznika narastajacego: ${counterError.message}`
+          : 'Wpis usuniety, ale nie udalo sie przeliczyc licznika narastajacego.')
+        await load()
+        setDeleting(false)
+        return
+      }
       await logAudit('manager_report_delete', 'hourly_reports', editing.id, {
         good_count: editing.good_count,
         reject_count: editing.reject_count,

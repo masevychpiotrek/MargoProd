@@ -17,6 +17,16 @@ interface AuthState {
 }
 
 let authListenerSet = false
+let initInFlight: Promise<void> | null = null
+const AUTH_TIMEOUT_MS = 10000
+
+function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise<T> {
+  let timeoutId: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), AUTH_TIMEOUT_MS)
+  })
+  return Promise.race([Promise.resolve(promise), timeout]).finally(() => clearTimeout(timeoutId))
+}
 
 async function loadProfile(userId: string) {
   const { data, error } = await supabase
@@ -56,26 +66,40 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   initialize: async () => {
     if (get().isInitialized) return
-    set({ isLoading: true })
+    if (initInFlight) return initInFlight
 
-    try {
-      const { data: { session } } = await supabase.auth.getSession()
-      if (session?.user) {
-        const profile = await loadProfile(session.user.id)
-        if (isUsableProfile(profile)) {
-          set({ user: session.user, session, profile })
+    initInFlight = (async () => {
+      set({ isLoading: true })
+
+      try {
+        const { data: { session } } = await withTimeout(
+          supabase.auth.getSession(),
+          'Sprawdzanie sesji trwa zbyt dlugo.'
+        )
+        if (session?.user) {
+          const profile = await withTimeout(
+            loadProfile(session.user.id),
+            'Ladowanie profilu trwa zbyt dlugo.'
+          )
+          if (isUsableProfile(profile)) {
+            set({ user: session.user, session, profile })
+          } else {
+            await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
+            set({ user: null, session: null, profile: null })
+          }
         } else {
-          await supabase.auth.signOut({ scope: 'local' })
           set({ user: null, session: null, profile: null })
         }
-      } else {
+      } catch {
+        await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
         set({ user: null, session: null, profile: null })
+      } finally {
+        set({ isLoading: false, isInitialized: true })
+        initInFlight = null
       }
-    } catch {
-      set({ user: null, session: null, profile: null })
-    } finally {
-      set({ isLoading: false, isInitialized: true })
-    }
+    })()
+
+    await initInFlight
 
     if (!authListenerSet) {
       authListenerSet = true
