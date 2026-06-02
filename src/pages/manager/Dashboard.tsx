@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { cn, efficiencyBg, efficiencyColor, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
-import type { HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
+import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
@@ -112,6 +112,11 @@ type EditState = {
   reason: string
 }
 
+type ShiftEditState = {
+  operator1Id: string
+  operator2Id: string
+}
+
 type CounterRow = Pick<ReportWithContext, 'id' | 'hour_start' | 'good_count' | 'reject_count'>
 
 function one<T>(value: T | T[] | null | undefined) {
@@ -208,6 +213,7 @@ function groupSuggestion(row: Omit<GroupRow, 'suggestion'>) {
 export default function ManagerDashboard() {
   const { time, dateISO } = useClock()
   const [machines, setMachines] = useState<Machine[]>([])
+  const [operators, setOperators] = useState<Pick<Profile, 'id' | 'full_name'>[]>([])
   const [activeShifts, setActiveShifts] = useState<ShiftWithContext[]>([])
   const [shiftSummaries, setShiftSummaries] = useState<ShiftWithContext[]>([])
   const [reports, setReports] = useState<ReportWithContext[]>([])
@@ -225,6 +231,10 @@ export default function ManagerDashboard() {
   const [machineFilter, setMachineFilter] = useState('all')
   const [editing, setEditing] = useState<ReportWithContext | null>(null)
   const [editState, setEditState] = useState<EditState | null>(null)
+  const [editingShift, setEditingShift] = useState<ShiftWithContext | null>(null)
+  const [shiftEditState, setShiftEditState] = useState<ShiftEditState | null>(null)
+  const [shiftEditError, setShiftEditError] = useState('')
+  const [shiftSaving, setShiftSaving] = useState(false)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const loadRequestSeq = useRef(0)
 
@@ -268,8 +278,15 @@ export default function ManagerDashboard() {
     const requestId = ++loadRequestSeq.current
     setLoading(true)
 
-    const [mRes, activeRes, shiftRes, rRes] = await Promise.all([
+    const [mRes, pRes, activeRes, shiftRes, rRes] = await Promise.all([
       supabase.from('machines').select('*').eq('is_active', true).order('code'),
+      supabase
+        .from('profiles')
+        .select('id, full_name')
+        .eq('role', 'operator')
+        .eq('is_active', true)
+        .is('deleted_at', null)
+        .order('full_name'),
       supabase
         .from('shifts')
         .select('*, operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)')
@@ -304,6 +321,7 @@ export default function ManagerDashboard() {
     }
 
     if (!mRes.error) setMachines((mRes.data ?? []) as Machine[])
+    if (!pRes.error) setOperators((pRes.data ?? []) as Pick<Profile, 'id' | 'full_name'>[])
     if (!activeRes.error) {
       setActiveShifts(((activeRes.data ?? []) as ShiftWithContext[]).filter(s =>
         !isShiftPastAutoClose(s.shift_date, s.shift_type as ShiftType)
@@ -326,6 +344,10 @@ export default function ManagerDashboard() {
     const shiftOk = shiftFilter === 'all' || shift.shift_type === shiftFilter
     return machineOk && shiftOk
   }), [machineFilter, shiftFilter, shiftSummaries])
+
+  const shiftByGroupKey = useMemo(() => Object.fromEntries(
+    filteredShifts.map(shift => [`${shift.shift_date}|${shift.shift_type}|${shift.machine_id}`, shift])
+  ), [filteredShifts])
 
   const dayReports = useMemo(
     () => filteredReports.filter(report => report.report_date === selectedDate),
@@ -640,6 +662,50 @@ export default function ManagerDashboard() {
     })
   }
 
+  const openShiftEdit = (shift: ShiftWithContext) => {
+    setEditingShift(shift)
+    setShiftEditState({
+      operator1Id: shift.operator_1_id,
+      operator2Id: shift.operator_2_id ?? ''
+    })
+    setShiftEditError('')
+  }
+
+  const saveShiftOperators = async () => {
+    if (!editingShift || !shiftEditState) return
+    if (!shiftEditState.operator1Id) {
+      setShiftEditError('Wybierz pierwszego operatora.')
+      return
+    }
+    if (shiftEditState.operator2Id && shiftEditState.operator2Id === shiftEditState.operator1Id) {
+      setShiftEditError('Drugi operator musi byc inny niz pierwszy.')
+      return
+    }
+
+    setShiftSaving(true)
+    setShiftEditError('')
+    const payload = {
+      operator_1_id: shiftEditState.operator1Id,
+      operator_2_id: shiftEditState.operator2Id || null
+    }
+    const { error } = await supabase.from('shifts').update(payload).eq('id', editingShift.id)
+
+    if (error) {
+      setShiftEditError(error.message || 'Nie udalo sie zapisac operatorow zmiany.')
+      setShiftSaving(false)
+      return
+    }
+
+    await logAudit('shift_operator_update', 'shifts', editingShift.id, {
+      operator_1_id: editingShift.operator_1_id,
+      operator_2_id: editingShift.operator_2_id
+    }, payload)
+    setEditingShift(null)
+    setShiftEditState(null)
+    setShiftSaving(false)
+    await load()
+  }
+
   const recalculateShiftCounters = async (shiftId: string) => {
     const { data, error } = await supabase
       .from('hourly_reports')
@@ -927,36 +993,46 @@ export default function ManagerDashboard() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-navy-700">
-                  {['Rok', 'Mc', 'Dzien', 'Zmiana', 'Maszyna', 'W EPQ', 'Odrzut', 'Wyd. maszyny', 'Produkcja', 'Raporty', 'Czas', 'Status', 'Sugestia'].map(header => (
+                  {['Rok', 'Mc', 'Dzien', 'Zmiana', 'Maszyna', 'Operatorzy', 'W EPQ', 'Odrzut', 'Wyd. maszyny', 'Produkcja', 'Raporty', 'Czas', 'Status', 'Sugestia', 'Akcja'].map(header => (
                     <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
                 {groups.length === 0 && (
-                  <tr><td colSpan={13} className="py-8 text-center text-navy-500">Brak danych dla wybranego zakresu</td></tr>
+                  <tr><td colSpan={15} className="py-8 text-center text-navy-500">Brak danych dla wybranego zakresu</td></tr>
                 )}
-                {groups.map(row => (
-                  <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
-                    <td className="py-2 px-3 font-mono text-navy-300">{row.year}</td>
-                    <td className="py-2 px-3 font-mono text-navy-300">{row.month}</td>
-                    <td className="py-2 px-3 font-mono text-white">{row.day}</td>
-                    <td className="py-2 px-3 font-bold text-white">Zmiana {row.shiftType}</td>
-                    <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
-                    <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq || '-'}{row.wEpq ? '%' : ''}</td>
-                    <td className={cn('py-2 px-3 font-bold font-mono', row.rejectPct > 5 ? 'text-red-400' : 'text-green-400')}>{row.rejectPct}%</td>
-                    <td className="py-2 px-3 font-bold font-mono text-cyan-300">{row.machineRate ? row.machineRate.toLocaleString('pl-PL') : '-'}</td>
-                    <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
-                    <td className="py-2 px-3 font-mono text-navy-200">{row.reports}</td>
-                    <td className="py-2 px-3 font-mono text-green-400">{row.hasTimeSummary ? minsToHHMM(row.runtime) : '-'}</td>
-                    <td className="py-2 px-3">
-                      <span className={cn('text-xs', row.hasTimeSummary ? 'status-ok' : 'status-warn')}>
-                        {row.hasTimeSummary ? 'Rozliczone' : 'Brak czasu'}
-                      </span>
-                    </td>
-                    <td className="py-2 px-3 text-xs text-navy-200 min-w-[220px]">{row.suggestion}</td>
-                  </tr>
-                ))}
+                {groups.map(row => {
+                  const shift = shiftByGroupKey[row.key]
+                  const shiftOperators = shift
+                    ? [shift.operator_1?.full_name, shift.operator_2?.full_name].filter(Boolean).join(' / ') || '-'
+                    : '-'
+                  return (
+                    <tr key={row.key} className="border-b border-navy-800 hover:bg-navy-800/50">
+                      <td className="py-2 px-3 font-mono text-navy-300">{row.year}</td>
+                      <td className="py-2 px-3 font-mono text-navy-300">{row.month}</td>
+                      <td className="py-2 px-3 font-mono text-white">{row.day}</td>
+                      <td className="py-2 px-3 font-bold text-white">Zmiana {row.shiftType}</td>
+                      <td className="py-2 px-3"><span className="status-info text-xs">{row.machineName}</span></td>
+                      <td className="py-2 px-3 text-xs text-navy-200 min-w-[180px]">{shiftOperators}</td>
+                      <td className={cn('py-2 px-3 font-bold font-mono', efficiencyColor(row.wEpq))}>{row.wEpq || '-'}{row.wEpq ? '%' : ''}</td>
+                      <td className={cn('py-2 px-3 font-bold font-mono', row.rejectPct > 5 ? 'text-red-400' : 'text-green-400')}>{row.rejectPct}%</td>
+                      <td className="py-2 px-3 font-bold font-mono text-cyan-300">{row.machineRate ? row.machineRate.toLocaleString('pl-PL') : '-'}</td>
+                      <td className="py-2 px-3 font-bold font-mono text-white">{row.good.toLocaleString('pl-PL')}</td>
+                      <td className="py-2 px-3 font-mono text-navy-200">{row.reports}</td>
+                      <td className="py-2 px-3 font-mono text-green-400">{row.hasTimeSummary ? minsToHHMM(row.runtime) : '-'}</td>
+                      <td className="py-2 px-3">
+                        <span className={cn('text-xs', row.hasTimeSummary ? 'status-ok' : 'status-warn')}>
+                          {row.hasTimeSummary ? 'Rozliczone' : 'Brak czasu'}
+                        </span>
+                      </td>
+                      <td className="py-2 px-3 text-xs text-navy-200 min-w-[220px]">{row.suggestion}</td>
+                      <td className="py-2 px-3">
+                        {shift && <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openShiftEdit(shift)}>Operatorzy</button>}
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
@@ -981,6 +1057,9 @@ export default function ManagerDashboard() {
                 <div className="text-sm text-navy-200 mt-2">
                   {[shift.operator_1?.full_name, shift.operator_2?.full_name].filter(Boolean).join(' / ') || 'Brak operatorow'}
                 </div>
+                <button className="btn-secondary mt-3 w-full text-xs py-1.5" onClick={() => openShiftEdit(shift)}>
+                  Koryguj operatorow
+                </button>
               </div>
             ))}
           </div>
@@ -1197,6 +1276,63 @@ export default function ManagerDashboard() {
           </table>
         </div>
       </div>
+
+      {editingShift && shiftEditState && (
+        <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
+          <div className="card w-full max-w-xl">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Korekta operatorow zmiany</div>
+                <div className="card-sub">
+                  {editingShift.shift_date} | Zmiana {editingShift.shift_type} | {machineNameById[editingShift.machine_id] ?? '-'}
+                </div>
+              </div>
+              <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => { setEditingShift(null); setShiftEditError('') }}>Zamknij</button>
+            </div>
+
+            <div className="grid grid-cols-1 gap-3">
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Operator 1</span>
+                <select
+                  className="input mt-1"
+                  value={shiftEditState.operator1Id}
+                  onChange={e => setShiftEditState({ ...shiftEditState, operator1Id: e.target.value })}
+                >
+                  <option value="">Wybierz operatora</option>
+                  {operators.map(operator => <option key={operator.id} value={operator.id}>{operator.full_name}</option>)}
+                </select>
+              </label>
+
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Operator 2</span>
+                <select
+                  className="input mt-1"
+                  value={shiftEditState.operator2Id}
+                  onChange={e => setShiftEditState({ ...shiftEditState, operator2Id: e.target.value })}
+                >
+                  <option value="">Brak drugiego operatora</option>
+                  {operators
+                    .filter(operator => operator.id !== shiftEditState.operator1Id)
+                    .map(operator => <option key={operator.id} value={operator.id}>{operator.full_name}</option>)}
+                </select>
+              </label>
+            </div>
+
+            {shiftEditError && (
+              <div className="mt-3 rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+                {shiftEditError}
+              </div>
+            )}
+
+            <div className="mt-5 flex justify-end gap-2">
+              <button className="btn-secondary" onClick={() => { setEditingShift(null); setShiftEditError('') }} disabled={shiftSaving}>Anuluj</button>
+              <button className="btn-primary" onClick={saveShiftOperators} disabled={shiftSaving}>
+                {shiftSaving ? 'Zapisywanie...' : 'Zapisz operatorow'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {editing && editState && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
