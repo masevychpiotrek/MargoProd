@@ -175,6 +175,10 @@ function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : null
 }
 
+function runtimeTarget(ratePerHour: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(ratePerHour * runtimeMin / 60) : 0
+}
+
 function reportTarget(report: ReportWithContext, machineRate: number) {
   return report.target && report.target > 0 ? report.target : machineRate
 }
@@ -408,7 +412,10 @@ export default function ManagerDashboard() {
       const ready = hasSummary ? shift?.summary_ready_min ?? 0 : 0
       const alarm = hasSummary ? shift?.summary_alarm_min ?? 0 : 0
       const downtime = hasSummary ? shift?.summary_downtime_min ?? 0 : 0
-      const target = reportGroup?.target ?? 0
+      const machineTarget = machineTargetById[machineId] ?? TARGET
+      const target = hasSummary && runtime > 0
+        ? runtimeTarget(machineTarget, runtime)
+        : reportGroup?.target ?? 0
       const base = {
         key,
         date,
@@ -459,10 +466,10 @@ export default function ManagerDashboard() {
     const rejectPct = pct1(totalReject, totalGood + totalReject)
     const totalTime = runtime + ready + alarm + downtime
     const availability = totalTime ? Math.round(runtime / totalTime * 100) : 0
-    const machineRate = hourlyRate(totalGood + totalReject, runtime)
-    const goodRate = hourlyRate(totalGood, runtime)
     const summarizedShifts = groups.filter(row => row.hasTimeSummary).length
     const missingTimeSummaries = groups.filter(row => !row.hasTimeSummary && row.reports > 0).length
+    const machineRate = missingTimeSummaries ? null : hourlyRate(totalGood + totalReject, runtime)
+    const goodRate = missingTimeSummaries ? null : hourlyRate(totalGood, runtime)
     const lowOutput = groups.reduce((sum, row) => sum + row.lowOutput, 0)
     const highReject = groups.reduce((sum, row) => sum + row.highReject, 0)
     const missingReasons = groups.reduce((sum, row) => sum + row.missingLowOutputReason + row.missingRejectReason, 0)
@@ -559,6 +566,7 @@ export default function ManagerDashboard() {
       reject: number
       target: number
       runtime: number
+      missingTime: number
       rows: number
     }>>((acc, row) => {
       if (!acc[row.machineId]) {
@@ -569,6 +577,7 @@ export default function ManagerDashboard() {
           reject: 0,
           target: 0,
           runtime: 0,
+          missingTime: 0,
           rows: 0
         }
       }
@@ -576,6 +585,7 @@ export default function ManagerDashboard() {
       acc[row.machineId].reject += row.reject
       acc[row.machineId].target += row.target
       acc[row.machineId].runtime += row.runtime
+      if (!row.hasTimeSummary && row.reports > 0) acc[row.machineId].missingTime += 1
       acc[row.machineId].rows += 1
       return acc
     }, {})
@@ -587,7 +597,7 @@ export default function ManagerDashboard() {
         wEpq: pct(row.good, row.target),
         wEpqTotal: pct(row.good + row.reject, row.target),
         rejectPct: pct1(row.reject, row.good + row.reject),
-        machineRate: hourlyRate(row.good + row.reject, row.runtime)
+        machineRate: row.missingTime ? null : hourlyRate(row.good + row.reject, row.runtime)
       }))
       .sort((a, b) => b.wEpq - a.wEpq || a.rejectPct - b.rejectPct || a.machineName.localeCompare(b.machineName))
   }, [groups])
@@ -925,8 +935,8 @@ export default function ManagerDashboard() {
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z wpisow ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma wpisanych godzin', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z czasu ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma z czasu pracy', color: efficiencyColor(kpi.avgWepq) },
           { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / norma', color: efficiencyColor(kpi.wepqTotal) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
         ].map(item => (
@@ -941,8 +951,8 @@ export default function ManagerDashboard() {
       <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
         {[
           { label: 'Czas pracy', value: kpi.summarizedShifts ? minsToHHMM(kpi.runtime) : '-', sub: `z rozliczen: ${kpi.summarizedShifts}`, color: 'text-green-400' },
-          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'produkcja / czas pracy', color: 'text-cyan-400' },
-          { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: 'dobre / czas pracy', color: 'text-green-400' },
+          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'produkcja / czas pracy', color: 'text-cyan-400' },
+          { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'dobre / czas pracy', color: 'text-green-400' },
           { label: 'Alarmy', value: kpi.summarizedShifts ? minsToHHMM(kpi.alarm) : '-', sub: 'z konca zmiany', color: kpi.alarm > 60 ? 'text-red-400' : 'text-amber-400' },
           { label: 'Postoje', value: kpi.summarizedShifts ? minsToHHMM(kpi.downtime) : '-', sub: 'z konca zmiany', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' },
           { label: 'Dostepnosc', value: kpi.summarizedShifts && kpi.availability ? `${kpi.availability}%` : '-', sub: kpi.missingTimeSummaries ? `brakuje ${kpi.missingTimeSummaries}` : 'praca / caly czas', color: efficiencyColor(kpi.availability) }
@@ -1154,6 +1164,7 @@ export default function ManagerDashboard() {
                   <div>
                     <div className="text-navy-500">tempo</div>
                     <div className="font-mono font-bold text-cyan-300">{row.machineRate ? row.machineRate.toLocaleString('pl-PL') : '-'}</div>
+                    {row.missingTime > 0 && <div className="mt-0.5 text-[10px] text-amber-400">brak czasu</div>}
                   </div>
                 </div>
               </div>

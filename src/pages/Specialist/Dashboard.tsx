@@ -15,6 +15,7 @@ const STATUS_CFG: Record<FailureStatus, { label: string; cls: string }> = {
   new: { label: 'Nowe', cls: 'bg-red-500/15 text-red-400 border-red-500/30' },
   acknowledged: { label: 'Przyjeto', cls: 'bg-amber-500/15 text-amber-400 border-amber-500/30' },
   in_progress: { label: 'W trakcie', cls: 'bg-blue-500/15 text-blue-400 border-blue-500/30' },
+  unresolved: { label: 'Nierozwiazane', cls: 'bg-orange-500/15 text-orange-400 border-orange-500/30' },
   resolved: { label: 'Rozwiazano', cls: 'bg-green-500/15 text-green-400 border-green-500/30' },
 }
 
@@ -173,8 +174,16 @@ export default function SpecialistDashboard() {
     if (status === 'acknowledged') {
       updates.acknowledged_at = new Date().toISOString()
       updates.assigned_to = profile?.id ?? null
+      updates.resolved_at = null
     }
-    if (status === 'in_progress' && profile?.id) updates.assigned_to = profile.id
+    if (status === 'in_progress' && profile?.id) {
+      updates.assigned_to = profile.id
+      updates.resolved_at = null
+    }
+    if (status === 'unresolved') {
+      updates.resolved_at = null
+      if (profile?.id) updates.assigned_to = profile.id
+    }
     if (status === 'resolved') {
       updates.resolved_at = new Date().toISOString()
       if (profile?.role === 'specialist' && profile.id) updates.assigned_to = profile.id
@@ -259,6 +268,7 @@ export default function SpecialistDashboard() {
     new: reports.filter(r => r.status === 'new').length,
     acknowledged: reports.filter(r => r.status === 'acknowledged').length,
     in_progress: reports.filter(r => r.status === 'in_progress').length,
+    unresolved: reports.filter(r => r.status === 'unresolved').length,
     resolved: historyReports.length,
     critical: openReports.filter(r => r.severity === 'critical').length,
   }
@@ -305,7 +315,7 @@ export default function SpecialistDashboard() {
             { label: 'W trakcie', value: counts.in_progress, tone: 'text-blue-400' },
             { label: 'Otwarte lacznie', value: openReports.length, tone: 'text-amber-400' },
             { label: 'Problemy prod.', value: issues.length, tone: 'text-cyan-300' },
-            { label: 'Rozwiazane', value: counts.resolved, tone: 'text-green-400' },
+            { label: 'Nierozwiazane', value: counts.unresolved, tone: 'text-orange-400' },
           ].map(kpi => (
             <div key={kpi.label} className="kpi-card">
               <div className="kpi-label">{kpi.label}</div>
@@ -343,7 +353,7 @@ export default function SpecialistDashboard() {
               </div>
               <div className="mb-4 flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
                 <div className="flex flex-wrap gap-2">
-                  {(['all', 'new', 'acknowledged', 'in_progress'] as FilterStatus[]).map(status => (
+                  {(['all', 'new', 'acknowledged', 'in_progress', 'unresolved'] as FilterStatus[]).map(status => (
                     <button
                       key={status}
                       onClick={() => setFilter(status)}
@@ -523,6 +533,7 @@ function FailureCard(props: {
             <>
           {r.status === 'new' && <button onClick={() => props.onStatus(r.id, 'acknowledged')} className="btn-primary px-3 py-2 text-xs">Przyjmij</button>}
           {r.status !== 'resolved' && <button onClick={() => props.onStatus(r.id, 'in_progress')} className="btn-secondary px-3 py-2 text-xs">W trakcie</button>}
+          {r.status !== 'resolved' && <button onClick={() => props.onStatus(r.id, 'unresolved')} className="rounded-xl bg-orange-500 px-3 py-2 text-xs font-bold text-white hover:bg-orange-400">Nierozwiazane</button>}
           {r.status !== 'resolved' && <button onClick={() => props.onStatus(r.id, 'resolved')} className="rounded-xl bg-green-500 px-3 py-2 text-xs font-bold text-white hover:bg-green-400">Zamknij</button>}
             </>
           )}

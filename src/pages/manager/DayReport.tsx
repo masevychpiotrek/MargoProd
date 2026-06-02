@@ -367,10 +367,10 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
   const [step, setStep] = useState<'loading' | 'done' | 'error'>('loading')
   const [emailHtml, setEmailHtml] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
+  const [apiKey, setApiKey] = useState(() => localStorage.getItem('margoline_api_key') || '')
   const [copied, setCopied] = useState(false)
   const generated = useRef(false)
 
-  const apiKey = localStorage.getItem('margoline_api_key') || ''
   const machineNames = rows.map(r => r.machineName)
 
   useEffect(() => {
@@ -382,12 +382,14 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
   async function generate() {
     setStep('loading')
     try {
+      const key = apiKey.trim()
+      if (!key) throw new Error('Brak klucza API. Wklej poprawny klucz i sprobuj ponownie.')
       const prompt = buildAiPrompt(eventsByShift, shiftTotals, machineNames)
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'x-api-key': apiKey,
+          'x-api-key': key,
           'anthropic-version': '2023-06-01',
           'anthropic-dangerous-direct-browser-access': 'true',
         },
@@ -412,6 +414,20 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
       setErrorMsg(e instanceof Error ? e.message : 'Nieznany błąd')
       setStep('error')
     }
+  }
+
+  function saveApiKeyAndRetry() {
+    const key = apiKey.trim()
+    if (!key) return
+    localStorage.setItem('margoline_api_key', key)
+    generated.current = false
+    generate()
+  }
+
+  function clearApiKey() {
+    localStorage.removeItem('margoline_api_key')
+    setApiKey('')
+    setErrorMsg('')
   }
 
   function copyToClipboard() {
@@ -486,6 +502,25 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
                 <div className="font-bold mb-1">Błąd generowania</div>
                 {errorMsg}
+              </div>
+              <div className="rounded-xl border border-navy-600 bg-navy-900 p-4">
+                <label className="block">
+                  <span className="text-xs font-bold uppercase tracking-wider text-navy-400">Klucz API</span>
+                  <input
+                    type="password"
+                    value={apiKey}
+                    onChange={e => setApiKey(e.target.value)}
+                    className="input mt-1"
+                    placeholder="Wklej poprawny klucz"
+                    autoComplete="off"
+                  />
+                </label>
+                <div className="mt-2 flex flex-wrap gap-2">
+                  <button onClick={clearApiKey} className="btn-secondary px-3 py-2 text-xs">Wyczysc klucz</button>
+                  <button onClick={saveApiKeyAndRetry} disabled={!apiKey.trim()} className="btn-primary px-3 py-2 text-xs disabled:opacity-50">
+                    Zapisz klucz i sprobuj ponownie
+                  </button>
+                </div>
               </div>
               <div className="flex gap-3">
                 <button onClick={onClose} className="btn-secondary flex-1">Zamknij</button>

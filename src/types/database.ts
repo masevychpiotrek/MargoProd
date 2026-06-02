@@ -16,7 +16,7 @@ export type AuditAction =
   | 'failure_report_create' | 'failure_report_update'
 
 export type FailureSeverity = 'low' | 'medium' | 'high' | 'critical'
-export type FailureStatus   = 'new' | 'acknowledged' | 'in_progress' | 'resolved'
+export type FailureStatus   = 'new' | 'acknowledged' | 'in_progress' | 'unresolved' | 'resolved'
 
 export interface Profile {
   id: string
