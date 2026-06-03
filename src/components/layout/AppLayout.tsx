@@ -78,6 +78,7 @@ export default function AppLayout() {
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
+  const [lightTheme, setLightTheme] = useState(() => localStorage.getItem('margoline_theme') === 'light')
 
   useEffect(() => {
     // Show loading animation only on first mount
@@ -90,6 +91,11 @@ export default function AppLayout() {
   useEffect(() => {
     loadActiveShift()
   }, [profile?.id, profile?.role, loadActiveShift])
+
+  useEffect(() => {
+    document.documentElement.classList.toggle('theme-light', lightTheme)
+    localStorage.setItem('margoline_theme', lightTheme ? 'light' : 'dark')
+  }, [lightTheme])
 
   useEffect(() => {
     if (profile?.role !== 'operator') return
@@ -312,6 +318,26 @@ export default function AppLayout() {
             </svg>
           </button>
           <div className="flex-1" />
+          <button
+            type="button"
+            onClick={() => setLightTheme(v => !v)}
+            className="theme-toggle"
+            aria-label={lightTheme ? 'Przelacz na ciemne tlo' : 'Przelacz na jasne tlo'}
+            title={lightTheme ? 'Ciemne tlo' : 'Jasne tlo'}
+          >
+            <span className="theme-toggle__thumb">
+              {lightTheme ? (
+                <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+                  <circle cx="11" cy="11" r="4" fill="currentColor" />
+                  <path d="M11 1.8v2.1M11 18.1v2.1M20.2 11h-2.1M3.9 11H1.8M17.5 4.5 16 6M6 16l-1.5 1.5M17.5 17.5 16 16M6 6 4.5 4.5" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />
+                </svg>
+              ) : (
+                <svg width="16" height="16" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+                  <path d="M17.8 14.3A7.6 7.6 0 0 1 7.7 4.2 8.4 8.4 0 1 0 17.8 14.3Z" fill="currentColor" />
+                </svg>
+              )}
+            </span>
+          </button>
           <button
             onClick={() => setTestModeEnabled(!testMode)}
             className={cn(
