@@ -20,12 +20,19 @@ const HexLogo = () => (
   </svg>
 )
 
+function shouldSkipIntro() {
+  if (typeof window === 'undefined') return false
+  return window.matchMedia('(max-width: 1024px), (pointer: coarse)').matches
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
-  const [showForm, setShowForm] = useState(() => !!sessionStorage.getItem('ml-intro-shown'))
+  const [showForm, setShowForm] = useState(() =>
+    shouldSkipIntro() || !!sessionStorage.getItem('ml-intro-shown')
+  )
 
   const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)

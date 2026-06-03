@@ -155,6 +155,7 @@ export default function OperatorReport() {
   const [rejectReason,   setRejectReason]   = useState('')
   const [notes,          setNotes]          = useState('')
   const [existingReports, setExistingReports] = useState<ReportExt[]>([])
+  const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
   const [errors,  setErrors]  = useState<string[]>([])
@@ -238,10 +239,11 @@ export default function OperatorReport() {
   }, [activeShift?.shift_type, hour, testMode])
 
   useEffect(() => {
+    if (editingReportId) return
     const reported = existingReports.map(r => r.hour_start)
     const firstMissing = shiftHours.find(h => !reported.includes(h))
     if (firstMissing !== undefined && selectedHour !== firstMissing) setSelectedHour(firstMissing)
-  }, [activeShift?.shift_type, existingReports, selectedHour, testMode])
+  }, [activeShift?.shift_type, editingReportId, existingReports, selectedHour, testMode])
 
   const loadReports = async () => {
     if (!activeShift) return
@@ -304,6 +306,8 @@ export default function OperatorReport() {
   const orderedReports = [...existingReports]
     .filter(r => getHourIndex(r.hour_start) !== -1)
     .sort((a,b) => getHourIndex(a.hour_start) - getHourIndex(b.hour_start))
+  const lastReport = orderedReports[orderedReports.length - 1] as ReportExt | undefined
+  const editingReport = editingReportId ? existingReports.find(r => r.id === editingReportId) : undefined
   const previousReports = orderedReports.filter(r => getHourIndex(r.hour_start) < selectedHourIndex)
   const prevGood = previousReports.reduce((sum, report) => sum + (report.good_count ?? 0), 0)
   const prevReject = previousReports.reduce((sum, report) => sum + (report.reject_count ?? 0), 0)
@@ -319,7 +323,7 @@ export default function OperatorReport() {
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
   const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
   const rejectAboveLimit = !testMode && rejectPct > 5
-  const alreadyReported = existingReports.some(r => r.hour_start === selectedHour)
+  const alreadyReported = existingReports.some(r => r.hour_start === selectedHour && r.id !== editingReportId)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
   const currentSlotReported = currentSlotBelongsToShift && existingReports.some(r => r.hour_start === currentSlot)
@@ -329,13 +333,39 @@ export default function OperatorReport() {
     !reportedHours.includes(h) &&
     (testMode || !activeShift || canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h, now))
   )
-  const mustFillPreviousHour = firstMissingHour !== undefined && selectedHour !== firstMissingHour
+  const mustFillPreviousHour = !editingReportId && firstMissingHour !== undefined && selectedHour !== firstMissingHour
   const shouldWarnCurrentSlot = firstOpenMissingHour !== undefined && !currentSlotReported
   const activeOrder = orders.find(o => o.id === activeOrderId)
   const selectedReportOpenAt = activeShift && !testMode
     ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, selectedHour)
     : null
   const selectedReportCanBeEntered = !selectedReportOpenAt || new Date().getTime() >= selectedReportOpenAt.getTime()
+
+  const startEditLastReport = () => {
+    if (!lastReport) return
+    const previous = orderedReports.filter(r => getHourIndex(r.hour_start) < getHourIndex(lastReport.hour_start))
+    const baseGood = previous.reduce((sum, report) => sum + (report.good_count ?? 0), 0)
+    const baseReject = previous.reduce((sum, report) => sum + (report.reject_count ?? 0), 0)
+    setEditingReportId(lastReport.id)
+    setSelectedHour(lastReport.hour_start)
+    setCounterGood(String(baseGood + (lastReport.good_count ?? 0)))
+    setCounterReject(String(baseReject + (lastReport.reject_count ?? 0)))
+    setDowntimeReason(lastReport.downtime_reason ?? '')
+    setRejectReason(lastReport.reject_reason ?? '')
+    setNotes(lastReport.notes ?? '')
+    setErrors([])
+  }
+
+  const cancelEditReport = () => {
+    setEditingReportId(null)
+    setCounterGood('')
+    setCounterReject('')
+    setDowntimeReason('')
+    setRejectReason('')
+    setNotes('')
+    setOrderQty('')
+    setErrors([])
+  }
 
   const handleFinishOrder = async () => {
     if (!activeShift || !profile || !activeOrderId) return
@@ -404,14 +434,14 @@ export default function OperatorReport() {
         reportValidationError(message)
         return
       }
-      if (currentReports) {
+      if (currentReports && currentReports.id !== editingReportId) {
         const message = `Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} zostal juz zapisany na innym urzadzeniu`
         setErrors([message])
         reportValidationError(message)
         await loadReports()
         return
       }
-      const { error } = await supabase.from('hourly_reports').insert({
+      const payload = {
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
         hour_block: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
         good_count: incGood, reject_count: incReject, total_count: curGood,
@@ -426,7 +456,10 @@ export default function OperatorReport() {
         status: 'submitted',
         order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
         order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
-      })
+      }
+      const { error } = editingReportId
+        ? await supabase.from('hourly_reports').update(payload).eq('id', editingReportId)
+        : await supabase.from('hourly_reports').insert(payload)
       if (error) {
         const message = getSaveErrorMessage(error.message)
         setErrors([message])
@@ -435,11 +468,14 @@ export default function OperatorReport() {
         return
       }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
+      setEditingReportId(null)
       setCounterGood(''); setCounterReject('')
       setDowntimeReason(''); setRejectReason(''); setNotes(''); setOrderQty('')
-      const nextReported = [...reportedHours, selectedHour]
-      const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
-      if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
+      if (!editingReportId) {
+        const nextReported = [...reportedHours, selectedHour]
+        const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
+        if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
+      }
       loadReports(); loadOrders()
     } finally { setSaving(false) }
   }
@@ -490,6 +526,7 @@ export default function OperatorReport() {
 
                   return hours.map((h, idx) => {
                     const alreadyReported = reportedHours.includes(h)
+                    const isEditedHour = editingReport?.hour_start === h
 
                     // Czy godzina już minęła (uwzględnia zmianę nocną)
                     // Czy godzina już minęła — uwzględnia zmianę nocną
@@ -513,10 +550,10 @@ export default function OperatorReport() {
                     const prevHour = idx > 0 ? hours[idx - 1] : null
                     const prevReported = prevHour === null || reportedHours.includes(prevHour)
 
-                    const isDisabled = alreadyReported ||
+                    const isDisabled = (alreadyReported && !isEditedHour) ||
                       (!testMode && !hasPassed) ||
                       (!testMode && !isFirstHour && !prevReported) ||
-                      (firstMissingHour !== undefined && h !== firstMissingHour && !alreadyReported)
+                      (!editingReportId && firstMissingHour !== undefined && h !== firstMissingHour && !alreadyReported)
 
                     return (
                       <option key={h} value={h} disabled={isDisabled}>
@@ -530,6 +567,12 @@ export default function OperatorReport() {
             {!selectedReportCanBeEntered && selectedReportOpenAt && (
               <div className="mt-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm font-semibold text-amber-300">
                 Ten blok bedzie dostepny do wpisania od {selectedReportOpenAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}.
+              </div>
+            )}
+            {editingReport && (
+              <div className="mt-3 rounded-xl border border-brand/30 bg-brand/10 p-3 text-sm text-amber-100">
+                Edytujesz ostatni wpis: <span className="font-mono font-bold text-white">{editingReport.hour_block}</span>.
+                <button onClick={cancelEditReport} className="ml-3 font-bold text-brand hover:text-brand-light">Anuluj edycje</button>
               </div>
             )}
           </div>
@@ -817,6 +860,14 @@ export default function OperatorReport() {
                       </div>
                       {ORDERS_ENABLED && (r as ReportExt).order_id && (
                         <div className="text-xs text-brand mt-1">📋 {orders.find(o => o.id === (r as ReportExt).order_id)?.order_number ?? 'zlecenie'}</div>
+                      )}
+                      {lastReport?.id === r.id && (
+                        <button
+                          onClick={startEditLastReport}
+                          className="mt-2 w-full rounded-lg border border-brand/40 bg-brand/10 px-3 py-1.5 text-xs font-bold text-brand hover:bg-brand/20"
+                        >
+                          {editingReportId === r.id ? 'Edytujesz ten wpis' : 'Popraw ostatni wpis'}
+                        </button>
                       )}
                       <div className="h-1 bg-navy-700 rounded mt-1.5 overflow-hidden">
                         <div className={cn('h-full rounded', efficiencyBg(eff))} style={{ width: `${Math.min(eff,100)}%` }} />
