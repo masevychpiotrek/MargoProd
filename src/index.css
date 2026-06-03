@@ -218,3 +218,84 @@ html.theme-light table tr:hover {
 html.theme-light .status-info {
   background: rgba(201,168,76,.16) !important;
 }
+
+html.theme-light .text-brand {
+  color: #8a6413 !important;
+}
+
+html.theme-light .text-green-300,
+html.theme-light .text-green-400 {
+  color: #15803d !important;
+}
+
+html.theme-light .text-red-300,
+html.theme-light .text-red-400 {
+  color: #c0262d !important;
+}
+
+html.theme-light .text-amber-300,
+html.theme-light .text-amber-400 {
+  color: #b45309 !important;
+}
+
+html.theme-light .text-blue-300,
+html.theme-light .text-blue-400 {
+  color: #1d4ed8 !important;
+}
+
+html.theme-light .text-cyan-300,
+html.theme-light .text-cyan-400 {
+  color: #047085 !important;
+}
+
+html.theme-light aside,
+html.theme-light main > div:first-child {
+  color: #17304c;
+}
+
+html.theme-light aside svg,
+html.theme-light main > div:first-child svg,
+html.theme-light button svg {
+  color: currentColor;
+  filter: drop-shadow(0 1px 0 rgba(255,255,255,.55));
+}
+
+html.theme-light aside a {
+  color: #40536d !important;
+}
+
+html.theme-light aside a:hover {
+  color: #102033 !important;
+  background: rgba(218,229,244,.85) !important;
+}
+
+html.theme-light aside a.bg-navy-700,
+html.theme-light aside a.bg-navy-700\/50,
+html.theme-light aside a[class*="bg-navy-700"] {
+  color: #7a5710 !important;
+  background: rgba(201,168,76,.18) !important;
+  border-color: rgba(138,100,19,.35) !important;
+}
+
+html.theme-light .status-ok {
+  background: rgba(22,163,74,.12) !important;
+  border-color: rgba(21,128,61,.28) !important;
+  color: #15803d !important;
+}
+
+html.theme-light .status-warn {
+  background: rgba(217,119,6,.12) !important;
+  border-color: rgba(180,83,9,.28) !important;
+  color: #b45309 !important;
+}
+
+html.theme-light .status-alarm {
+  background: rgba(220,38,38,.12) !important;
+  border-color: rgba(192,38,45,.28) !important;
+  color: #c0262d !important;
+}
+
+html.theme-light .kpi-label,
+html.theme-light .label {
+  color: #40536d !important;
+}
