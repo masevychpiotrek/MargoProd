@@ -327,12 +327,16 @@ function handoverForEvents(events: ShiftEvent[]) {
   return 'Przekazać następnej zmianie zapisane uwagi operatora i zweryfikować, czy problem się powtarza.'
 }
 
-function buildMachineNarrative(machine: string, events: ShiftEvent[], index: number) {
+function buildMachineNarrative(machine: string, events: ShiftEvent[], index: number, summary?: ShiftSummary) {
   const machineClass = index % 2 === 0 ? 'm3' : 'm4'
+  const summaryLine = summary
+    ? `<p class="times">Produkcja: <strong>${pieces(summary.good)} szt.</strong> | Odrzut: <strong>${pieces(summary.reject)} szt.</strong> | Czas pracy: <strong>${mins(summary.runtime)}</strong></p>`
+    : ''
   if (!events.length) {
     return `<div class="mc-box ${machineClass}">
   <div class="mc-name">${escapeHtml(machine)}</div>
   <div class="mc-body">
+    ${summaryLine}
     <em style="color:#6B7280">Brak zdarzen do odnotowania.</em>
   </div>
 </div>`
@@ -341,29 +345,29 @@ function buildMachineNarrative(machine: string, events: ShiftEvent[], index: num
   const actions = actionEvents(events)
   const labels = issueLabels(events)
   const chronology = `<ul>${events.map(event => {
-    const operator = event.operator && event.operator !== '-' ? `, operator: ${escapeHtml(event.operator)}` : ''
-    return `<li><strong>${escapeHtml(event.hour)}</strong>${operator}: ${escapeHtml(event.text)}</li>`
+    return `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`
   }).join('')}</ul>`
   const actionList = actions.length
     ? `<ul>${actions.map(event => `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`).join('')}</ul>`
-    : '<p>Wpisy opisują problem, ale nie wskazują jednoznacznie wykonanych działań.</p>'
+    : '<p>Wpisy wskazują na wystąpienie problemu, natomiast nie zawierają jednoznacznego opisu podjętej interwencji.</p>'
   const opening = labels.length
-    ? `Zmiana na tym automacie była zakłócona przez: ${escapeHtml(labels.join(', '))}.`
-    : 'W trakcie zmiany odnotowano uwagi operatora wymagające przekazania dalej.'
+    ? `Praca automatu była zakłócona przez: ${escapeHtml(labels.join(', '))}.`
+    : 'W trakcie zmiany odnotowano uwagi wymagające uwzględnienia w analizie przebiegu produkcji.'
 
   return `<div class="mc-box ${machineClass}">
   <div class="mc-name">${escapeHtml(machine)}</div>
   <div class="mc-body">
+    ${summaryLine}
     <p>${opening}</p>
-    <p class="sub-h">Chronologia zdarzeń:</p>
+    <p class="sub-h">Przebieg zdarzeń:</p>
     ${chronology}
-    <p class="sub-h">Co było robione:</p>
+    <p class="sub-h">Podjęte działania:</p>
     ${actionList}
-    <p class="sub-h">Cel działań:</p>
+    <p class="sub-h">Cel interwencji:</p>
     <p>${goalForEvents(events)}</p>
-    <p class="sub-h">Skutek / ocena:</p>
+    <p class="sub-h">Ocena wpływu:</p>
     <p>${effectForEvents(events)}</p>
-    <p class="sub-h">Do przekazania:</p>
+    <p class="sub-h">Rekomendacja do dalszej kontroli:</p>
     <p>${handoverForEvents(events)}</p>
   </div>
 </div>`
@@ -372,7 +376,8 @@ function buildMachineNarrative(machine: string, events: ShiftEvent[], index: num
 function buildSystemReportHtml(
   eventsByShift: Record<ShiftType, ShiftEvent[]>,
   shiftTotals: Record<ShiftType, ShiftSummary>,
-  machineNames: string[]
+  machineNames: string[],
+  rows: MachineDayRow[] = []
 ): string {
   return SHIFTS.map((shift, shiftIndex) => {
     const shiftClass = shiftIndex === 0 ? 's1' : shiftIndex === 1 ? 's2' : 's3'
@@ -383,13 +388,16 @@ function buildSystemReportHtml(
       eventsByMachine.set(name, [...(eventsByMachine.get(name) ?? []), event])
     })
 
-    const knownMachines = machineNames.length ? machineNames : Array.from(eventsByMachine.keys())
+    const knownMachines = rows.length ? rows.map(row => row.machineName) : machineNames.length ? machineNames : Array.from(eventsByMachine.keys())
     const allMachines = Array.from(new Set([...knownMachines, ...eventsByMachine.keys()]))
     const machineBlocks = allMachines
-      .map((machine, index) => buildMachineNarrative(machine, eventsByMachine.get(machine) ?? [], index))
+      .map((machine, index) => {
+        const row = rows.find(item => item.machineName === machine)
+        return buildMachineNarrative(machine, eventsByMachine.get(machine) ?? [], index, row?.shifts[shift])
+      })
       .join('\n')
 
-    return `<div class="shift-bar ${shiftClass}">Zmiana ${shift} - produkcja ${pieces(st.good)} szt., odrzut ${pieces(st.reject)} szt., czas pracy ${mins(st.runtime)}</div>
+    return `<div class="shift-bar ${shiftClass}">Zmiana ${shift} - produkcja łącznie ${pieces(st.good)} szt., odrzut łącznie ${pieces(st.reject)} szt.</div>
 ${machineBlocks}`
   }).join('\n')
 
@@ -595,7 +603,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
             console.warn('AI polish skipped, using source report notes', err)
           }
         }
-        const shiftsHtml = buildSystemReportHtml(reportEvents, shiftTotals, machineNames)
+        const shiftsHtml = buildSystemReportHtml(reportEvents, shiftTotals, machineNames, rows)
         const html = buildEmailHtml({ date, rows, totals, shiftTotals, shiftsHtml })
         setEmailHtml(html)
         setStep('done')
@@ -604,7 +612,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
 
       const key = apiKey.trim()
       if (!key) throw new Error('Brak klucza API. Wklej poprawny klucz i sprobuj ponownie.')
-      const prompt = buildSystemReportHtml(eventsByShift, shiftTotals, machineNames)
+      const prompt = buildSystemReportHtml(eventsByShift, shiftTotals, machineNames, rows)
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
