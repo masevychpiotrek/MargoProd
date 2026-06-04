@@ -38,6 +38,8 @@ type ShiftWithSummary = Shift & {
   summary_notes?: string | null
 }
 
+type ShiftEvent = { machine: string; hour: string; text: string; operator: string }
+
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
 function one<T>(value: T | T[] | null | undefined) {
@@ -69,6 +71,31 @@ function noteText(report: ReportWithContext) {
     report.reject_reason?.trim() ? `Odrzut: ${report.reject_reason.trim()}` : '',
     report.notes?.trim() ? `Uwagi: ${report.notes.trim()}` : ''
   ].filter(Boolean).join(' - ')
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, char => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  }[char] ?? char))
+}
+
+function lockedTokens(value: string) {
+  return (value.match(/\bst\.?\s*\d+\b|\b\d{1,2}:\d{2}\b|\b\d+(?:[,.]\d+)?\b/gi) ?? [])
+    .map(token => token.toLowerCase().replace(/\s+/g, '').replace(',', '.'))
+}
+
+function safePolishedText(original: string, candidate: string | undefined) {
+  const cleaned = candidate?.trim()
+  if (!cleaned) return original
+  const originalTokens = lockedTokens(original).join('|')
+  const candidateTokens = lockedTokens(cleaned).join('|')
+  if (originalTokens !== candidateTokens) return original
+  if (cleaned.length > original.length * 2 + 80) return original
+  return cleaned
 }
 
 function hasClosingSummary(shift: ShiftWithSummary) {
@@ -241,13 +268,131 @@ ${machineRows}
 </body></html>`
 }
 
-// ─── AI prompt ────────────────────────────────────────────────────────────────
+// ─── System report content ────────────────────────────────────────────────────
 
-function buildAiPrompt(
-  eventsByShift: Record<ShiftType, { machine: string; hour: string; text: string; operator: string }[]>,
+function uniqueList(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean)))
+}
+
+function eventText(event: ShiftEvent) {
+  return event.text.toLowerCase()
+}
+
+function extractStations(events: ShiftEvent[]) {
+  return uniqueList(events.flatMap(event => event.text.match(/\bst\.?\s*\d+\b/gi) ?? []))
+}
+
+function actionEvents(events: ShiftEvent[]) {
+  const actionWords = ['czyszcz', 'regul', 'sprawdz', 'uruchom', 'wymien', 'ustaw', 'popraw', 'usun', 'zatrzym', 'zgłos', 'zglos', 'wezw', 'kontrol']
+  return events.filter(event => actionWords.some(word => eventText(event).includes(word)))
+}
+
+function issueLabels(events: ShiftEvent[]) {
+  const labels: string[] = []
+  events.forEach(event => {
+    const text = eventText(event)
+    if (text.includes('odrzut') || text.includes('brak') || text.includes('uszkodz')) labels.push('jakość / odrzut')
+    if (text.includes('zaci') || text.includes('blok') || text.includes('zakleszcz')) labels.push('zacięcia lub blokowanie pracy')
+    if (text.includes('alarm') || text.includes('awari')) labels.push('alarm / awaria')
+    if (text.includes('niska') || text.includes('slaba') || text.includes('słaba') || text.includes('wydajno')) labels.push('niska wydajność')
+    if (text.includes('szkol')) labels.push('szkolenie / wsparcie operatora')
+  })
+  return uniqueList(labels)
+}
+
+function goalForEvents(events: ShiftEvent[]) {
+  const labels = issueLabels(events)
+  if (!labels.length) return 'Celem było utrzymanie ciągłości pracy i ograniczenie ryzyka ponownego wystąpienia problemu.'
+  if (labels.includes('jakość / odrzut')) return 'Celem działań było ograniczenie odrzutu i ustabilizowanie jakości produkcji.'
+  if (labels.includes('zacięcia lub blokowanie pracy')) return 'Celem działań było przywrócenie płynnej pracy automatu oraz ograniczenie kolejnych zacięć.'
+  if (labels.includes('alarm / awaria')) return 'Celem działań było usunięcie przyczyny alarmu i bezpieczne wznowienie pracy automatu.'
+  if (labels.includes('niska wydajność')) return 'Celem działań było podniesienie tempa pracy i ograniczenie strat produkcyjnych.'
+  return 'Celem było utrzymanie stabilnej pracy automatu w trakcie zmiany.'
+}
+
+function effectForEvents(events: ShiftEvent[]) {
+  const stations = extractStations(events)
+  const labels = issueLabels(events)
+  if (events.length > 1 && stations.length) return `Problem wymaga obserwacji, ponieważ w zapisach pojawia się powtarzalnie: ${escapeHtml(stations.join(', '))}.`
+  if (events.length > 1 && labels.length) return 'Temat powracał w kilku wpisach, dlatego należy traktować go jako istotny dla wyniku zmiany.'
+  return 'W raporcie nie ma kolejnego wpisu, który jednoznacznie potwierdzałby powtórzenie tego samego problemu.'
+}
+
+function handoverForEvents(events: ShiftEvent[]) {
+  const stations = extractStations(events)
+  const labels = issueLabels(events)
+  if (!events.length) return 'Brak dodatkowych informacji do przekazania.'
+  if (stations.length) return `Przekazać do obserwacji: ${escapeHtml(stations.join(', '))}. Sprawdzić przy starcie kolejnej zmiany.`
+  if (labels.length) return `Przekazać następnej zmianie temat: ${escapeHtml(labels.join(', '))}.`
+  return 'Przekazać następnej zmianie zapisane uwagi operatora i zweryfikować, czy problem się powtarza.'
+}
+
+function buildMachineNarrative(machine: string, events: ShiftEvent[], index: number) {
+  const machineClass = index % 2 === 0 ? 'm3' : 'm4'
+  if (!events.length) {
+    return `<div class="mc-box ${machineClass}">
+  <div class="mc-name">${escapeHtml(machine)}</div>
+  <div class="mc-body">
+    <em style="color:#6B7280">Brak zdarzen do odnotowania.</em>
+  </div>
+</div>`
+  }
+
+  const actions = actionEvents(events)
+  const labels = issueLabels(events)
+  const chronology = `<ul>${events.map(event => {
+    const operator = event.operator && event.operator !== '-' ? `, operator: ${escapeHtml(event.operator)}` : ''
+    return `<li><strong>${escapeHtml(event.hour)}</strong>${operator}: ${escapeHtml(event.text)}</li>`
+  }).join('')}</ul>`
+  const actionList = actions.length
+    ? `<ul>${actions.map(event => `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`).join('')}</ul>`
+    : '<p>Wpisy opisują problem, ale nie wskazują jednoznacznie wykonanych działań.</p>'
+  const opening = labels.length
+    ? `Zmiana na tym automacie była zakłócona przez: ${escapeHtml(labels.join(', '))}.`
+    : 'W trakcie zmiany odnotowano uwagi operatora wymagające przekazania dalej.'
+
+  return `<div class="mc-box ${machineClass}">
+  <div class="mc-name">${escapeHtml(machine)}</div>
+  <div class="mc-body">
+    <p>${opening}</p>
+    <p class="sub-h">Chronologia zdarzeń:</p>
+    ${chronology}
+    <p class="sub-h">Co było robione:</p>
+    ${actionList}
+    <p class="sub-h">Cel działań:</p>
+    <p>${goalForEvents(events)}</p>
+    <p class="sub-h">Skutek / ocena:</p>
+    <p>${effectForEvents(events)}</p>
+    <p class="sub-h">Do przekazania:</p>
+    <p>${handoverForEvents(events)}</p>
+  </div>
+</div>`
+}
+
+function buildSystemReportHtml(
+  eventsByShift: Record<ShiftType, ShiftEvent[]>,
   shiftTotals: Record<ShiftType, ShiftSummary>,
   machineNames: string[]
 ): string {
+  return SHIFTS.map((shift, shiftIndex) => {
+    const shiftClass = shiftIndex === 0 ? 's1' : shiftIndex === 1 ? 's2' : 's3'
+    const st = shiftTotals[shift]
+    const eventsByMachine = new Map<string, ShiftEvent[]>()
+    eventsByShift[shift].forEach(event => {
+      const name = event.machine || '-'
+      eventsByMachine.set(name, [...(eventsByMachine.get(name) ?? []), event])
+    })
+
+    const knownMachines = machineNames.length ? machineNames : Array.from(eventsByMachine.keys())
+    const allMachines = Array.from(new Set([...knownMachines, ...eventsByMachine.keys()]))
+    const machineBlocks = allMachines
+      .map((machine, index) => buildMachineNarrative(machine, eventsByMachine.get(machine) ?? [], index))
+      .join('\n')
+
+    return `<div class="shift-bar ${shiftClass}">Zmiana ${shift} - produkcja ${pieces(st.good)} szt., odrzut ${pieces(st.reject)} szt., czas pracy ${mins(st.runtime)}</div>
+${machineBlocks}`
+  }).join('\n')
+
   const notesBlock = SHIFTS.map(shift => {
     const events = eventsByShift[shift]
     const byMachine: Record<string, string[]> = {}
@@ -308,6 +453,64 @@ Pomiń sekcje sub-h jeśli brak danych. Times tylko jeśli w notatce.
 ${notesBlock}`
 }
 
+async function polishEventsWithAi(
+  apiKey: string,
+  eventsByShift: Record<ShiftType, ShiftEvent[]>
+): Promise<Record<ShiftType, ShiftEvent[]>> {
+  const items = SHIFTS.flatMap(shift =>
+    eventsByShift[shift].map((event, index) => ({
+      id: `${shift}-${index}`,
+      text: event.text
+    }))
+  ).filter(item => item.text.trim())
+
+  if (!items.length) return eventsByShift
+
+  const response = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': apiKey,
+      'anthropic-version': '2023-06-01',
+      'anthropic-dangerous-direct-browser-access': 'true',
+    },
+    body: JSON.stringify({
+      model: 'claude-haiku-4-5-20251001',
+      max_tokens: 3000,
+      messages: [{
+        role: 'user',
+        content: `Popraw tylko pisownie, interpunkcje i czytelnosc ponizszych komentarzy operatorow.
+
+ZASADY BEZWZGLEDNE:
+- Nie dodawaj faktow.
+- Nie usuwaj faktow.
+- Nie zmieniaj godzin, liczb, nazw stacji, nazw maszyn, nazwisk ani skrotow technicznych.
+- Nie zamieniaj komentarza na wnioski.
+- Zwroc tylko JSON w formacie: [{"id":"...","text":"..."}].
+- Kazdy id musi wrocic dokladnie raz.
+
+DANE:
+${JSON.stringify(items)}`
+      }]
+    })
+  })
+
+  if (!response.ok) throw new Error(`AI polish failed: ${response.status}`)
+  const data = await response.json() as { content: { type: string; text?: string }[] }
+  const raw = data.content.map(item => item.text || '').join('').trim()
+    .replace(/^```(?:json)?/i, '')
+    .replace(/```$/i, '')
+    .trim()
+  const polished = JSON.parse(raw) as { id: string; text: string }[]
+  const byId = new Map(polished.map(item => [item.id, item.text?.trim()]))
+
+  return {
+    I: eventsByShift.I.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`I-${index}`)) })),
+    II: eventsByShift.II.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`II-${index}`)) })),
+    III: eventsByShift.III.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`III-${index}`)) })),
+  }
+}
+
 // ─── API Key Modal ────────────────────────────────────────────────────────────
 
 function ApiKeyModal({ onSave }: { onSave: (key: string) => void }) {
@@ -359,7 +562,7 @@ interface ReportModalProps {
   rows: MachineDayRow[]
   totals: ShiftSummary
   shiftTotals: Record<ShiftType, ShiftSummary>
-  eventsByShift: Record<ShiftType, { machine: string; hour: string; text: string; operator: string }[]>
+  eventsByShift: Record<ShiftType, ShiftEvent[]>
   onClose: () => void
 }
 
@@ -382,9 +585,26 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
   async function generate() {
     setStep('loading')
     try {
+      {
+        let reportEvents = eventsByShift
+        const key = apiKey.trim()
+        if (key) {
+          try {
+            reportEvents = await polishEventsWithAi(key, eventsByShift)
+          } catch (err) {
+            console.warn('AI polish skipped, using source report notes', err)
+          }
+        }
+        const shiftsHtml = buildSystemReportHtml(reportEvents, shiftTotals, machineNames)
+        const html = buildEmailHtml({ date, rows, totals, shiftTotals, shiftsHtml })
+        setEmailHtml(html)
+        setStep('done')
+        return
+      }
+
       const key = apiKey.trim()
       if (!key) throw new Error('Brak klucza API. Wklej poprawny klucz i sprobuj ponownie.')
-      const prompt = buildAiPrompt(eventsByShift, shiftTotals, machineNames)
+      const prompt = buildSystemReportHtml(eventsByShift, shiftTotals, machineNames)
       const resp = await fetch('https://api.anthropic.com/v1/messages', {
         method: 'POST',
         headers: {
@@ -490,8 +710,8 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
                 </svg>
               </div>
               <div className="text-center">
-                <p className="text-white font-semibold">AI redaguje raport...</p>
-                <p className="text-navy-400 text-sm mt-1">Formatuję notatki operatorów</p>
+                <p className="text-white font-semibold">System generuje raport...</p>
+                <p className="text-navy-400 text-sm mt-1">Układam zapisane dane bez dopisywania faktów</p>
               </div>
             </div>
           )}
@@ -557,18 +777,9 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
               </button>
 
               {/* Dodatkowe opcje */}
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3">
                 <button onClick={openInWindow} className="btn-secondary py-2.5 text-sm">
                   🔍 Podgląd w nowym oknie
-                </button>
-                <button
-                  onClick={() => {
-                    localStorage.removeItem('margoline_api_key')
-                    onClose()
-                  }}
-                  className="btn-secondary py-2.5 text-sm text-navy-400"
-                >
-                  🔑 Zmień klucz API
                 </button>
               </div>
 
@@ -733,7 +944,7 @@ export default function ManagerDayReport() {
   }, [rows])
 
   const eventsByShift = useMemo(() => {
-    const result: Record<ShiftType, { machine: string; hour: string; text: string; operator: string }[]> =
+    const result: Record<ShiftType, ShiftEvent[]> =
       { I: [], II: [], III: [] }
     reports.forEach(report => {
       const shiftType = one(report.shift)?.shift_type
@@ -759,12 +970,7 @@ export default function ManagerDayReport() {
   }, [machineNameById, reports, shiftSummaries])
 
   function handleGenerateClick() {
-    const key = localStorage.getItem('margoline_api_key')
-    if (!key) {
-      setModalState('apikey')
-    } else {
-      setModalState('report')
-    }
+    setModalState('report')
   }
 
   function handleApiKeySave(key: string) {
