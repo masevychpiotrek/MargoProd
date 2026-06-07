@@ -39,6 +39,7 @@ export default function LoginPage() {
   const [rfidStatus, setRfidStatus] = useState<'idle' | 'reading' | 'found' | 'error'>('idle')
   const [rfidError, setRfidError] = useState('')
   const rfidInputRef = useRef<HTMLInputElement | null>(null)
+  const passwordInputRef = useRef<HTMLInputElement | null>(null)
   const [showForm, setShowForm] = useState(() =>
     shouldSkipIntro() || !!sessionStorage.getItem('ml-intro-shown')
   )
@@ -46,6 +47,7 @@ export default function LoginPage() {
   const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
   })
+  const passwordField = register('password')
 
   useEffect(() => {
     if (loginMode !== 'rfid') return
@@ -82,18 +84,21 @@ export default function LoginPage() {
       if (!found?.email) {
         setRfidStatus('error')
         setRfidError('Nieznany identyfikator RFID.')
+        setRfidCode('')
+        window.setTimeout(() => rfidInputRef.current?.focus(), 100)
         return
       }
       setValue('email', found.email, { shouldValidate: true })
       setRfidUser(found)
       setRfidStatus('found')
       window.setTimeout(() => {
-        const password = document.querySelector<HTMLInputElement>('input[type="password"]')
-        password?.focus()
+        passwordInputRef.current?.focus()
       }, 100)
     } catch (e) {
       setRfidStatus('error')
       setRfidError(e instanceof Error ? e.message : 'Blad odczytu RFID.')
+      setRfidCode('')
+      window.setTimeout(() => rfidInputRef.current?.focus(), 100)
     }
   }
 
@@ -148,7 +153,13 @@ export default function LoginPage() {
           <div className="grid grid-cols-2 gap-2 mb-5 rounded-xl p-1" style={{ background: '#0d1117', border: '1px solid #263145' }}>
             <button
               type="button"
-              onClick={() => setLoginMode('password')}
+              onClick={() => {
+                setLoginMode('password')
+                setRfidUser(null)
+                setRfidCode('')
+                setRfidError('')
+                setRfidStatus('idle')
+              }}
               className="rounded-lg py-2 text-sm font-bold transition-all"
               style={{
                 background: loginMode === 'password' ? 'rgba(201,168,76,0.18)' : 'transparent',
@@ -197,10 +208,10 @@ export default function LoginPage() {
                 </div>
               </div>
               <div className="font-bold text-white">
-                {rfidStatus === 'found' ? 'Identyfikator rozpoznany' : 'Przyloz identyfikator RFID'}
+                {rfidStatus === 'found' ? `Witaj, ${rfidUser?.full_name ?? 'uzytkowniku'}` : 'Przyloz identyfikator RFID'}
               </div>
               <div className="mt-1 text-sm" style={{ color: rfidStatus === 'found' ? '#4ade80' : '#6b7f99' }}>
-                {rfidUser ? `${rfidUser.full_name} - ${rfidUser.role}` : 'Czytnik wpisze kod automatycznie'}
+                {rfidUser ? 'Identyfikator przyjety. Wpisz haslo, aby kontynuowac.' : 'Po odczycie przejdziesz do logowania haslem'}
               </div>
               <input
                 ref={rfidInputRef}
@@ -212,50 +223,55 @@ export default function LoginPage() {
                     handleRfidLookup()
                   }
                 }}
-                className="mt-4 w-full rounded-xl px-4 py-3 text-center font-mono text-white outline-none"
-                style={{ background: '#0d1117', border: '1px solid #263145' }}
-                placeholder="Oczekiwanie na tag..."
+                className="sr-only"
+                style={{ position: 'absolute', left: '-9999px', width: 1, height: 1, opacity: 0 }}
+                aria-hidden="true"
+                tabIndex={-1}
                 autoComplete="off"
               />
-              <button
-                type="button"
-                onClick={() => handleRfidLookup()}
-                className="mt-3 w-full rounded-xl py-2.5 text-sm font-bold transition-all"
-                style={{ background: 'rgba(201,168,76,0.16)', color: '#f3d77a', border: '1px solid rgba(201,168,76,0.25)' }}
-              >
-                Sprawdz identyfikator
-              </button>
+              {rfidStatus !== 'found' && (
+                <div className="mt-4 rounded-xl px-4 py-3 text-sm" style={{ background: '#0d1117', border: '1px solid #263145', color: '#8899bb' }}>
+                  Oczekiwanie na identyfikator...
+                </div>
+              )}
               {rfidError && <div className="mt-3 text-sm text-red-400">{rfidError}</div>}
             </div>
           )}
 
           <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
-                {loginMode === 'rfid' ? 'Konto rozpoznane z RFID' : 'Adres e-mail'}
-              </label>
-              <input
-                {...register('email')}
-                type="email"
-                autoComplete="email"
-                readOnly={loginMode === 'rfid'}
-                placeholder={loginMode === 'rfid' ? 'Najpierw przyloz identyfikator' : 'twoje.imie@margomed.pl'}
-                className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
-                style={{ background: '#0d1117', border: '1px solid #263145' }}
-                onFocus={e => e.target.style.borderColor = '#c9a84c'}
-                onBlur={e => e.target.style.borderColor = '#263145'}
-              />
-              {errors.email && (
-                <p className="text-red-400 text-xs mt-1.5">{errors.email.message}</p>
-              )}
-            </div>
+            {loginMode === 'password' ? (
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
+                  Adres e-mail
+                </label>
+                <input
+                  {...register('email')}
+                  type="email"
+                  autoComplete="email"
+                  placeholder="twoje.imie@margomed.pl"
+                  className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
+                  style={{ background: '#0d1117', border: '1px solid #263145' }}
+                  onFocus={e => e.target.style.borderColor = '#c9a84c'}
+                  onBlur={e => e.target.style.borderColor = '#263145'}
+                />
+                {errors.email && (
+                  <p className="text-red-400 text-xs mt-1.5">{errors.email.message}</p>
+                )}
+              </div>
+            ) : (
+              <input {...register('email')} type="hidden" />
+            )}
 
             <div>
               <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
                 Hasło
               </label>
               <input
-                {...register('password')}
+                {...passwordField}
+                ref={e => {
+                  passwordField.ref(e)
+                  passwordInputRef.current = e
+                }}
                 type="password"
                 autoComplete="current-password"
                 placeholder="••••••••••"
@@ -277,7 +293,7 @@ export default function LoginPage() {
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={submitting || (loginMode === 'rfid' && rfidStatus !== 'found')}
               className="w-full font-semibold py-3.5 rounded-xl transition-all mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
               style={{
                 background: 'linear-gradient(135deg, #c9a84c, #9a7a2e)',
