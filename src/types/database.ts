@@ -24,6 +24,7 @@ export interface Profile {
   role: UserRole
   is_active: boolean
   must_change_password?: boolean
+  rfid_uid?: string | null
   avatar_url: string | null
   phone: string | null
   department: string
