@@ -104,10 +104,12 @@ export default function LoginPage() {
     setRfidStatus('reading')
     setRfidError('')
     setRfidName('')
+    sessionStorage.setItem('ml-rfid-welcome-until', String(Date.now() + 2200))
 
     try {
       const { error, fullName } = await signInWithRfid(code)
       if (error) {
+        sessionStorage.removeItem('ml-rfid-welcome-until')
         setRfidStatus('error')
         setRfidError(mapRfidError(error))
         setRfidCode('')
@@ -119,8 +121,12 @@ export default function LoginPage() {
 
       setRfidName(fullName || '')
       setRfidStatus('found')
-      window.setTimeout(() => navigate('/', { replace: true }), 1300)
+      window.setTimeout(() => {
+        sessionStorage.removeItem('ml-rfid-welcome-until')
+        navigate('/', { replace: true })
+      }, 1600)
     } catch (e) {
+      sessionStorage.removeItem('ml-rfid-welcome-until')
       setRfidStatus('error')
       setRfidError(mapRfidError(e instanceof Error ? e.message : 'Blad odczytu RFID.'))
       setRfidCode('')

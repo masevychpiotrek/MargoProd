@@ -76,12 +76,18 @@ export function RequireAuth({ children, roles }: Props) {
 
 export function PublicOnly({ children }: { children: React.ReactNode }) {
   const { user, profile, isLoading, isInitialized, initialize } = useAuthStore()
+  const location = useLocation()
 
   useEffect(() => {
     if (!isInitialized) initialize()
   }, [isInitialized, initialize])
 
   if (!isInitialized || isLoading) return LOADING_SCREEN
+
+  const rfidWelcomeUntil = Number(sessionStorage.getItem('ml-rfid-welcome-until') || 0)
+  if (location.pathname === '/login' && Date.now() < rfidWelcomeUntil) {
+    return <>{children}</>
+  }
 
   if (user && profile) {
     if (profile.must_change_password) return <Navigate to="/password" replace />
