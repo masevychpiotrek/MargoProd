@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
@@ -47,6 +47,8 @@ export default function LoginPage() {
   const [rfidStatus, setRfidStatus] = useState<'idle' | 'reading' | 'found' | 'error'>('idle')
   const [rfidError, setRfidError] = useState('')
   const rfidInputRef = useRef<HTMLInputElement | null>(null)
+  const scannerBufferRef = useRef('')
+  const scannerTimerRef = useRef<number | null>(null)
   const [showForm, setShowForm] = useState(() =>
     shouldSkipIntro() || !!sessionStorage.getItem('ml-intro-shown')
   )
@@ -55,17 +57,16 @@ export default function LoginPage() {
     resolver: zodResolver(schema)
   })
 
-  useEffect(() => {
-    if (loginMode !== 'rfid' || rfidStatus === 'found') return
-    const timer = window.setTimeout(() => rfidInputRef.current?.focus(), 100)
-    return () => window.clearTimeout(timer)
-  }, [loginMode, rfidStatus])
-
   const resetRfid = () => {
     setRfidCode('')
     setRfidName('')
     setRfidError('')
     setRfidStatus('idle')
+    scannerBufferRef.current = ''
+    if (scannerTimerRef.current) {
+      window.clearTimeout(scannerTimerRef.current)
+      scannerTimerRef.current = null
+    }
   }
 
   const onSubmit = async (data: FormData) => {
@@ -84,7 +85,7 @@ export default function LoginPage() {
     }
   }
 
-  const handleRfidLookup = async (rawCode = rfidCode) => {
+  const handleRfidLookup = useCallback(async (rawCode = rfidCode) => {
     const code = rawCode.trim()
     if (!code || submitting || rfidStatus === 'reading') return
     setRfidStatus('reading')
@@ -110,7 +111,59 @@ export default function LoginPage() {
       setRfidCode('')
       window.setTimeout(() => rfidInputRef.current?.focus(), 100)
     }
-  }
+  }, [navigate, rfidCode, rfidStatus, signInWithRfid, submitting])
+
+  useEffect(() => {
+    if (loginMode !== 'rfid' || rfidStatus === 'found') return
+    const timer = window.setTimeout(() => rfidInputRef.current?.focus(), 100)
+    return () => window.clearTimeout(timer)
+  }, [loginMode, rfidStatus])
+
+  useEffect(() => {
+    if (loginMode !== 'rfid') return
+
+    const clearScannerBufferSoon = () => {
+      if (scannerTimerRef.current) window.clearTimeout(scannerTimerRef.current)
+      scannerTimerRef.current = window.setTimeout(() => {
+        scannerBufferRef.current = ''
+        setRfidCode('')
+      }, 700)
+    }
+
+    const handleScannerKey = (event: KeyboardEvent) => {
+      if (rfidStatus === 'reading' || rfidStatus === 'found') {
+        event.preventDefault()
+        event.stopPropagation()
+        return
+      }
+
+      if (event.key === 'Enter') {
+        event.preventDefault()
+        event.stopPropagation()
+        const code = scannerBufferRef.current.trim() || rfidCode.trim()
+        scannerBufferRef.current = ''
+        setRfidCode('')
+        void handleRfidLookup(code)
+        return
+      }
+
+      if (event.key.length !== 1) return
+      event.preventDefault()
+      event.stopPropagation()
+      scannerBufferRef.current += event.key
+      setRfidCode(scannerBufferRef.current)
+      clearScannerBufferSoon()
+    }
+
+    window.addEventListener('keydown', handleScannerKey, true)
+    return () => window.removeEventListener('keydown', handleScannerKey, true)
+  }, [handleRfidLookup, loginMode, rfidCode, rfidStatus])
+
+  useEffect(() => {
+    return () => {
+      if (scannerTimerRef.current) window.clearTimeout(scannerTimerRef.current)
+    }
+  }, [])
 
   if (!showForm) {
     return <LoadingScreen onLogin={() => {

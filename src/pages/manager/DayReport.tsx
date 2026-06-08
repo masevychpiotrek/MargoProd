@@ -67,10 +67,10 @@ function timeLine(s: ShiftSummary) {
 }
 function noteText(report: ReportWithContext) {
   return [
-    report.downtime_reason?.trim() ? `Wynik: ${report.downtime_reason.trim()}` : '',
-    report.reject_reason?.trim() ? `Odrzut: ${report.reject_reason.trim()}` : '',
-    report.notes?.trim() ? `Uwagi: ${report.notes.trim()}` : ''
-  ].filter(Boolean).join(' - ')
+    report.downtime_reason?.trim() ? report.downtime_reason.trim() : '',
+    report.reject_reason?.trim() ? `Uzasadnienie odrzutu: ${report.reject_reason.trim()}` : '',
+    report.notes?.trim() ? `Informacja uzupełniająca: ${report.notes.trim()}` : ''
+  ].filter(Boolean).join('. ')
 }
 
 function escapeHtml(value: string) {
@@ -257,7 +257,7 @@ ${machineRows}
     </td></tr></table>
     ${prodTable}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 12px 0"><tr><td style="border-bottom:2px solid ${K.blue};padding-bottom:6px">
-      <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">2. Kluczowe zdarzenia</span>
+      <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">2. Przebieg zmian i istotne zdarzenia</span>
     </td></tr></table>
     ${emailShifts}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px"><tr><td style="border-top:1px solid ${K.gray2};padding-top:12px">
@@ -302,29 +302,29 @@ function issueLabels(events: ShiftEvent[]) {
 
 function goalForEvents(events: ShiftEvent[]) {
   const labels = issueLabels(events)
-  if (!labels.length) return 'Celem było utrzymanie ciągłości pracy i ograniczenie ryzyka ponownego wystąpienia problemu.'
-  if (labels.includes('jakość / odrzut')) return 'Celem działań było ograniczenie odrzutu i ustabilizowanie jakości produkcji.'
-  if (labels.includes('zacięcia lub blokowanie pracy')) return 'Celem działań było przywrócenie płynnej pracy automatu oraz ograniczenie kolejnych zacięć.'
-  if (labels.includes('alarm / awaria')) return 'Celem działań było usunięcie przyczyny alarmu i bezpieczne wznowienie pracy automatu.'
-  if (labels.includes('niska wydajność')) return 'Celem działań było podniesienie tempa pracy i ograniczenie strat produkcyjnych.'
-  return 'Celem było utrzymanie stabilnej pracy automatu w trakcie zmiany.'
+  if (!labels.length) return 'Utrzymanie ciągłości procesu oraz ograniczenie ryzyka ponownego wystąpienia zakłócenia.'
+  if (labels.includes('jakość / odrzut')) return 'Ograniczenie odrzutu, stabilizacja jakości oraz zabezpieczenie dalszej produkcji.'
+  if (labels.includes('zacięcia lub blokowanie pracy')) return 'Przywrócenie płynnej pracy automatu i ograniczenie kolejnych zatrzymań procesu.'
+  if (labels.includes('alarm / awaria')) return 'Usunięcie przyczyny alarmu oraz bezpieczne wznowienie pracy automatu.'
+  if (labels.includes('niska wydajność')) return 'Ograniczenie strat produkcyjnych i poprawa stabilności tempa pracy.'
+  return 'Utrzymanie stabilnej pracy automatu w trakcie zmiany.'
 }
 
 function effectForEvents(events: ShiftEvent[]) {
   const stations = extractStations(events)
   const labels = issueLabels(events)
-  if (events.length > 1 && stations.length) return `Problem wymaga obserwacji, ponieważ w zapisach pojawia się powtarzalnie: ${escapeHtml(stations.join(', '))}.`
-  if (events.length > 1 && labels.length) return 'Temat powracał w kilku wpisach, dlatego należy traktować go jako istotny dla wyniku zmiany.'
-  return 'W raporcie nie ma kolejnego wpisu, który jednoznacznie potwierdzałby powtórzenie tego samego problemu.'
+  if (events.length > 1 && stations.length) return `Zakłócenie wymaga dalszej obserwacji, ponieważ w zapisach powtarza się odniesienie do: ${escapeHtml(stations.join(', '))}.`
+  if (events.length > 1 && labels.length) return 'Zdarzenie pojawiało się w kilku wpisach, dlatego należy traktować je jako czynnik mający wpływ na wynik zmiany.'
+  return 'Na podstawie dostępnych wpisów nie stwierdzono jednoznacznego potwierdzenia ponownego wystąpienia tego samego zakłócenia.'
 }
 
 function handoverForEvents(events: ShiftEvent[]) {
   const stations = extractStations(events)
   const labels = issueLabels(events)
-  if (!events.length) return 'Brak dodatkowych informacji do przekazania.'
-  if (stations.length) return `Przekazać do obserwacji: ${escapeHtml(stations.join(', '))}. Sprawdzić przy starcie kolejnej zmiany.`
-  if (labels.length) return `Przekazać następnej zmianie temat: ${escapeHtml(labels.join(', '))}.`
-  return 'Przekazać następnej zmianie zapisane uwagi operatora i zweryfikować, czy problem się powtarza.'
+  if (!events.length) return 'Brak dodatkowych zaleceń wynikających z zapisów zmiany.'
+  if (stations.length) return `Objąć obserwacją ${escapeHtml(stations.join(', '))} podczas uruchomienia kolejnej zmiany.`
+  if (labels.length) return `Przekazać do dalszej kontroli obszar: ${escapeHtml(labels.join(', '))}.`
+  return 'Zweryfikować na kolejnej zmianie, czy opisane zakłócenie nie występuje ponownie.'
 }
 
 function buildMachineNarrative(machine: string, events: ShiftEvent[], index: number, summary?: ShiftSummary) {
@@ -337,7 +337,7 @@ function buildMachineNarrative(machine: string, events: ShiftEvent[], index: num
   <div class="mc-name">${escapeHtml(machine)}</div>
   <div class="mc-body">
     ${summaryLine}
-    <em style="color:#6B7280">Brak zdarzen do odnotowania.</em>
+    <em style="color:#6B7280">Brak istotnych zdarzeń do raportowania.</em>
   </div>
 </div>`
   }
@@ -349,25 +349,25 @@ function buildMachineNarrative(machine: string, events: ShiftEvent[], index: num
   }).join('')}</ul>`
   const actionList = actions.length
     ? `<ul>${actions.map(event => `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`).join('')}</ul>`
-    : '<p>Wpisy wskazują na wystąpienie problemu, natomiast nie zawierają jednoznacznego opisu podjętej interwencji.</p>'
+    : '<p>W zapisach zmiany nie wskazano jednoznacznie szczegółowego opisu działań korygujących.</p>'
   const opening = labels.length
-    ? `Praca automatu była zakłócona przez: ${escapeHtml(labels.join(', '))}.`
-    : 'W trakcie zmiany odnotowano uwagi wymagające uwzględnienia w analizie przebiegu produkcji.'
+    ? `Na automacie odnotowano zakłócenia dotyczące obszaru: ${escapeHtml(labels.join(', '))}.`
+    : 'W zapisach zmiany odnotowano informacje wymagające uwzględnienia w ocenie przebiegu produkcji.'
 
   return `<div class="mc-box ${machineClass}">
   <div class="mc-name">${escapeHtml(machine)}</div>
   <div class="mc-body">
     ${summaryLine}
     <p>${opening}</p>
-    <p class="sub-h">Przebieg zdarzeń:</p>
+    <p class="sub-h">Przebieg operacyjny:</p>
     ${chronology}
     <p class="sub-h">Podjęte działania:</p>
     ${actionList}
-    <p class="sub-h">Cel interwencji:</p>
+    <p class="sub-h">Cel działań:</p>
     <p>${goalForEvents(events)}</p>
     <p class="sub-h">Ocena wpływu:</p>
     <p>${effectForEvents(events)}</p>
-    <p class="sub-h">Rekomendacja do dalszej kontroli:</p>
+    <p class="sub-h">Dalsza kontrola:</p>
     <p>${handoverForEvents(events)}</p>
   </div>
 </div>`

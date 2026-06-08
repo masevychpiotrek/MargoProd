@@ -352,9 +352,9 @@ export default function OperatorDashboard() {
                         </div>
                         {(report.downtime_reason || report.reject_reason || report.notes) && (
                           <div className="mt-2 text-xs text-navy-300">
-                            {report.downtime_reason && <div><span className="text-navy-500">Wynik:</span> {report.downtime_reason}</div>}
-                            {report.reject_reason && <div><span className="text-navy-500">Odrzut:</span> {report.reject_reason}</div>}
-                            {report.notes && <div><span className="text-navy-500">Uwagi:</span> {report.notes}</div>}
+                            {report.downtime_reason && <div><span className="text-navy-500">Przebieg:</span> {report.downtime_reason}</div>}
+                            {report.reject_reason && <div><span className="text-navy-500">Uzasadnienie odrzutu:</span> {report.reject_reason}</div>}
+                            {report.notes && <div><span className="text-navy-500">Informacja dodatkowa:</span> {report.notes}</div>}
                           </div>
                         )}
                       </div>

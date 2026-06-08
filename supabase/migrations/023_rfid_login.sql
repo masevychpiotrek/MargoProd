@@ -7,7 +7,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_rfid_uid
   WHERE rfid_uid IS NOT NULL AND deleted_at IS NULL;
 
 UPDATE public.profiles p
-SET rfid_uid = '0703620996'
+SET rfid_uid = '0701967844'
 FROM auth.users u
 WHERE p.id = u.id
   AND lower(u.email) = 'petromasevych@margomed.com'
