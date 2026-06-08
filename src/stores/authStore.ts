@@ -140,7 +140,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
 
   signIn: async (email, password) => {
     set({
-      isLoading: true,
+      isLoading: false,
       user: null,
       session: null,
       profile: null,
@@ -188,7 +188,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
     if (!cleanUid) return { error: 'Nie odczytano identyfikatora RFID.' }
 
     set({
-      isLoading: true,
+      isLoading: false,
       user: null,
       session: null,
       profile: null,
