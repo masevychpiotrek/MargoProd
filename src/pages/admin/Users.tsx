@@ -36,6 +36,7 @@ export default function AdminUsers() {
   const [newEmail, setNewEmail] = useState('')
   const [newRole, setNewRole] = useState<UserRole>('operator')
   const [newPass, setNewPass] = useState('Margomed123')
+  const [addUserError, setAddUserError] = useState('')
 
   useEffect(() => { loadUsers() }, [])
 
@@ -92,11 +93,14 @@ export default function AdminUsers() {
   }
 
   const handleAddUser = async () => {
+    setAddUserError('')
     const email = newEmail.trim().toLowerCase()
-    if (!newName.trim() || !email || !newPass) return
+    if (!newName.trim() || !email || !newPass) {
+      setAddUserError('Uzupelnij imie i nazwisko, e-mail oraz haslo.')
+      return
+    }
     if (!isValidEmail(email)) {
-      setMsg('Blad: wpisz poprawny adres e-mail, np. j.chargot@margomed.com')
-      setTimeout(() => setMsg(''), 5000)
+      setAddUserError('Wpisz poprawny adres e-mail, np. j.chargot@margomed.com')
       return
     }
     setSaving(true)
@@ -109,12 +113,16 @@ export default function AdminUsers() {
       }
     })
     if (createResult?.error) {
-      setMsg('Blad: ' + createResult.error)
+      setAddUserError(createResult.error)
       setSaving(false)
-      setTimeout(() => setMsg(''), 4000)
       return
     }
     if (error) {
+      setAddUserError(error.message || 'Nie udalo sie utworzyc konta.')
+      setSaving(false)
+      return
+    }
+    if (false) {
       setMsg('Błąd: ' + error.message)
     } else {
       setMsg(`Użytkownik ${newName} został dodany`)
@@ -299,6 +307,11 @@ export default function AdminUsers() {
                   type="text" className="input font-mono" />
               </div>
             </div>
+            {addUserError && (
+              <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+                {addUserError}
+              </div>
+            )}
             <div className="flex gap-3 mt-6">
               <button onClick={handleAddUser} disabled={saving || !newName || !newEmail}
                 className="btn-primary flex-1 py-3">
