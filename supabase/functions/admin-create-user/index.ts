@@ -20,14 +20,14 @@ Deno.serve(async (req) => {
     const token = authHeader.replace('Bearer ', '').trim()
 
     if (!supabaseUrl || !serviceRoleKey) throw new Error('Missing Supabase service configuration')
-    if (!token) return json({ error: 'Brak sesji administratora.' }, 401)
+    if (!token) return json({ error: 'Brak sesji administratora.' })
 
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
 
     const { data: callerData, error: callerError } = await admin.auth.getUser(token)
-    if (callerError || !callerData.user) return json({ error: 'Nie udalo sie potwierdzic sesji administratora.' }, 401)
+    if (callerError || !callerData.user) return json({ error: 'Nie udalo sie potwierdzic sesji administratora.' })
 
     const { data: callerProfile, error: profileError } = await admin
       .from('profiles')
@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
 
     if (profileError) throw profileError
     if (!callerProfile || callerProfile.role !== 'admin' || !callerProfile.is_active || callerProfile.deleted_at) {
-      return json({ error: 'Tylko administrator moze tworzyc konta.' }, 403)
+      return json({ error: 'Tylko administrator moze tworzyc konta.' })
     }
 
     const body = await req.json().catch(() => ({}))
@@ -47,11 +47,11 @@ Deno.serve(async (req) => {
     const role = String(body.role ?? 'operator').trim()
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return json({ error: 'Wpisz poprawny adres e-mail.' }, 400)
+      return json({ error: 'Wpisz poprawny adres e-mail.' })
     }
-    if (!fullName) return json({ error: 'Wpisz imie i nazwisko.' }, 400)
-    if (password.length < 6) return json({ error: 'Haslo musi miec minimum 6 znakow.' }, 400)
-    if (!ALLOWED_ROLES.has(role)) return json({ error: 'Nieprawidlowa rola uzytkownika.' }, 400)
+    if (!fullName) return json({ error: 'Wpisz imie i nazwisko.' })
+    if (password.length < 6) return json({ error: 'Haslo musi miec minimum 6 znakow.' })
+    if (!ALLOWED_ROLES.has(role)) return json({ error: 'Nieprawidlowa rola uzytkownika.' })
 
     const existingUser = await findUserByEmail(admin, email)
     const metadata = { full_name: fullName, name: fullName, role }
@@ -99,7 +99,7 @@ Deno.serve(async (req) => {
     return json({ id: userId })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udalo sie utworzyc konta.'
-    return json({ error: message }, 500)
+    return json({ error: message })
   }
 })
 
