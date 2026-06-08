@@ -100,12 +100,20 @@ export default function AdminUsers() {
       return
     }
     setSaving(true)
-    const { error } = await supabase.rpc('create_user_with_profile', {
-      p_email: email,
-      p_password: newPass,
-      p_name: newName.trim(),
-      p_role: newRole
+    const { data: createResult, error } = await supabase.functions.invoke<{ error?: string }>('admin-create-user', {
+      body: {
+        email,
+        password: newPass,
+        full_name: newName.trim(),
+        role: newRole
+      }
     })
+    if (createResult?.error) {
+      setMsg('Blad: ' + createResult.error)
+      setSaving(false)
+      setTimeout(() => setMsg(''), 4000)
+      return
+    }
     if (error) {
       setMsg('Błąd: ' + error.message)
     } else {
