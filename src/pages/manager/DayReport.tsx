@@ -278,6 +278,47 @@ function eventText(event: ShiftEvent) {
   return event.text.toLowerCase()
 }
 
+function textSentences(value: string) {
+  return value
+    .split(/(?:\.\s+|\n+|;\s+)/)
+    .map(sentence => sentence.trim().replace(/[.。]+$/, ''))
+    .filter(Boolean)
+}
+
+function isActionText(value: string) {
+  const text = value.toLowerCase()
+  const actionWords = [
+    'czyszcz', 'wyczyszcz', 'regul', 'sprawdz', 'sprawdzon',
+    'uruchom', 'wymien', 'ustaw', 'popraw', 'usun', 'usuni',
+    'zatrzym', 'zglos', 'zgĹ‚os', 'wezw', 'kontrol', 'skoryg',
+    'przezbro', 'napraw', 'odblok', 'kalibr'
+  ]
+  return actionWords.some(word => text.includes(word))
+}
+
+function eventIssueText(event: ShiftEvent) {
+  const sentences = textSentences(event.text)
+  return sentences.filter(sentence => !isActionText(sentence)).join('. ')
+}
+
+function eventActionText(event: ShiftEvent) {
+  const sentences = textSentences(event.text)
+  return sentences.filter(isActionText).join('. ')
+}
+
+function uniqueActionItems(events: ShiftEvent[]) {
+  const seen = new Set<string>()
+  return events
+    .map(event => ({ ...event, text: eventActionText(event) }))
+    .filter(event => event.text)
+    .filter(event => {
+      const key = `${event.hour}|${event.text.toLowerCase()}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    })
+}
+
 function extractStations(events: ShiftEvent[]) {
   return uniqueList(events.flatMap(event => event.text.match(/\bst\.?\s*\d+\b/gi) ?? []))
 }
@@ -342,26 +383,30 @@ function buildMachineNarrative(machine: string, events: ShiftEvent[], index: num
 </div>`
   }
 
-  const actions = actionEvents(events)
-  const labels = issueLabels(events)
-  const chronology = `<ul>${events.map(event => {
-    return `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`
-  }).join('')}</ul>`
-  const actionList = actions.length
-    ? `<ul>${actions.map(event => `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`).join('')}</ul>`
-    : '<p>W zapisach zmiany nie wskazano jednoznacznie szczegółowego opisu działań korygujących.</p>'
+  const actionItems = uniqueActionItems(actionEvents(events))
+  const issueItems = events
+    .map(event => ({ ...event, text: eventIssueText(event) }))
+    .filter(event => event.text)
+  const labels = issueLabels(issueItems.length ? issueItems : events)
+  const chronology = issueItems.length
+    ? `<ul>${issueItems.map(event => {
+      return `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`
+    }).join('')}</ul>`
+    : '<p>Wpisy z tej zmiany dotyczyły głównie działań operacyjnych; nie odnotowano odrębnego opisu przebiegu zakłócenia.</p>'
+  const actionList = actionItems.length
+    ? `<ul>${actionItems.map(event => `<li><strong>${escapeHtml(event.hour)}</strong>: ${escapeHtml(event.text)}</li>`).join('')}</ul>`
+    : '<p>W zapisach zmiany nie wskazano jednoznacznie szczegółowego opisu działań operacyjnych.</p>'
   const opening = labels.length
     ? `Na automacie odnotowano zakłócenia dotyczące obszaru: ${escapeHtml(labels.join(', '))}.`
     : 'W zapisach zmiany odnotowano informacje wymagające uwzględnienia w ocenie przebiegu produkcji.'
-
   return `<div class="mc-box ${machineClass}">
   <div class="mc-name">${escapeHtml(machine)}</div>
   <div class="mc-body">
     ${summaryLine}
     <p>${opening}</p>
-    <p class="sub-h">Przebieg operacyjny:</p>
+    <p class="sub-h">Przebieg zmiany:</p>
     ${chronology}
-    <p class="sub-h">Podjęte działania:</p>
+    <p class="sub-h">Działania operacyjne:</p>
     ${actionList}
     <p class="sub-h">Cel działań:</p>
     <p>${goalForEvents(events)}</p>
