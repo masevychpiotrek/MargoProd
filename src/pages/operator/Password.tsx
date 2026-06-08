@@ -73,6 +73,7 @@ export default function OperatorPassword() {
       const nextPath =
         profile?.role === 'admin' ? '/admin' :
         profile?.role === 'manager' ? '/manager' :
+        profile?.role === 'viewer' ? '/manager' :
         profile?.role === 'specialist' ? '/specialist' :
         '/operator'
       window.location.replace(nextPath)

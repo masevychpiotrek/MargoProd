@@ -78,8 +78,8 @@ function toneClasses(tone: string) {
 
 export default function SpecialistDashboard() {
   const { profile } = useAuthStore()
-  const readOnly = profile?.role === 'manager'
-  const canSeeAllHistory = profile?.role === 'manager' || profile?.role === 'admin'
+  const readOnly = profile?.role === 'manager' || profile?.role === 'viewer'
+  const canSeeAllHistory = profile?.role === 'manager' || profile?.role === 'admin' || profile?.role === 'viewer'
   const [reports, setReports] = useState<FailureRow[]>([])
   const [issues, setIssues] = useState<ProductionIssue[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -159,7 +159,7 @@ export default function SpecialistDashboard() {
   }, [load])
 
   useEffect(() => {
-    if (!profile?.id) return
+    if (!profile?.id || readOnly) return
     supabase
       .from('notifications')
       .update({ is_read: true, read_at: new Date().toISOString() })
@@ -167,9 +167,10 @@ export default function SpecialistDashboard() {
       .eq('type', 'failure_report')
       .eq('is_read', false)
       .then(() => undefined)
-  }, [profile?.id])
+  }, [profile?.id, readOnly])
 
   async function updateStatus(id: string, status: FailureStatus) {
+    if (readOnly) return
     const updates: Partial<FailureReport> = { status }
     if (status === 'acknowledged') {
       updates.acknowledged_at = new Date().toISOString()
@@ -194,6 +195,7 @@ export default function SpecialistDashboard() {
   }
 
   async function saveNotes(id: string) {
+    if (readOnly) return
     const entry = editNotes[id]
     if (!entry) return
     setEditNotes(prev => ({ ...prev, [id]: { ...prev[id], saving: true } }))
@@ -203,6 +205,7 @@ export default function SpecialistDashboard() {
   }
 
   function startEditNotes(r: FailureRow) {
+    if (readOnly) return
     setEditNotes(prev => ({ ...prev, [r.id]: { id: r.id, notes: r.resolution_notes ?? '', saving: false } }))
   }
 

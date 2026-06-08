@@ -111,6 +111,7 @@ function RoleRedirect() {
   const { profile } = useAuthStore()
   if (profile?.role === 'admin')      return <Navigate to="/admin" replace />
   if (profile?.role === 'manager')    return <Navigate to="/manager" replace />
+  if (profile?.role === 'viewer')     return <Navigate to="/manager" replace />
   if (profile?.role === 'specialist') return <Navigate to="/specialist" replace />
   return <Navigate to="/operator" replace />
 }
@@ -151,19 +152,19 @@ const router = createBrowserRouter([
       // ── MANAGER ──
       {
         path: 'manager',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
       },
       {
         path: 'manager/day-report',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerDayReport /></Wrap></RequireAuth>
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDayReport /></Wrap></RequireAuth>
       },
       {
         path: 'manager/failures',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><SpecialistDashboard /></Wrap></RequireAuth>
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><SpecialistDashboard /></Wrap></RequireAuth>
       },
       {
         path: 'manager/export',
-        element: <RequireAuth roles={['manager', 'admin']}><Wrap><ManagerExport /></Wrap></RequireAuth>
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerExport /></Wrap></RequireAuth>
       },
       // ── SPECIALIST ──
       {

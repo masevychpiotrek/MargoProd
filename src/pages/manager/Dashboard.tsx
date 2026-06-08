@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
+import { useAuthStore } from '@/stores/authStore'
 import { cn, efficiencyBg, efficiencyColor, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
@@ -216,7 +217,9 @@ function groupSuggestion(row: Omit<GroupRow, 'suggestion'>) {
 }
 
 export default function ManagerDashboard() {
+  const { profile } = useAuthStore()
   const { time, dateISO } = useClock()
+  const canEdit = profile?.role === 'manager' || profile?.role === 'admin'
   const [machines, setMachines] = useState<Machine[]>([])
   const [operators, setOperators] = useState<Pick<Profile, 'id' | 'full_name'>[]>([])
   const [activeShifts, setActiveShifts] = useState<ShiftWithContext[]>([])
@@ -957,6 +960,7 @@ export default function ManagerDashboard() {
   }, [dayReports, machineFilter, machines])
 
   const openEdit = (report: ReportWithContext) => {
+    if (!canEdit) return
     setEditing(report)
     setEditError('')
     setEditState({
@@ -975,6 +979,7 @@ export default function ManagerDashboard() {
   }
 
   const openShiftEdit = (shift: ShiftWithContext) => {
+    if (!canEdit) return
     setEditingShift(shift)
     setShiftEditState({
       operator1Id: shift.operator_1_id,
@@ -984,6 +989,7 @@ export default function ManagerDashboard() {
   }
 
   const saveShiftOperators = async () => {
+    if (!canEdit) return
     if (!editingShift || !shiftEditState) return
     if (!shiftEditState.operator1Id) {
       setShiftEditError('Wybierz pierwszego operatora.')
@@ -1049,6 +1055,7 @@ export default function ManagerDashboard() {
   }
 
   const saveEdit = async () => {
+    if (!canEdit) return
     if (!editing || !editState) return
     setSaving(true)
     setEditError('')
@@ -1094,6 +1101,7 @@ export default function ManagerDashboard() {
   }
 
   const deleteReport = async () => {
+    if (!canEdit) return
     if (!editing || !editState) return
     const reason = editState.reason.trim()
     if (!reason) {
@@ -1359,7 +1367,7 @@ export default function ManagerDashboard() {
                       </td>
                       <td className="py-2 px-3 text-xs text-navy-200 min-w-[220px]">{row.suggestion}</td>
                       <td className="py-2 px-3">
-                        {shift && <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openShiftEdit(shift)}>Operatorzy</button>}
+                        {canEdit && shift && <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openShiftEdit(shift)}>Operatorzy</button>}
                       </td>
                     </tr>
                   )
@@ -1388,9 +1396,11 @@ export default function ManagerDashboard() {
                 <div className="text-sm text-navy-200 mt-2">
                   {[shift.operator_1?.full_name, shift.operator_2?.full_name].filter(Boolean).join(' / ') || 'Brak operatorow'}
                 </div>
-                <button className="btn-secondary mt-3 w-full text-xs py-1.5" onClick={() => openShiftEdit(shift)}>
-                  Koryguj operatorow
-                </button>
+                {canEdit && (
+                  <button className="btn-secondary mt-3 w-full text-xs py-1.5" onClick={() => openShiftEdit(shift)}>
+                    Koryguj operatorow
+                  </button>
+                )}
               </div>
             ))}
           </div>
@@ -1753,7 +1763,7 @@ export default function ManagerDashboard() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Data', 'Do godz.', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Komentarz wyniku', 'Komentarz odrzutu', 'Akcja'].map(header => (
+                    {['Data', 'Do godz.', 'Maszyna', 'Zmiana', 'Operator', 'W EPQ', 'Szt', 'Odrzut', 'Komentarz wyniku', 'Komentarz odrzutu', ...(canEdit ? ['Akcja'] : [])].map(header => (
                   <th key={header} className="text-left py-2 px-3 text-xs font-bold text-navy-400 uppercase tracking-wider whitespace-nowrap">{header}</th>
                 ))}
               </tr>
@@ -1780,9 +1790,11 @@ export default function ManagerDashboard() {
                     <td className={cn('py-2 px-3 font-mono', reject > 5 ? 'text-red-400' : 'text-green-400')}>{report.reject_count} ({reject}%)</td>
                     <td className="py-2 px-3 text-xs text-navy-300 max-w-[220px] truncate">{report.downtime_reason || '-'}</td>
                     <td className="py-2 px-3 text-xs text-navy-300 max-w-[220px] truncate">{report.reject_reason || '-'}</td>
-                    <td className="py-2 px-3">
-                      <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openEdit(report)}>Edytuj</button>
-                    </td>
+                      {canEdit && (
+                        <td className="py-2 px-3">
+                          <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openEdit(report)}>Edytuj</button>
+                        </td>
+                      )}
                   </tr>
                 )
               })}

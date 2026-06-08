@@ -50,6 +50,14 @@ const NAV_MANAGER = [
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export }
 ]
 
+const NAV_VIEWER = [
+  { to: '/manager',              label: 'Live produkcja',   icon: Icons.live,    end: true },
+  { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
+  { to: '/manager/failures',      label: 'Awarie i technik', icon: Icons.failure },
+  { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
+  { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
+]
+
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
   { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
@@ -132,6 +140,7 @@ export default function AppLayout() {
   const navItems = profile?.role === 'admin'      ? NAV_ADMIN
     : profile?.role === 'specialist' ? NAV_SPECIALIST
     : profile?.role === 'manager'    ? NAV_MANAGER
+    : profile?.role === 'viewer'     ? NAV_VIEWER
     : NAV_OPERATOR
   const visibleActiveShift = profile?.role === 'operator' &&
     !shiftLoading &&
@@ -247,7 +256,7 @@ export default function AppLayout() {
         <nav className="flex-1 py-3 px-2 overflow-y-auto min-h-0">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
-              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'specialist' ? 'Specjalista' : 'Operator'}
+              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : 'Operator'}
             </div>
           )}
           {navItems.map(item => (
