@@ -5,15 +5,14 @@ import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
 import { useAuthStore } from '@/stores/authStore'
 import LoadingScreen from '@/components/shared/LoadingScreen'
-import { supabase } from '@/lib/supabase'
 
 const schema = z.object({
-  email: z.string().email('Podaj prawidłowy adres e-mail'),
-  password: z.string().min(1, 'Hasło jest wymagane')
+  email: z.string().email('Podaj prawidlowy adres e-mail'),
+  password: z.string().min(1, 'Haslo jest wymagane')
 })
+
 type FormData = z.infer<typeof schema>
 type LoginMode = 'password' | 'rfid'
-type RfidLookup = { email: string; full_name: string; role: string }
 
 const HexLogo = () => (
   <svg width="32" height="32" viewBox="0 0 22 22" fill="none">
@@ -28,32 +27,46 @@ function shouldSkipIntro() {
   return window.matchMedia('(max-width: 1024px), (pointer: coarse)').matches
 }
 
+function initials(name?: string) {
+  return (name || '?')
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map(part => part[0]?.toUpperCase())
+    .join('') || '?'
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
-  const { signIn } = useAuthStore()
+  const { signIn, signInWithRfid } = useAuthStore()
   const [serverError, setServerError] = useState<string | null>(null)
   const [submitting, setSubmitting] = useState(false)
   const [loginMode, setLoginMode] = useState<LoginMode>('password')
   const [rfidCode, setRfidCode] = useState('')
-  const [rfidUser, setRfidUser] = useState<RfidLookup | null>(null)
+  const [rfidName, setRfidName] = useState('')
   const [rfidStatus, setRfidStatus] = useState<'idle' | 'reading' | 'found' | 'error'>('idle')
   const [rfidError, setRfidError] = useState('')
   const rfidInputRef = useRef<HTMLInputElement | null>(null)
-  const passwordInputRef = useRef<HTMLInputElement | null>(null)
   const [showForm, setShowForm] = useState(() =>
     shouldSkipIntro() || !!sessionStorage.getItem('ml-intro-shown')
   )
 
-  const { register, handleSubmit, setValue, formState: { errors } } = useForm<FormData>({
+  const { register, handleSubmit, formState: { errors } } = useForm<FormData>({
     resolver: zodResolver(schema)
   })
-  const passwordField = register('password')
 
   useEffect(() => {
-    if (loginMode !== 'rfid') return
+    if (loginMode !== 'rfid' || rfidStatus === 'found') return
     const timer = window.setTimeout(() => rfidInputRef.current?.focus(), 100)
     return () => window.clearTimeout(timer)
   }, [loginMode, rfidStatus])
+
+  const resetRfid = () => {
+    setRfidCode('')
+    setRfidName('')
+    setRfidError('')
+    setRfidStatus('idle')
+  }
 
   const onSubmit = async (data: FormData) => {
     if (submitting) return
@@ -73,27 +86,24 @@ export default function LoginPage() {
 
   const handleRfidLookup = async (rawCode = rfidCode) => {
     const code = rawCode.trim()
-    if (!code || submitting) return
+    if (!code || submitting || rfidStatus === 'reading') return
     setRfidStatus('reading')
     setRfidError('')
-    setRfidUser(null)
+    setRfidName('')
+
     try {
-      const { data, error } = await supabase.rpc('lookup_rfid_login', { p_rfid_uid: code })
-      if (error) throw error
-      const found = Array.isArray(data) ? data[0] as RfidLookup | undefined : undefined
-      if (!found?.email) {
+      const { error, fullName } = await signInWithRfid(code)
+      if (error) {
         setRfidStatus('error')
-        setRfidError('Nieznany identyfikator RFID.')
+        setRfidError(error)
         setRfidCode('')
         window.setTimeout(() => rfidInputRef.current?.focus(), 100)
         return
       }
-      setValue('email', found.email, { shouldValidate: true })
-      setRfidUser(found)
+
+      setRfidName(fullName || '')
       setRfidStatus('found')
-      window.setTimeout(() => {
-        passwordInputRef.current?.focus()
-      }, 100)
+      window.setTimeout(() => navigate('/', { replace: true }), 650)
     } catch (e) {
       setRfidStatus('error')
       setRfidError(e instanceof Error ? e.message : 'Blad odczytu RFID.')
@@ -102,7 +112,6 @@ export default function LoginPage() {
     }
   }
 
-  // Najpierw animacja — po 14s pojawia się formularz
   if (!showForm) {
     return <LoadingScreen onLogin={() => {
       sessionStorage.setItem('ml-intro-shown', '1')
@@ -147,7 +156,9 @@ export default function LoginPage() {
         }}>
           <div className="mb-6">
             <h2 className="text-xl font-semibold text-white">Logowanie</h2>
-            <p className="text-sm mt-1" style={{ color: '#6b7f99' }}>Wpisz e-mail i hasło aby kontynuować</p>
+            <p className="text-sm mt-1" style={{ color: '#6b7f99' }}>
+              {loginMode === 'rfid' ? 'Przyloz identyfikator, aby wejsc do systemu' : 'Wpisz e-mail i haslo, aby kontynuowac'}
+            </p>
           </div>
 
           <div className="grid grid-cols-2 gap-2 mb-5 rounded-xl p-1" style={{ background: '#0d1117', border: '1px solid #263145' }}>
@@ -155,10 +166,7 @@ export default function LoginPage() {
               type="button"
               onClick={() => {
                 setLoginMode('password')
-                setRfidUser(null)
-                setRfidCode('')
-                setRfidError('')
-                setRfidStatus('idle')
+                resetRfid()
               }}
               className="rounded-lg py-2 text-sm font-bold transition-all"
               style={{
@@ -173,9 +181,7 @@ export default function LoginPage() {
               type="button"
               onClick={() => {
                 setLoginMode('rfid')
-                setRfidCode('')
-                setRfidError('')
-                setRfidStatus('idle')
+                resetRfid()
               }}
               className="rounded-lg py-2 text-sm font-bold transition-all"
               style={{
@@ -189,29 +195,38 @@ export default function LoginPage() {
           </div>
 
           {loginMode === 'rfid' && (
-            <div className="mb-5 rounded-2xl p-5 text-center" style={{
+            <div className="overflow-hidden rounded-2xl p-6 text-center" style={{
               background: 'linear-gradient(180deg, rgba(201,168,76,0.10), rgba(13,17,23,0.45))',
               border: '1px solid rgba(201,168,76,0.25)'
             }}>
-              <div className="relative mx-auto mb-4 flex h-24 w-24 items-center justify-center">
-                <div className="absolute inset-0 rounded-full animate-ping" style={{ background: 'rgba(201,168,76,0.12)' }} />
-                <div className="absolute inset-3 rounded-full" style={{ border: '1px solid rgba(201,168,76,0.25)' }} />
-                <div className="relative flex h-16 w-16 items-center justify-center rounded-2xl" style={{
-                  background: rfidStatus === 'found' ? 'rgba(34,197,94,0.16)' : '#111827',
-                  border: `1px solid ${rfidStatus === 'found' ? 'rgba(34,197,94,0.45)' : 'rgba(201,168,76,0.35)'}`,
-                  color: rfidStatus === 'found' ? '#4ade80' : '#c9a84c'
+              <div className="relative mx-auto mb-5 flex h-32 w-32 items-center justify-center">
+                <div className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(circle, rgba(201,168,76,0.18), transparent 68%)' }} />
+                {rfidStatus !== 'found' && <div className="absolute inset-2 rounded-full animate-ping" style={{ border: '1px solid rgba(201,168,76,0.30)' }} />}
+                <div className="absolute inset-5 rounded-full" style={{ border: '1px solid rgba(201,168,76,0.22)' }} />
+                <div className="absolute inset-x-4 h-px animate-pulse" style={{ background: 'linear-gradient(90deg, transparent, rgba(201,168,76,0.85), transparent)' }} />
+                <div className="relative flex h-20 w-20 items-center justify-center rounded-full shadow-2xl" style={{
+                  background: rfidStatus === 'found'
+                    ? 'linear-gradient(135deg, rgba(34,197,94,0.28), rgba(13,17,23,0.95))'
+                    : 'linear-gradient(135deg, rgba(201,168,76,0.18), rgba(13,17,23,0.95))',
+                  border: `1px solid ${rfidStatus === 'found' ? 'rgba(74,222,128,0.55)' : 'rgba(201,168,76,0.45)'}`,
+                  color: rfidStatus === 'found' ? '#4ade80' : '#c9a84c',
+                  boxShadow: rfidStatus === 'found' ? '0 0 38px rgba(34,197,94,0.18)' : '0 0 38px rgba(201,168,76,0.14)'
                 }}>
-                  <svg width="34" height="34" viewBox="0 0 24 24" fill="none">
-                    <rect x="5" y="3" width="14" height="18" rx="3" stroke="currentColor" strokeWidth="1.7"/>
-                    <path d="M9 8h6M9 12h6M9 16h3" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round"/>
-                  </svg>
+                  {rfidStatus === 'found' ? (
+                    <span className="text-2xl font-black tracking-wide">{initials(rfidName)}</span>
+                  ) : (
+                    <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
+                      <path d="M7 8.5a7 7 0 010 7M4.5 6a10.5 10.5 0 010 12M17 8.5a7 7 0 010 7M19.5 6a10.5 10.5 0 010 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
+                      <rect x="9" y="6" width="6" height="12" rx="2" stroke="currentColor" strokeWidth="1.6"/>
+                    </svg>
+                  )}
                 </div>
               </div>
-              <div className="font-bold text-white">
-                {rfidStatus === 'found' ? `Witaj, ${rfidUser?.full_name ?? 'uzytkowniku'}` : 'Przyloz identyfikator RFID'}
+              <div className="text-2xl font-black text-white">
+                {rfidStatus === 'found' ? `Witaj, ${rfidName || 'uzytkowniku'}` : rfidStatus === 'reading' ? 'Weryfikacja...' : 'Przyloz identyfikator'}
               </div>
-              <div className="mt-1 text-sm" style={{ color: rfidStatus === 'found' ? '#4ade80' : '#6b7f99' }}>
-                {rfidUser ? 'Identyfikator przyjety. Wpisz haslo, aby kontynuowac.' : 'Po odczycie przejdziesz do logowania haslem'}
+              <div className="mt-2 text-sm" style={{ color: rfidStatus === 'found' ? '#4ade80' : '#8aa0c2' }}>
+                {rfidStatus === 'found' ? 'Dostep potwierdzony. Logowanie...' : 'System czeka na bezpieczny odczyt RFID'}
               </div>
               <input
                 ref={rfidInputRef}
@@ -230,16 +245,18 @@ export default function LoginPage() {
                 autoComplete="off"
               />
               {rfidStatus !== 'found' && (
-                <div className="mt-4 rounded-xl px-4 py-3 text-sm" style={{ background: '#0d1117', border: '1px solid #263145', color: '#8899bb' }}>
-                  Oczekiwanie na identyfikator...
+                <div className="mt-5 flex items-center justify-center gap-2 text-xs font-bold uppercase tracking-[0.28em]" style={{ color: '#c9a84c' }}>
+                  <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: '#c9a84c' }} />
+                  Oczekiwanie
+                  <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: '#c9a84c', animationDelay: '150ms' }} />
                 </div>
               )}
               {rfidError && <div className="mt-3 text-sm text-red-400">{rfidError}</div>}
             </div>
           )}
 
-          <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-            {loginMode === 'password' ? (
+          {loginMode === 'password' && (
+            <form noValidate onSubmit={handleSubmit(onSubmit)} className="space-y-5">
               <div>
                 <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
                   Adres e-mail
@@ -258,73 +275,69 @@ export default function LoginPage() {
                   <p className="text-red-400 text-xs mt-1.5">{errors.email.message}</p>
                 )}
               </div>
-            ) : (
-              <input {...register('email')} type="hidden" />
-            )}
 
-            <div>
-              <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
-                Hasło
-              </label>
-              <input
-                {...passwordField}
-                ref={e => {
-                  passwordField.ref(e)
-                  passwordInputRef.current = e
-                }}
-                type="password"
-                autoComplete="current-password"
-                placeholder="••••••••••"
-                className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
-                style={{ background: '#0d1117', border: '1px solid #263145' }}
-                onFocus={e => e.target.style.borderColor = '#c9a84c'}
-                onBlur={e => e.target.style.borderColor = '#263145'}
-              />
-              {errors.password && (
-                <p className="text-red-400 text-xs mt-1.5">{errors.password.message}</p>
-              )}
-            </div>
-
-            {serverError && (
-              <div role="alert" className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
-                {serverError}
+              <div>
+                <label className="block text-xs font-bold uppercase tracking-wider mb-2" style={{ color: '#8899bb' }}>
+                  Haslo
+                </label>
+                <input
+                  {...register('password')}
+                  type="password"
+                  autoComplete="current-password"
+                  placeholder="••••••••••"
+                  className="w-full rounded-xl px-4 py-3 text-white placeholder-navy-400 transition-all outline-none"
+                  style={{ background: '#0d1117', border: '1px solid #263145' }}
+                  onFocus={e => e.target.style.borderColor = '#c9a84c'}
+                  onBlur={e => e.target.style.borderColor = '#263145'}
+                />
+                {errors.password && (
+                  <p className="text-red-400 text-xs mt-1.5">{errors.password.message}</p>
+                )}
               </div>
-            )}
 
-            <button
-              type="submit"
-              disabled={submitting || (loginMode === 'rfid' && rfidStatus !== 'found')}
-              className="w-full font-semibold py-3.5 rounded-xl transition-all mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
-              style={{
-                background: 'linear-gradient(135deg, #c9a84c, #9a7a2e)',
-                color: '#0d1117',
-                boxShadow: '0 4px 20px rgba(201,168,76,0.25)'
-              }}
-            >
-              {submitting ? (
-                <span className="flex items-center justify-center gap-2">
-                  <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
-                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
-                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
-                  </svg>
-                  Logowanie...
-                </span>
-              ) : 'Zaloguj się'}
-            </button>
-          </form>
+              {serverError && (
+                <div role="alert" className="bg-red-500/10 border border-red-500/30 rounded-xl px-4 py-3 text-red-400 text-sm">
+                  {serverError}
+                </div>
+              )}
 
-          <div className="mt-6 pt-5" style={{ borderTop: '1px solid #1e2736' }}>
-            <p className="text-xs text-center" style={{ color: '#4a5568' }}>
-              Domyślne hasło: <span className="font-mono" style={{ color: '#8899bb' }}>Margomed123</span>
-            </p>
-            <p className="text-xs text-center mt-1" style={{ color: '#374151' }}>
-              Zmień hasło po pierwszym logowaniu w ustawieniach profilu
-            </p>
-          </div>
+              <button
+                type="submit"
+                disabled={submitting}
+                className="w-full font-semibold py-3.5 rounded-xl transition-all mt-2 disabled:opacity-50 disabled:cursor-not-allowed"
+                style={{
+                  background: 'linear-gradient(135deg, #c9a84c, #9a7a2e)',
+                  color: '#0d1117',
+                  boxShadow: '0 4px 20px rgba(201,168,76,0.25)'
+                }}
+              >
+                {submitting ? (
+                  <span className="flex items-center justify-center gap-2">
+                    <svg className="animate-spin h-4 w-4" viewBox="0 0 24 24" fill="none">
+                      <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"/>
+                      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/>
+                    </svg>
+                    Logowanie...
+                  </span>
+                ) : 'Zaloguj sie'}
+              </button>
+            </form>
+          )}
+
+          {loginMode === 'password' && (
+            <div className="mt-6 pt-5" style={{ borderTop: '1px solid #1e2736' }}>
+              <p className="text-xs text-center" style={{ color: '#4a5568' }}>
+                Domyslne haslo: <span className="font-mono" style={{ color: '#8899bb' }}>Margomed123</span>
+              </p>
+              <p className="text-xs text-center mt-1" style={{ color: '#374151' }}>
+                Zmien haslo po pierwszym logowaniu w ustawieniach profilu
+              </p>
+            </div>
+          )}
         </div>
 
         <p className="text-center text-xs mt-6" style={{ color: '#374151' }}>
-          MargoLine MES v1.0 · Margomed
+          MargoLine MES v1.0 - Margomed
         </p>
       </div>
     </div>

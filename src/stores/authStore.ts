@@ -11,6 +11,7 @@ interface AuthState {
   isInitialized: boolean
   initialize: () => Promise<void>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
+  signInWithRfid: (rfidUid: string) => Promise<{ error: string | null; fullName?: string }>
   signOut: () => Promise<void>
   refreshProfile: () => Promise<void>
   hasRole: (role: UserRole | UserRole[]) => boolean
@@ -177,6 +178,68 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       return { error: null }
     } catch (e: unknown) {
       return { error: e instanceof Error ? mapAuthError(e.message) : 'Blad logowania.' }
+    } finally {
+      set({ isLoading: false })
+    }
+  },
+
+  signInWithRfid: async (rfidUid) => {
+    const cleanUid = rfidUid.trim()
+    if (!cleanUid) return { error: 'Nie odczytano identyfikatora RFID.' }
+
+    set({
+      isLoading: true,
+      user: null,
+      session: null,
+      profile: null,
+      isInitialized: true
+    })
+
+    try {
+      const { data: loginData, error: functionError } = await supabase.functions.invoke<{
+        email: string
+        token_hash: string
+        full_name: string
+        role: string
+        error?: string
+      }>('rfid-login', {
+        body: { rfid_uid: cleanUid }
+      })
+
+      if (functionError) return { error: mapAuthError(functionError.message) }
+      if (!loginData?.token_hash) return { error: loginData?.error || 'Nieznany identyfikator RFID.' }
+
+      const { data, error } = await supabase.auth.verifyOtp({
+        type: 'magiclink',
+        token_hash: loginData.token_hash
+      })
+      if (error) return { error: mapAuthError(error.message) }
+      if (!data.session) return { error: 'Brak sesji po logowaniu RFID.' }
+      if (!data.user) return { error: 'Brak uzytkownika po logowaniu RFID.' }
+
+      const profile = await loadProfile(data.user.id)
+      if (!profile) {
+        await supabase.auth.signOut({ scope: 'local' })
+        return { error: 'Konto istnieje, ale nie ma profilu w systemie. Sprawdz panel admina.' }
+      }
+
+      if (!isUsableProfile(profile)) {
+        await supabase.auth.signOut({ scope: 'local' })
+        return { error: 'Konto jest nieaktywne. Skontaktuj sie z administratorem.' }
+      }
+
+      set({
+        user: data.user,
+        session: data.session,
+        profile,
+        isLoading: false,
+        isInitialized: true
+      })
+
+      await logAudit('login', 'profiles', profile.id, undefined, { method: 'rfid' })
+      return { error: null, fullName: profile.full_name }
+    } catch (e: unknown) {
+      return { error: e instanceof Error ? mapAuthError(e.message) : 'Blad logowania RFID.' }
     } finally {
       set({ isLoading: false })
     }
