@@ -8,7 +8,7 @@ import { useTestMode } from '@/hooks/useTestMode'
 import { efficiencyColor, efficiencyBg, formatHourBlock, cn, SHIFT_HOURS, canEnterHourlyReport } from '@/lib/utils'
 import type { FailureReport, HourlyReport, Profile, Shift, ShiftType } from '@/types/database'
 
-const TARGET = 2100
+const TARGET = 3200
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 
 type HandoverReport = HourlyReport & {

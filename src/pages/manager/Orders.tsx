@@ -291,7 +291,7 @@ export default function ManagerOrders() {
 
     const runtimeMin = toInt(reportEdit.runtime_min)
     const accountableMin = runtimeMin + toInt(reportEdit.ready_min) + toInt(reportEdit.alarm_min) + toInt(reportEdit.downtime_min) + toInt(reportEdit.failure_min)
-    const ratePerHour = machines.find(machine => machine.id === selected?.machine_id)?.target_per_hour ?? 2100
+    const ratePerHour = machines.find(machine => machine.id === selected?.machine_id)?.target_per_hour ?? 3200
     const payload = {
       good_count: toInt(reportEdit.good_count),
       reject_count: toInt(reportEdit.reject_count),

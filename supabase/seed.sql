@@ -7,8 +7,8 @@
 -- MASZYNY
 -- ============================================================
 INSERT INTO machines (name, code, department, target_per_hour) VALUES
-  ('Automat 3', 'A3', 'Montaż Automatyczny', 2100),
-  ('Automat 4', 'A4', 'Montaż Automatyczny', 2100)
+  ('Automat 3', 'A3', 'Montaż Automatyczny', 3200),
+  ('Automat 4', 'A4', 'Montaż Automatyczny', 3200)
 ON CONFLICT (code) DO NOTHING;
 
 -- ============================================================

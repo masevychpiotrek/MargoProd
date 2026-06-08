@@ -3,7 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { efficiencyColor, cn } from '@/lib/utils'
 import type { HourlyReport, Machine } from '@/types/database'
 
-const TARGET = 2100
+const TARGET = 3200
 
 interface ReportData {
   reports: HourlyReport[]

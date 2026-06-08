@@ -55,7 +55,7 @@ CREATE TABLE machines (
   name            TEXT NOT NULL UNIQUE,
   code            TEXT NOT NULL UNIQUE,
   department      TEXT NOT NULL DEFAULT 'Montaż Automatyczny',
-  target_per_hour INT NOT NULL DEFAULT 2100,
+  target_per_hour INT NOT NULL DEFAULT 3200,
   is_active       BOOLEAN NOT NULL DEFAULT true,
   description     TEXT,
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW(),
@@ -69,7 +69,7 @@ CREATE TABLE machines (
 CREATE TABLE production_targets (
   id              UUID PRIMARY KEY DEFAULT uuid_generate_v4(),
   machine_id      UUID NOT NULL REFERENCES machines(id),
-  target_per_hour INT NOT NULL DEFAULT 2100,
+  target_per_hour INT NOT NULL DEFAULT 3200,
   valid_from      DATE NOT NULL,
   valid_to        DATE,
   note            TEXT,
@@ -135,7 +135,7 @@ CREATE TABLE hourly_reports (
   good_count      INT NOT NULL DEFAULT 0,   -- przyrost dobrych
   reject_count    INT NOT NULL DEFAULT 0,   -- przyrost złych
   total_count     INT,                       -- licznik łączny (opcjonalnie)
-  target          INT NOT NULL DEFAULT 2100,
+  target          INT NOT NULL DEFAULT 3200,
   efficiency_pct  NUMERIC GENERATED ALWAYS AS (
     CASE WHEN target > 0
     THEN ROUND(good_count::NUMERIC / target * 100, 1)

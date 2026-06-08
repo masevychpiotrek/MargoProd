@@ -8,7 +8,7 @@ export default function AdminTargets() {
   const [loading, setLoading] = useState(true)
   const [msg, setMsg] = useState('')
   const [showAdd, setShowAdd] = useState(false)
-  const [form, setForm] = useState({ machine_id: '', target_per_hour: 2100, valid_from: new Date().toISOString().split('T')[0], valid_to: '', note: '' })
+  const [form, setForm] = useState({ machine_id: '', target_per_hour: 3200, valid_from: new Date().toISOString().split('T')[0], valid_to: '', note: '' })
 
   useEffect(() => { load() }, [])
 
@@ -55,7 +55,7 @@ export default function AdminTargets() {
       {msg && <div className="bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3 text-green-400 text-sm">{msg}</div>}
 
       <div className="bg-amber-500/10 border border-amber-500/20 rounded-xl p-4 text-sm text-amber-400">
-        ℹ Domyślny target to <strong>2100 szt/h</strong> ustawiony bezpośrednio na maszynie. Tutaj możesz dodać tymczasowe nadpisanie dla konkretnego okresu.
+        ℹ Domyślny target to <strong>3200 szt/h</strong> ustawiony bezpośrednio na maszynie. Tutaj możesz dodać tymczasowe nadpisanie dla konkretnego okresu.
       </div>
 
       <div className="card overflow-hidden">

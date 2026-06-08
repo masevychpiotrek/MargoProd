@@ -8,7 +8,7 @@ import { Bar, Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
 
-const TARGET = 2100
+const TARGET = 3200 // manufacturer EPQ base
 const SHIFTS = ['I', 'II', 'III'] as const
 
 const CHART_OPTS = {
@@ -180,8 +180,8 @@ function runtimeTarget(ratePerHour: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(ratePerHour * runtimeMin / 60) : 0
 }
 
-function reportTarget(report: ReportWithContext, machineRate: number) {
-  return report.target && report.target > 0 ? report.target : machineRate
+function reportTarget(_report: ReportWithContext, _machineRate: number) {
+  return TARGET
 }
 
 function reportWepq(report: ReportWithContext, ratePerHour: number) {
@@ -256,7 +256,7 @@ export default function ManagerDashboard() {
     [machines]
   )
   const machineTargetById = useMemo(
-    () => Object.fromEntries(machines.map(machine => [machine.id, machine.target_per_hour])),
+    () => Object.fromEntries(machines.map(machine => [machine.id, TARGET])),
     [machines]
   )
 
@@ -891,7 +891,7 @@ export default function ManagerDashboard() {
     const forecastTarget = currentTarget > 0 && currentGood > 0
       ? Math.round(currentTarget * (forecastGood / currentGood))
       : Math.round((machineFilter === 'all'
-        ? machines.reduce((sum, machine) => sum + machine.target_per_hour, 0)
+        ? machines.reduce((sum) => sum + TARGET, 0)
         : machineTargetById[machineFilter] ?? TARGET) * 8)
 
     const backtests = historicalDays

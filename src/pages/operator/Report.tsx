@@ -8,7 +8,8 @@ import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
-const TARGET = 2100
+const TARGET = 3200 // manufacturer EPQ base
+const EXPLANATION_TARGET = 2100 // operational threshold that requires an operator explanation
 const TEST_SLOTS = Array.from({ length: 20 }, (_, i) => i)
 const ORDERS_ENABLED = false
 
@@ -28,7 +29,7 @@ function calcEfficiency(good: number, target: number) {
 
 function getRobotHint(errors: string[]) {
   const first = errors[0]?.toLowerCase() ?? ''
-  if (first.includes('target')) return 'Produkcja jest pod targetem. Dopisz krotko dlaczego, zeby kierownik nie musial zgadywac.'
+  if (first.includes('progu') || first.includes('wyjasnienia')) return 'Wynik jest ponizej progu wyjasnienia. Dopisz krotko przyczyne, zeby kierownik nie musial zgadywac.'
   if (first.includes('odrzut')) return 'Odrzut przekroczyl 5%. Dopisz krotko przyczyne, zeby bylo wiadomo co sie stalo.'
   if (first.includes('istnieje')) return 'Ten przedzial jest juz zapisany. Wybierz kolejna godzine z listy.'
   if (first.includes('male')) return 'Liczniki sa narastajace. Nowy stan nie moze byc mniejszy od poprzedniego.'
@@ -65,7 +66,7 @@ function errorTargetSelector(error: string) {
   if (text.includes('blok') || text.includes('godzin') || text.includes('raport za')) return '[data-error-target="hour"]'
   if (text.includes('zlecen')) return '[data-error-target="order"]'
   if (text.includes('odrzut')) return '[data-error-target="reject"]'
-  if (text.includes('przyczyna') || text.includes('ponizej normy') || text.includes('poniżej normy')) return '[data-error-target="reason"]'
+  if (text.includes('przyczyna') || text.includes('ponizej normy') || text.includes('poniżej normy') || text.includes('progu wyjasnienia')) return '[data-error-target="reason"]'
   if (text.includes('licznik dobrych') || text.includes('licznik odrzutu') || text.includes('przyrost') || text.includes('normy')) return '[data-error-target="production"]'
   return '[data-error-target="errors"]'
 }
@@ -146,7 +147,7 @@ export default function OperatorReport() {
   const { display: countdown, isUrgent } = useHourCountdown()
   const { now, hour } = useClock()
   const shiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
-  const activeTarget = activeMachine?.target_per_hour ?? TARGET
+  const activeTarget = TARGET
 
   const [counterGood,    setCounterGood]    = useState('')
   const [counterReject,  setCounterReject]  = useState('')
@@ -321,7 +322,8 @@ export default function OperatorReport() {
   const reportTarget = activeTarget
   const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
-  const belowTarget = !testMode && reportTarget > 0 && incGood > 0 && incGood < reportTarget
+  const explanationTarget = EXPLANATION_TARGET
+  const belowTarget = !testMode && explanationTarget > 0 && incGood > 0 && incGood < explanationTarget
   const rejectAboveLimit = !testMode && rejectPct > 5
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour && r.id !== editingReportId)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
@@ -406,7 +408,7 @@ export default function OperatorReport() {
     }
     if (mustFillPreviousHour && firstMissingHour !== undefined) errs.push(`Najpierw wpisz zalegly blok ${formatHourBlock(firstMissingHour)}`)
     if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
-    if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej normy: przyrost ${incGood} szt przy normie ${reportTarget} szt`)
+    if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej progu wyjasnienia: przyrost ${incGood} szt przy progu ${explanationTarget} szt`)
     if (rejectAboveLimit && !rejectReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
@@ -450,7 +452,7 @@ export default function OperatorReport() {
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: null, counter_ready: null, counter_alarm: null,
         target: reportTarget,
-        downtime_reason: downtimeReason || (testMode && reportTarget > 0 && incGood < reportTarget ? 'Tryb testowy' : null),
+        downtime_reason: downtimeReason || (testMode && explanationTarget > 0 && incGood < explanationTarget ? 'Tryb testowy' : null),
         reject_reason: rejectReason || null,
         notes: notes || null,
         status: 'submitted',
@@ -712,7 +714,7 @@ export default function OperatorReport() {
                 <div className={cn('card-title', belowTarget && 'text-red-300')}>Komentarz do wyniku</div>
                 <div className="card-sub">
                   {belowTarget
-                    ? `Wymagane, bo wynik jest ponizej normy: ${incGood.toLocaleString('pl-PL')} / ${reportTarget.toLocaleString('pl-PL')} szt`
+                    ? `Wymagane, bo wynik jest ponizej progu wyjasnienia: ${incGood.toLocaleString('pl-PL')} / ${explanationTarget.toLocaleString('pl-PL')} szt`
                     : 'Opcjonalnie, gdy wynik wymaga wyjasnienia'}
                 </div>
               </div>
@@ -734,7 +736,7 @@ export default function OperatorReport() {
             />
             {belowTarget && !downtimeReason.trim() && (
               <div className="mt-2 text-xs font-semibold text-red-300">
-                Bez komentarza do slabego wyniku raport nie zostanie zapisany.
+                Bez komentarza do wyniku ponizej progu raport nie zostanie zapisany.
               </div>
             )}
           </div>
