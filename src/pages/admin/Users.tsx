@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { ROLE_LABELS, cn } from '@/lib/utils'
 import type { Profile, UserRole } from '@/types/database'
+import RFIDModal from '@/components/admin/RFIDModal'
 
 interface UserRow extends Profile {
   email?: string
@@ -25,6 +26,7 @@ export default function AdminUsers() {
   const [search, setSearch] = useState('')
   const [showAdd, setShowAdd] = useState(false)
   const [resetUser, setResetUser] = useState<UserRow | null>(null)
+  const [rfidUser, setRfidUser] = useState<UserRow | null>(null)
   const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -124,6 +126,14 @@ export default function AdminUsers() {
     setTimeout(() => setMsg(''), 3000)
   }
 
+  const handleRfidSaved = (userId: string, rfidUid: string | null) => {
+    setUsers(prev => prev.map(user =>
+      user.id === userId ? { ...user, rfid_uid: rfidUid } : user
+    ))
+    setMsg(rfidUid ? 'Karta RFID zostala przypisana.' : 'Karta RFID zostala usunieta.')
+    setTimeout(() => setMsg(''), 3000)
+  }
+
   const roleColor = (role: UserRole) => ({
     admin:    'bg-purple-500/15 text-purple-400 border-purple-500/20',
     manager:  'bg-blue-500/15 text-blue-400 border-blue-500/20',
@@ -161,14 +171,14 @@ export default function AdminUsers() {
           <table className="w-full">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Użytkownik','Rola','Status','Haslo','Akcje'].map(h => (
+                {['Uzytkownik','Rola','Status','Haslo','RFID','Akcje'].map(h => (
                   <th key={h} className="text-left py-3 px-4 text-xs font-bold text-navy-400 uppercase tracking-wider">{h}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {loading ? (
-                <tr><td colSpan={5} className="text-center py-8 text-navy-500">Ładowanie...</td></tr>
+                <tr><td colSpan={6} className="text-center py-8 text-navy-500">Ladowanie...</td></tr>
               ) : filtered.map(u => (
                 <tr key={u.id} className="border-b border-navy-800 hover:bg-navy-800/40">
                   <td className="py-3 px-4">
@@ -211,6 +221,22 @@ export default function AdminUsers() {
                     )}>
                       {u.must_change_password ? 'Wymagana zmiana' : 'OK'}
                     </span>
+                  </td>
+                  <td className="py-3 px-4">
+                    <button
+                      onClick={() => setRfidUser(u)}
+                      title={u.rfid_uid ? `UID: ${u.rfid_uid}` : 'Brak karty RFID'}
+                      className={cn(
+                        'inline-flex items-center gap-2 rounded-lg border px-3 py-1.5 text-xs font-bold transition-all',
+                        u.rfid_uid
+                          ? 'border-green-500/25 bg-green-500/10 text-green-400 hover:bg-green-500/15'
+                          : 'border-navy-600 bg-navy-900 text-navy-400 hover:border-brand/40 hover:text-brand'
+                      )}
+                    >
+                      <span className={cn('h-2 w-2 rounded-full', u.rfid_uid ? 'bg-green-400' : 'bg-navy-500')} />
+                      {u.rfid_uid ? 'RFID' : 'Dodaj RFID'}
+                    </button>
+                    {u.rfid_uid && <div className="mt-1 max-w-[120px] truncate font-mono text-[10px] text-navy-500">{u.rfid_uid}</div>}
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
@@ -305,6 +331,17 @@ export default function AdminUsers() {
           </div>
         </div>
       )}
+
+      {rfidUser && (
+        <RFIDModal
+          userId={rfidUser.id}
+          userName={rfidUser.full_name}
+          currentRfid={rfidUser.rfid_uid ?? null}
+          onClose={() => setRfidUser(null)}
+          onSaved={rfid => handleRfidSaved(rfidUser.id, rfid)}
+        />
+      )}
     </div>
   )
 }
+
