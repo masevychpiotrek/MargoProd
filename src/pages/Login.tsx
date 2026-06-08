@@ -36,6 +36,19 @@ function initials(name?: string) {
     .join('') || '?'
 }
 
+function mapRfidError(message: string) {
+  const normalized = message.toLowerCase()
+  if (
+    normalized.includes('rfid_not_found') ||
+    normalized.includes('not found') ||
+    normalized.includes('404') ||
+    normalized.includes('nieznany')
+  ) {
+    return 'Odmowa dostepu. Identyfikator nie jest przypisany do konta.'
+  }
+  return message || 'Odmowa dostepu.'
+}
+
 export default function LoginPage() {
   const navigate = useNavigate()
   const { signIn, signInWithRfid } = useAuthStore()
@@ -96,20 +109,24 @@ export default function LoginPage() {
       const { error, fullName } = await signInWithRfid(code)
       if (error) {
         setRfidStatus('error')
-        setRfidError(error)
+        setRfidError(mapRfidError(error))
         setRfidCode('')
-        window.setTimeout(() => rfidInputRef.current?.focus(), 100)
+        scannerBufferRef.current = ''
+        window.setTimeout(() => resetRfid(), 1900)
+        window.setTimeout(() => rfidInputRef.current?.focus(), 2000)
         return
       }
 
       setRfidName(fullName || '')
       setRfidStatus('found')
-      window.setTimeout(() => navigate('/', { replace: true }), 650)
+      window.setTimeout(() => navigate('/', { replace: true }), 1300)
     } catch (e) {
       setRfidStatus('error')
-      setRfidError(e instanceof Error ? e.message : 'Blad odczytu RFID.')
+      setRfidError(mapRfidError(e instanceof Error ? e.message : 'Blad odczytu RFID.'))
       setRfidCode('')
-      window.setTimeout(() => rfidInputRef.current?.focus(), 100)
+      scannerBufferRef.current = ''
+      window.setTimeout(() => resetRfid(), 1900)
+      window.setTimeout(() => rfidInputRef.current?.focus(), 2000)
     }
   }, [navigate, rfidCode, rfidStatus, signInWithRfid, submitting])
 
@@ -253,20 +270,45 @@ export default function LoginPage() {
               border: '1px solid rgba(201,168,76,0.25)'
             }}>
               <div className="relative mx-auto mb-5 flex h-32 w-32 items-center justify-center">
-                <div className="absolute inset-0 rounded-full" style={{ background: 'radial-gradient(circle, rgba(201,168,76,0.18), transparent 68%)' }} />
-                {rfidStatus !== 'found' && <div className="absolute inset-2 rounded-full animate-ping" style={{ border: '1px solid rgba(201,168,76,0.30)' }} />}
-                <div className="absolute inset-5 rounded-full" style={{ border: '1px solid rgba(201,168,76,0.22)' }} />
-                <div className="absolute inset-x-4 h-px animate-pulse" style={{ background: 'linear-gradient(90deg, transparent, rgba(201,168,76,0.85), transparent)' }} />
+                <div className="absolute inset-0 rounded-full transition-all duration-300" style={{
+                  background: rfidStatus === 'error'
+                    ? 'radial-gradient(circle, rgba(239,68,68,0.28), transparent 68%)'
+                    : rfidStatus === 'found'
+                      ? 'radial-gradient(circle, rgba(34,197,94,0.25), transparent 68%)'
+                      : 'radial-gradient(circle, rgba(201,168,76,0.18), transparent 68%)'
+                }} />
+                {rfidStatus !== 'found' && (
+                  <div className="absolute inset-2 rounded-full animate-ping" style={{
+                    border: `1px solid ${rfidStatus === 'error' ? 'rgba(248,113,113,0.65)' : 'rgba(201,168,76,0.30)'}`
+                  }} />
+                )}
+                <div className="absolute inset-5 rounded-full transition-all duration-300" style={{
+                  border: `1px solid ${rfidStatus === 'error' ? 'rgba(248,113,113,0.45)' : rfidStatus === 'found' ? 'rgba(74,222,128,0.42)' : 'rgba(201,168,76,0.22)'}`
+                }} />
+                <div className="absolute inset-x-4 h-px animate-pulse" style={{
+                  background: rfidStatus === 'error'
+                    ? 'linear-gradient(90deg, transparent, rgba(248,113,113,0.95), transparent)'
+                    : rfidStatus === 'found'
+                      ? 'linear-gradient(90deg, transparent, rgba(74,222,128,0.95), transparent)'
+                      : 'linear-gradient(90deg, transparent, rgba(201,168,76,0.85), transparent)'
+                }} />
                 <div className="relative flex h-20 w-20 items-center justify-center rounded-full shadow-2xl" style={{
-                  background: rfidStatus === 'found'
-                    ? 'linear-gradient(135deg, rgba(34,197,94,0.28), rgba(13,17,23,0.95))'
-                    : 'linear-gradient(135deg, rgba(201,168,76,0.18), rgba(13,17,23,0.95))',
-                  border: `1px solid ${rfidStatus === 'found' ? 'rgba(74,222,128,0.55)' : 'rgba(201,168,76,0.45)'}`,
-                  color: rfidStatus === 'found' ? '#4ade80' : '#c9a84c',
-                  boxShadow: rfidStatus === 'found' ? '0 0 38px rgba(34,197,94,0.18)' : '0 0 38px rgba(201,168,76,0.14)'
+                  background: rfidStatus === 'error'
+                    ? 'linear-gradient(135deg, rgba(239,68,68,0.34), rgba(13,17,23,0.95))'
+                    : rfidStatus === 'found'
+                      ? 'linear-gradient(135deg, rgba(34,197,94,0.28), rgba(13,17,23,0.95))'
+                      : 'linear-gradient(135deg, rgba(201,168,76,0.18), rgba(13,17,23,0.95))',
+                  border: `1px solid ${rfidStatus === 'error' ? 'rgba(248,113,113,0.70)' : rfidStatus === 'found' ? 'rgba(74,222,128,0.55)' : 'rgba(201,168,76,0.45)'}`,
+                  color: rfidStatus === 'error' ? '#f87171' : rfidStatus === 'found' ? '#4ade80' : '#c9a84c',
+                  boxShadow: rfidStatus === 'error' ? '0 0 42px rgba(239,68,68,0.26)' : rfidStatus === 'found' ? '0 0 38px rgba(34,197,94,0.18)' : '0 0 38px rgba(201,168,76,0.14)'
                 }}>
                   {rfidStatus === 'found' ? (
                     <span className="text-2xl font-black tracking-wide">{initials(rfidName)}</span>
+                  ) : rfidStatus === 'error' ? (
+                    <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
+                      <path d="M7 7l10 10M17 7L7 17" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round"/>
+                      <circle cx="12" cy="12" r="9" stroke="currentColor" strokeWidth="1.6"/>
+                    </svg>
                   ) : (
                     <svg width="38" height="38" viewBox="0 0 24 24" fill="none">
                       <path d="M7 8.5a7 7 0 010 7M4.5 6a10.5 10.5 0 010 12M17 8.5a7 7 0 010 7M19.5 6a10.5 10.5 0 010 12" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"/>
@@ -276,10 +318,10 @@ export default function LoginPage() {
                 </div>
               </div>
               <div className="text-2xl font-black text-white">
-                {rfidStatus === 'found' ? `Witaj, ${rfidName || 'uzytkowniku'}` : rfidStatus === 'reading' ? 'Weryfikacja...' : 'Przyloz identyfikator'}
+                {rfidStatus === 'error' ? 'Odmowa dostepu' : rfidStatus === 'found' ? `Witaj, ${rfidName || 'uzytkowniku'}` : rfidStatus === 'reading' ? 'Weryfikacja...' : 'Przyloz identyfikator'}
               </div>
-              <div className="mt-2 text-sm" style={{ color: rfidStatus === 'found' ? '#4ade80' : '#8aa0c2' }}>
-                {rfidStatus === 'found' ? 'Dostep potwierdzony. Logowanie...' : 'System czeka na bezpieczny odczyt RFID'}
+              <div className="mt-2 text-sm" style={{ color: rfidStatus === 'error' ? '#f87171' : rfidStatus === 'found' ? '#4ade80' : '#8aa0c2' }}>
+                {rfidStatus === 'error' ? 'Ten identyfikator nie ma dostepu do systemu' : rfidStatus === 'found' ? 'Dostep potwierdzony. Logowanie...' : 'System czeka na bezpieczny odczyt RFID'}
               </div>
               <input
                 ref={rfidInputRef}
@@ -304,7 +346,14 @@ export default function LoginPage() {
                   <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ background: '#c9a84c', animationDelay: '150ms' }} />
                 </div>
               )}
-              {rfidError && <div className="mt-3 text-sm text-red-400">{rfidError}</div>}
+              {rfidError && (
+                <div className="mt-4 rounded-xl px-4 py-3 text-sm font-semibold text-red-200" style={{
+                  background: 'rgba(239,68,68,0.14)',
+                  border: '1px solid rgba(248,113,113,0.40)'
+                }}>
+                  {rfidError}
+                </div>
+              )}
             </div>
           )}
 
