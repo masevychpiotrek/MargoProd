@@ -131,13 +131,19 @@ export default function AdminUsers() {
   }
 
   const handleDeleteUser = async (user: UserRow) => {
-    if (!confirm(`Usunąć użytkownika ${user.full_name}? Ta operacja jest nieodwracalna.`)) return
-    await supabase.from('profiles').update({ deleted_at: new Date().toISOString(), is_active: false }).eq('id', user.id)
-    setMsg(`Użytkownik ${user.full_name} usunięty`)
+    if (!confirm(`Usunac uzytkownika ${user.full_name}? Konto zniknie z panelu i zostanie zablokowane, ale historia produkcji zostanie zachowana.`)) return
+    setSaving(true)
+    const { error } = await supabase.rpc('admin_soft_delete_user', { p_user_id: user.id })
+    setSaving(false)
+    if (error) {
+      setMsg(`Blad usuwania: ${error.message}`)
+      setTimeout(() => setMsg(''), 5000)
+      return
+    }
+    setMsg(`Uzytkownik ${user.full_name} usuniety`)
     loadUsers()
     setTimeout(() => setMsg(''), 3000)
   }
-
   const handleRfidSaved = (userId: string, rfidUid: string | null) => {
     setUsers(prev => prev.map(user =>
       user.id === userId ? { ...user, rfid_uid: rfidUid } : user
