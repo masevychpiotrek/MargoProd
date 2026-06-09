@@ -202,7 +202,7 @@ function buildEmailHtml(params: {
     return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 12px 0"><tr><td style="border-bottom:2px solid ${K.blue};padding-bottom:6px">
   <span style="font-size:14px;font-weight:bold;color:${K.blue};font-family:Arial,sans-serif">2. Przyrost godzinowy per automat</span>
 </td></tr></table>
-<p style="margin:0 0 10px;color:${K.gray3};font-size:12px;font-family:Arial,sans-serif">Wykres wygenerowany z danych zapisanych w systemie MargoLine beta.</p>
+<p style="margin:0 0 10px;color:${K.gray3};font-size:12px;font-family:Arial,sans-serif">Wykres wygenerowany z danych zapisanych w systemie MargoLine.</p>
 ${machineBlocks}`
   }
 
@@ -296,9 +296,25 @@ ${machineRows}
 <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td>
   <table width="100%" cellpadding="0" cellspacing="0" border="0">
   <tr><td style="background:${K.blue};padding:14px 20px">
-    <p style="margin:0;font-size:15px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">Wydzia\u0142 Monta\u017cu Automatycznego</p>
-    <p style="margin:3px 0 0;font-size:12px;color:#E8F0FA;font-family:Arial,sans-serif">Raport produkcyjny &bull; ${dateFormatted} r. &bull; MargoLine beta</p>
-    <p style="margin:5px 0 0;font-size:11px;color:#D9E7FF;font-family:Arial,sans-serif;letter-spacing:.4px">Built on data. Driven by precision.</p>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+      <tr>
+        <td valign="middle" style="font-family:Arial,sans-serif">
+          <p style="margin:0;font-size:15px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">Wydzia\u0142 Monta\u017cu Automatycznego</p>
+          <p style="margin:3px 0 0;font-size:12px;color:#E8F0FA;font-family:Arial,sans-serif">Raport produkcyjny &bull; ${dateFormatted} r.</p>
+        </td>
+        <td valign="middle" align="right" width="220" style="font-family:Arial,sans-serif;text-align:right">
+          <table align="right" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
+            <tr>
+              <td width="34" height="34" align="center" valign="middle" style="border:1px solid rgba(255,255,255,.45);border-radius:8px;color:#fff;font-size:17px;font-weight:bold;font-family:Arial,sans-serif">⬡</td>
+              <td style="padding-left:8px;text-align:left;font-family:Arial,sans-serif">
+                <p style="margin:0;font-size:11px;color:#E8F0FA;font-family:Arial,sans-serif">Dane pochodz\u0105 z systemu</p>
+                <p style="margin:1px 0 0;font-size:14px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">MargoLine</p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
   </td></tr></table>
   <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr><td style="padding:16px 0 24px 0">
     <p style="font-size:14px;line-height:1.8;margin:0 0 20px;color:${K.navy};font-family:Arial,sans-serif">
@@ -316,7 +332,6 @@ ${machineRows}
     ${emailShifts}
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:24px"><tr><td style="border-top:1px solid ${K.gray2};padding-top:12px">
       <p style="margin:0;font-size:13px;color:${K.gray3};font-family:Arial,sans-serif">W przypadku dodatkowych pyta&nacute; lub w&aogon;tpliwo&sacute;ci pozostaj&eogon; do dyspozycji.</p>
-      <p style="margin:10px 0 0;font-size:11px;color:${K.gray3};font-family:Arial,sans-serif">Raport pochodzi z systemu <strong>MargoLine beta</strong>. Built on data. Driven by precision.</p>
     </td></tr></table>
   </td></tr></table>
 </td></tr></table>
