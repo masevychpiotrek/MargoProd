@@ -104,7 +104,7 @@ export default function AdminUsers() {
       return
     }
     setSaving(true)
-    const { data: createResult, error } = await supabase.functions.invoke<{ error?: string }>('admin-create-user', {
+    const { data: createResult, error } = await supabase.functions.invoke<{ id?: string; error?: string }>('admin-create-user', {
       body: {
         email,
         password: newPass,
@@ -122,14 +122,10 @@ export default function AdminUsers() {
       setSaving(false)
       return
     }
-    if (false) {
-      setMsg('Błąd: ' + error.message)
-    } else {
-      setMsg(`Użytkownik ${newName} został dodany`)
-      setShowAdd(false)
-      setNewName(''); setNewEmail(''); setNewPass('Margomed123'); setNewRole('operator')
-      loadUsers()
-    }
+    setMsg(`Uzytkownik ${newName.trim()} zostal dodany. Przy pierwszym logowaniu system wymusi zmiane hasla.`)
+    setShowAdd(false)
+    setNewName(''); setNewEmail(''); setNewPass('Margomed123'); setNewRole('operator')
+    await loadUsers()
     setSaving(false)
     setTimeout(() => setMsg(''), 4000)
   }

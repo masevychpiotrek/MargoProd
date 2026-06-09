@@ -53,34 +53,34 @@ Deno.serve(async (req) => {
     if (password.length < 6) return json({ error: 'Haslo musi miec minimum 6 znakow.' })
     if (!ALLOWED_ROLES.has(role)) return json({ error: 'Nieprawidlowa rola uzytkownika.' })
 
-    const existingUser = await findUserByEmail(admin, email)
     const metadata = { full_name: fullName, name: fullName, role }
 
-    const result = existingUser
-      ? await admin.auth.admin.updateUserById(existingUser.id, {
-          email,
-          password,
-          email_confirm: true,
-          user_metadata: metadata,
-          app_metadata: {
-            ...existingUser.app_metadata,
-            provider: 'email',
-            providers: ['email'],
-          },
-        })
-      : await admin.auth.admin.createUser({
-          email,
-          password,
-          email_confirm: true,
-          user_metadata: metadata,
-          app_metadata: {
-            provider: 'email',
-            providers: ['email'],
-          },
-        })
+    const result = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: metadata,
+      app_metadata: {
+        provider: 'email',
+        providers: ['email'],
+      },
+    })
 
-    if (result.error) throw result.error
-    const userId = result.data.user?.id
+    let userId = result.data.user?.id
+    if (result.error || !userId) {
+      const fallback = await admin.rpc('create_user_with_profile', {
+        p_email: email,
+        p_password: password,
+        p_name: fullName,
+        p_role: role,
+      })
+
+      if (fallback.error) {
+        throw new Error(fallback.error.message || result.error?.message || 'Nie udalo sie utworzyc konta.')
+      }
+
+      userId = fallback.data as string
+    }
     if (!userId) throw new Error('Supabase nie zwrocil ID uzytkownika.')
 
     const { error: profileSaveError } = await admin
@@ -90,7 +90,7 @@ Deno.serve(async (req) => {
         full_name: fullName,
         role,
         is_active: true,
-        must_change_password: false,
+        must_change_password: true,
         deleted_at: null,
       }, { onConflict: 'id' })
 
@@ -102,17 +102,6 @@ Deno.serve(async (req) => {
     return json({ error: message })
   }
 })
-
-async function findUserByEmail(admin: ReturnType<typeof createClient>, email: string) {
-  for (let page = 1; page <= 20; page += 1) {
-    const { data, error } = await admin.auth.admin.listUsers({ page, perPage: 100 })
-    if (error) throw error
-    const found = data.users.find(user => user.email?.toLowerCase() === email)
-    if (found) return found
-    if (data.users.length < 100) return null
-  }
-  return null
-}
 
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
