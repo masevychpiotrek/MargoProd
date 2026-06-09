@@ -321,7 +321,7 @@ ${machineRows}
         <td valign="middle" align="right" width="220" style="font-family:Arial,sans-serif;text-align:right">
           <table align="right" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
             <tr>
-              <td width="34" height="34" align="center" valign="middle" style="border:1px solid rgba(255,255,255,.45);border-radius:8px;color:#fff;font-size:17px;font-weight:bold;font-family:Arial,sans-serif">⬡</td>
+              <td width="40" height="40" align="center" valign="middle" style="background:#111827;border:1px solid #C9A84C;border-radius:10px;color:#C9A84C;font-size:19px;font-weight:bold;font-family:Arial,sans-serif;box-shadow:0 0 14px rgba(201,168,76,.18)">⬡</td>
               <td style="padding-left:8px;text-align:left;font-family:Arial,sans-serif">
                 <p style="margin:0;font-size:11px;color:#E8F0FA;font-family:Arial,sans-serif">Dane pochodz\u0105 z systemu</p>
                 <p style="margin:1px 0 0;font-size:14px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">MargoLine</p>
