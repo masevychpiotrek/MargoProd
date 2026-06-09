@@ -52,6 +52,16 @@ type Mode = 'day' | 'range' | 'month'
 type ShiftFilter = 'all' | ShiftType
 type ManagerTab = 'production' | 'operators' | 'forecast'
 
+type Recommendation = {
+  title: string
+  body: string
+  tone: 'red' | 'amber' | 'green' | 'blue'
+  actionLabel: string
+  action: 'missing-time' | 'missing-reason' | 'reject' | 'low-output' | 'losses' | 'none'
+  groupKey?: string
+  reportId?: string
+}
+
 type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   ready_min?: number
   alarm_min?: number
@@ -277,6 +287,8 @@ export default function ManagerDashboard() {
   const [shiftSaving, setShiftSaving] = useState(false)
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const loadRequestSeq = useRef(0)
+  const groupsTableRef = useRef<HTMLDivElement>(null)
+  const dayTimelineRef = useRef<HTMLDivElement>(null)
 
   const queryRange = useMemo(() => {
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
@@ -543,54 +555,81 @@ export default function ManagerDashboard() {
   }, [groups])
 
   const recommendations = useMemo(() => {
-    const items: Array<{ title: string; body: string; tone: 'red' | 'amber' | 'green' | 'blue' }> = []
+    const items: Recommendation[] = []
+    const missingTime = groups.find(row => !row.hasTimeSummary && row.reports > 0)
     const worstReject = [...groups].filter(row => row.rejectPct > 0).sort((a, b) => b.rejectPct - a.rejectPct)[0]
     const worstWepq = [...groups].filter(row => row.wEpq > 0).sort((a, b) => a.wEpq - b.wEpq)[0]
+    const missingReasonReport = filteredReports.find(report => {
+      const wepq = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
+      const reject = reportRejectPct(report)
+      return (wepq > 0 && wepq < 80 && !report.downtime_reason?.trim()) ||
+        (reject > 5 && !report.reject_reason?.trim())
+    })
+    const worstLoss = [...groups].filter(row => row.alarm + row.downtime > 0).sort((a, b) =>
+      (b.alarm + b.downtime) - (a.alarm + a.downtime)
+    )[0]
 
     if (kpi.missingTimeSummaries) {
       items.push({
         title: 'Domknij rozliczenia zmian',
         body: `${kpi.missingTimeSummaries} zm. ma wpisy produkcji, ale brakuje czasu pracy z konca zmiany.`,
-        tone: 'amber'
+        tone: 'amber',
+        actionLabel: 'Otworz korekte zmiany',
+        action: 'missing-time',
+        groupKey: missingTime?.key
       })
     }
     if (kpi.rejectPct > 5 && worstReject) {
       items.push({
         title: 'Odrzut przekracza prog 5%',
         body: `Najpierw sprawdz ${worstReject.machineName}, zmiana ${worstReject.shiftType}: ${worstReject.rejectPct}% odrzutu.`,
-        tone: 'red'
+        tone: 'red',
+        actionLabel: 'Pokaz te zmiane',
+        action: 'reject',
+        groupKey: worstReject.key
       })
     }
     if (kpi.avgWepq > 0 && kpi.avgWepq < 85 && worstWepq) {
       items.push({
         title: 'Wydajnosc wymaga reakcji',
         body: `Najslabszy wynik ma ${worstWepq.machineName}, zmiana ${worstWepq.shiftType}: W EPQ ${worstWepq.wEpq}%.`,
-        tone: 'amber'
+        tone: 'amber',
+        actionLabel: 'Pokaz slaby wynik',
+        action: 'low-output',
+        groupKey: worstWepq.key
       })
     }
     if (kpi.missingReasons) {
       items.push({
         title: 'Brakuje wyjasnien',
         body: `${kpi.missingReasons} wpisow ma niski wynik lub duzy odrzut bez pelnego komentarza.`,
-        tone: 'blue'
+        tone: 'blue',
+        actionLabel: 'Otworz wpis do uzupelnienia',
+        action: 'missing-reason',
+        reportId: missingReasonReport?.id
       })
     }
     if (kpi.alarm + kpi.downtime >= 60) {
       items.push({
         title: 'Sprawdz straty czasu',
         body: `Alarmy i postoje lacznie: ${minsToHHMM(kpi.alarm + kpi.downtime)}. Warto porownac z opisami awarii.`,
-        tone: 'amber'
+        tone: 'amber',
+        actionLabel: 'Pokaz najwieksza strate',
+        action: 'losses',
+        groupKey: worstLoss?.key
       })
     }
     if (!items.length) {
       items.push({
         title: 'Brak pilnych odchylen',
         body: 'Dane nie pokazuja teraz krytycznego problemu. Kontroluj trend i zamkniecia zmian.',
-        tone: 'green'
+        tone: 'green',
+        actionLabel: 'Zostan w podsumowaniu',
+        action: 'none'
       })
     }
     return items.slice(0, 4)
-  }, [groups, kpi])
+  }, [filteredReports, groups, kpi, machineTargetById])
 
   const dailyTrend = useMemo(() => {
     const map: Record<string, number> = {}
@@ -1008,6 +1047,48 @@ export default function ManagerDashboard() {
     })
   }
 
+  const focusGroup = (row: GroupRow, target: 'table' | 'timeline' = 'table') => {
+    setActiveTab('production')
+    setMode('day')
+    setSelectedDate(row.date)
+    setMachineFilter(row.machineId)
+    setShiftFilter(row.shiftType as ShiftFilter)
+    window.setTimeout(() => {
+      const ref = target === 'timeline' ? dayTimelineRef : groupsTableRef
+      ref.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+    }, 80)
+  }
+
+  const handleRecommendationClick = (item: Recommendation) => {
+    if (item.action === 'none') return
+
+    if (item.reportId) {
+      const report = filteredReports.find(row => row.id === item.reportId)
+      if (!report) return
+      const shiftType = one(report.shift)?.shift_type ?? 'all'
+      setActiveTab('production')
+      setMode('day')
+      setSelectedDate(report.report_date)
+      setMachineFilter(report.machine_id)
+      setShiftFilter(shiftType as ShiftFilter)
+      window.setTimeout(() => {
+        dayTimelineRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        if (canEdit) openEdit(report)
+      }, 80)
+      return
+    }
+
+    if (item.groupKey) {
+      const row = groups.find(group => group.key === item.groupKey)
+      if (!row) return
+      focusGroup(row, item.action === 'missing-reason' ? 'timeline' : 'table')
+      if (item.action === 'missing-time' && canEdit) {
+        const shift = shiftByGroupKey[row.key]
+        if (shift) window.setTimeout(() => openShiftEdit(shift), 120)
+      }
+    }
+  }
+
   const openShiftEdit = (shift: ShiftWithContext) => {
     if (!canEdit) return
     setEditingShift(shift)
@@ -1361,10 +1442,15 @@ export default function ManagerDashboard() {
         </div>
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
           {recommendations.map(item => (
-            <div
+            <button
               key={item.title}
+              type="button"
+              onClick={() => handleRecommendationClick(item)}
+              disabled={item.action === 'none'}
               className={cn(
-                'rounded-xl border p-3',
+                'rounded-xl border p-3 text-left transition-all',
+                item.action !== 'none' && 'cursor-pointer hover:-translate-y-0.5 hover:border-brand/60 hover:bg-navy-800/70',
+                item.action === 'none' && 'cursor-default',
                 item.tone === 'red' && 'border-red-500/30 bg-red-500/10',
                 item.tone === 'amber' && 'border-amber-500/30 bg-amber-500/10',
                 item.tone === 'green' && 'border-green-500/30 bg-green-500/10',
@@ -1373,13 +1459,16 @@ export default function ManagerDashboard() {
             >
               <div className="font-bold text-white">{item.title}</div>
               <div className="text-sm text-navy-200 mt-1">{item.body}</div>
-            </div>
+              <div className="mt-3 inline-flex items-center rounded-lg border border-navy-600 bg-navy-900 px-2.5 py-1 text-xs font-bold text-brand">
+                {item.actionLabel}
+              </div>
+            </button>
           ))}
         </div>
       </div>
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
-        <div className="card xl:col-span-2">
+        <div ref={groupsTableRef} className="card xl:col-span-2 scroll-mt-24">
           <div className="card-header">
             <div>
               <div className="card-title">Dzien / zmiana / maszyna</div>
@@ -1425,7 +1514,7 @@ export default function ManagerDashboard() {
                       </td>
                       <td className="py-2 px-3 text-xs text-navy-200 min-w-[220px]">{row.suggestion}</td>
                       <td className="py-2 px-3">
-                        {canEdit && shift && <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openShiftEdit(shift)}>Operatorzy</button>}
+                        {canEdit && shift && <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => openShiftEdit(shift)}>Korekta zmiany</button>}
                       </td>
                     </tr>
                   )
@@ -1456,7 +1545,7 @@ export default function ManagerDashboard() {
                 </div>
                 {canEdit && (
                   <button className="btn-secondary mt-3 w-full text-xs py-1.5" onClick={() => openShiftEdit(shift)}>
-                    Koryguj operatorow
+                    Korekta zmiany
                   </button>
                 )}
               </div>
@@ -1744,7 +1833,7 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      <div className="card">
+      <div ref={dayTimelineRef} className="card scroll-mt-24">
         <div className="card-header">
           <div>
             <div className="card-title">Odtworzenie calego dnia</div>
