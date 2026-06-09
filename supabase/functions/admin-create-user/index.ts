@@ -53,33 +53,32 @@ Deno.serve(async (req) => {
     if (password.length < 6) return json({ error: 'Haslo musi miec minimum 6 znakow.' })
     if (!ALLOWED_ROLES.has(role)) return json({ error: 'Nieprawidlowa rola uzytkownika.' })
 
-    const metadata = { full_name: fullName, name: fullName, role }
-
-    const result = await admin.auth.admin.createUser({
-      email,
-      password,
-      email_confirm: true,
-      user_metadata: metadata,
-      app_metadata: {
-        provider: 'email',
-        providers: ['email'],
-      },
+    const sqlCreate = await admin.rpc('create_user_with_profile', {
+      p_email: email,
+      p_password: password,
+      p_name: fullName,
+      p_role: role,
     })
 
-    let userId = result.data.user?.id
-    if (result.error || !userId) {
-      const fallback = await admin.rpc('create_user_with_profile', {
-        p_email: email,
-        p_password: password,
-        p_name: fullName,
-        p_role: role,
+    let userId = sqlCreate.data as string | null
+    if (sqlCreate.error || !userId) {
+      const metadata = { full_name: fullName, name: fullName, role }
+      const result = await admin.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+        user_metadata: metadata,
+        app_metadata: {
+          provider: 'email',
+          providers: ['email'],
+        },
       })
 
-      if (fallback.error) {
-        throw new Error(fallback.error.message || result.error?.message || 'Nie udalo sie utworzyc konta.')
+      if (result.error) {
+        throw new Error(sqlCreate.error?.message || result.error.message || 'Nie udalo sie utworzyc konta.')
       }
 
-      userId = fallback.data as string
+      userId = result.data.user?.id ?? null
     }
     if (!userId) throw new Error('Supabase nie zwrocil ID uzytkownika.')
 
