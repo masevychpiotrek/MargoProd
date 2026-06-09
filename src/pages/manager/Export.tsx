@@ -135,7 +135,7 @@ const buildMachineSheet = (
   const headerRow = addSheetHeader(
     ws,
     `MARGOMED S.A. — ${machine.name} · Raporty godzinowe`,
-    `Okres: ${dateFrom} – ${dateTo}   ·   Wygenerowano: ${new Date().toLocaleString('pl-PL')}   ·   Wpisów: ${reports.length}`,
+    `Okres: ${dateFrom} – ${dateTo}   ·   MargoLine beta   ·   Built on data. Driven by precision.   ·   Wpisów: ${reports.length}`,
     MACHINE_COLS.length
   )
 
@@ -239,7 +239,7 @@ const buildSummarySheet = (
   const headerRow = addSheetHeader(
     ws,
     'MARGOMED S.A. — Podsumowanie produkcji',
-    `Okres: ${dateFrom} – ${dateTo}   ·   Wszystkie maszyny   ·   Wygenerowano: ${new Date().toLocaleString('pl-PL')}`,
+    `Okres: ${dateFrom} – ${dateTo}   ·   Wszystkie maszyny   ·   MargoLine beta   ·   Built on data. Driven by precision.`,
     cols.length
   )
 
@@ -603,7 +603,7 @@ export default function ManagerExport() {
           <div style={{ background: '#1A2744', color: '#C9A84C', padding: '16px 20px', marginBottom: '16px', borderRadius: '6px' }}>
             <h1 style={{ fontSize: '18px', margin: 0, fontWeight: 'bold' }}>MARGOMED S.A. — MargoLine MES</h1>
             <p style={{ margin: '4px 0 0', fontSize: '11px', color: '#aaa' }}>
-              Raport produkcji · Okres: {dateFrom} – {dateTo} · Wygenerowano: {new Date().toLocaleString('pl-PL')}
+              Raport produkcji · Okres: {dateFrom} – {dateTo} · MargoLine beta · Built on data. Driven by precision.
             </p>
           </div>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '10px', marginBottom: '16px' }}>

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { useAuthStore } from '@/stores/authStore'
+import { TimeInput } from '@/components/shared/FormControls'
 import {
   PRODUCTION_DAY_HOURS,
   cn,
@@ -199,9 +200,19 @@ function toInt(value: string) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
-function toOptionalInt(value: string) {
-  if (value.trim() === '') return null
-  return toInt(value)
+function parseOptionalHHMM(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const match = trimmed.match(/^(\d{1,2}):([0-5]\d)$/)
+  if (!match) return Number.NaN
+  return Number(match[1]) * 60 + Number(match[2])
+}
+
+function hhmmTotal(...values: string[]) {
+  return values.reduce((sum, value) => {
+    const parsed = parseOptionalHHMM(value)
+    return sum + (typeof parsed === 'number' && Number.isFinite(parsed) ? parsed : 0)
+  }, 0)
 }
 
 function pct(value: number, target: number) {
@@ -1095,10 +1106,10 @@ export default function ManagerDashboard() {
     setShiftEditState({
       operator1Id: shift.operator_1_id,
       operator2Id: shift.operator_2_id ?? '',
-      runtimeMin: String(shift.summary_runtime_min ?? ''),
-      readyMin: String(shift.summary_ready_min ?? ''),
-      alarmMin: String(shift.summary_alarm_min ?? ''),
-      downtimeMin: String(shift.summary_downtime_min ?? ''),
+      runtimeMin: shift.summary_runtime_min != null ? minsToHHMM(shift.summary_runtime_min) : '',
+      readyMin: shift.summary_ready_min != null ? minsToHHMM(shift.summary_ready_min) : '',
+      alarmMin: shift.summary_alarm_min != null ? minsToHHMM(shift.summary_alarm_min) : '',
+      downtimeMin: shift.summary_downtime_min != null ? minsToHHMM(shift.summary_downtime_min) : '',
       notes: shift.summary_notes ?? '',
       reason: ''
     })
@@ -1116,10 +1127,14 @@ export default function ManagerDashboard() {
       setShiftEditError('Drugi operator musi byc inny niz pierwszy.')
       return
     }
-    const runtimeMin = toOptionalInt(shiftEditState.runtimeMin)
-    const readyMin = toOptionalInt(shiftEditState.readyMin)
-    const alarmMin = toOptionalInt(shiftEditState.alarmMin)
-    const downtimeMin = toOptionalInt(shiftEditState.downtimeMin)
+    const runtimeMin = parseOptionalHHMM(shiftEditState.runtimeMin)
+    const readyMin = parseOptionalHHMM(shiftEditState.readyMin)
+    const alarmMin = parseOptionalHHMM(shiftEditState.alarmMin)
+    const downtimeMin = parseOptionalHHMM(shiftEditState.downtimeMin)
+    if ([runtimeMin, readyMin, alarmMin, downtimeMin].some(value => typeof value === 'number' && Number.isNaN(value))) {
+      setShiftEditError('Wpisz czas w formacie HH:MM, np. 07:35 albo 00:20.')
+      return
+    }
     const totalTime = (runtimeMin ?? 0) + (readyMin ?? 0) + (alarmMin ?? 0) + (downtimeMin ?? 0)
     if (totalTime > 16 * 60) {
       setShiftEditError('Suma czasu jest za duza. Sprawdz wpisane minuty.')
@@ -2172,24 +2187,24 @@ export default function ManagerDashboard() {
                     ['alarmMin', 'Alarmy'],
                     ['downtimeMin', 'Postoje']
                   ] as const).map(([key, label]) => (
-                    <label key={key} className="block">
-                      <span className="text-xs text-navy-500 font-bold uppercase tracking-wider">{label} (min)</span>
-                      <input
-                        className="input mt-1"
-                        type="number"
-                        min="0"
-                        value={shiftEditState[key]}
-                        onChange={e => setShiftEditState({ ...shiftEditState, [key]: e.target.value })}
-                      />
-                    </label>
+                    <TimeInput
+                      key={key}
+                      label={label}
+                      value={shiftEditState[key]}
+                      onChange={value => setShiftEditState({ ...shiftEditState, [key]: value })}
+                      compact
+                      showDelta={false}
+                    />
                   ))}
                 </div>
                 <div className="mt-2 text-xs text-navy-400">
                   Suma: <span className="font-mono text-white">{minsToHHMM(
-                    toInt(shiftEditState.runtimeMin) +
-                    toInt(shiftEditState.readyMin) +
-                    toInt(shiftEditState.alarmMin) +
-                    toInt(shiftEditState.downtimeMin)
+                    hhmmTotal(
+                      shiftEditState.runtimeMin,
+                      shiftEditState.readyMin,
+                      shiftEditState.alarmMin,
+                      shiftEditState.downtimeMin
+                    )
                   )}</span>
                 </div>
               </div>

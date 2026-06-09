@@ -4,6 +4,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
+import { TimeInput } from '@/components/shared/FormControls'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -431,42 +432,34 @@ export default function OperatorShift() {
                       className="input mt-1 font-mono"
                     />
                   </label>
-                  <label>
-                    <span className="label">Czas pracy</span>
-                    <input
-                      value={endForm.runtime}
-                      onChange={e => setEndForm(prev => ({ ...prev, runtime: e.target.value }))}
-                      className="input mt-1 font-mono"
-                      placeholder="07:35"
-                    />
-                  </label>
-                  <label>
-                    <span className="label">Gotowosc</span>
-                    <input
-                      value={endForm.ready}
-                      onChange={e => setEndForm(prev => ({ ...prev, ready: e.target.value }))}
-                      className="input mt-1 font-mono"
-                      placeholder="00:25"
-                    />
-                  </label>
-                  <label>
-                    <span className="label">Alarm</span>
-                    <input
-                      value={endForm.alarm}
-                      onChange={e => setEndForm(prev => ({ ...prev, alarm: e.target.value }))}
-                      className="input mt-1 font-mono"
-                      placeholder="00:00"
-                    />
-                  </label>
-                  <label>
-                    <span className="label">Postoj / awaria</span>
-                    <input
-                      value={endForm.downtime}
-                      onChange={e => setEndForm(prev => ({ ...prev, downtime: e.target.value }))}
-                      className="input mt-1 font-mono"
-                      placeholder="00:00"
-                    />
-                  </label>
+                  <TimeInput
+                    label="Czas pracy"
+                    value={endForm.runtime}
+                    onChange={value => setEndForm(prev => ({ ...prev, runtime: value }))}
+                    compact
+                    showDelta={false}
+                  />
+                  <TimeInput
+                    label="Gotowosc"
+                    value={endForm.ready}
+                    onChange={value => setEndForm(prev => ({ ...prev, ready: value }))}
+                    compact
+                    showDelta={false}
+                  />
+                  <TimeInput
+                    label="Alarm"
+                    value={endForm.alarm}
+                    onChange={value => setEndForm(prev => ({ ...prev, alarm: value }))}
+                    compact
+                    showDelta={false}
+                  />
+                  <TimeInput
+                    label="Postoj / awaria"
+                    value={endForm.downtime}
+                    onChange={value => setEndForm(prev => ({ ...prev, downtime: value }))}
+                    compact
+                    showDelta={false}
+                  />
                 </div>
                 <label className="mt-3 block">
                   <span className="label">Uwagi do zmiany</span>

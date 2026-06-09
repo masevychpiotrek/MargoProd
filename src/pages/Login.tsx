@@ -223,6 +223,9 @@ export default function LoginPage() {
             }}>BETA</span>
           </div>
           <p className="text-sm" style={{ color: '#6b7f99' }}>System Monitorowania Produkcji</p>
+          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: '#c9a84c' }}>
+            Built on data. Driven by precision.
+          </p>
         </div>
 
         <div className="rounded-2xl p-8 shadow-2xl" style={{
@@ -445,7 +448,7 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs mt-6" style={{ color: '#374151' }}>
-          MargoLine MES v1.0 - Margomed
+          MargoLine beta - Margomed
         </p>
       </div>
     </div>

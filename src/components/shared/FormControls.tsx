@@ -17,6 +17,22 @@ export function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2,'0')}:${String(mins % 60).padStart(2,'0')}`
 }
 
+export function formatHHMMInput(value: string): string {
+  const raw = value.replace(/[^0-9]/g, '').slice(0, 4)
+  if (raw.length < 2) return raw
+  if (raw.length === 2) return `${raw}:`
+  return `${raw.slice(0, 2)}:${raw.slice(2)}`
+}
+
+export function completeHHMMInput(value: string): string {
+  const raw = value.replace(/[^0-9]/g, '').slice(0, 4)
+  if (!raw) return ''
+  if (raw.length === 1) return `0${raw}:00`
+  if (raw.length === 2) return `${raw}:00`
+  if (raw.length === 3) return `${raw.slice(0, 2)}:${raw.slice(2)}0`
+  return `${raw.slice(0, 2)}:${raw.slice(2)}`
+}
+
 // ── TimeInput — wygodne wpisywanie HH:MM na tablecie ─────────────────────
 interface TimeInputProps {
   label: string
@@ -26,30 +42,20 @@ interface TimeInputProps {
   prevValue?: number
   color?: string
   compact?: boolean
+  showDelta?: boolean
 }
 
-export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, color = 'text-white', compact = false }: TimeInputProps) {
+export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, color = 'text-white', compact = false, showDelta = true }: TimeInputProps) {
   const cur       = parseHHMM(value)
   const increment = value && cur >= prevValue ? cur - prevValue : 0
   const hasError  = value !== '' && cur < prevValue && prevValue > 0
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    let v = e.target.value.replace(/[^0-9]/g, '') // tylko cyfry
-    if (v.length > 5) v = v.slice(0, 5)
-    // Formatuj jako HH:MM
-    if (v.length <= 2) {
-      onChange(v)
-    } else {
-      onChange(v.slice(0, -2) + ':' + v.slice(-2))
-    }
+    onChange(formatHHMMInput(e.target.value))
   }
 
   const handleBlur = (e: React.FocusEvent<HTMLInputElement>) => {
-    // Uzupełnij do formatu HH:MM przy wyjściu z pola
-    const raw = e.target.value.replace(/[^0-9]/g, '')
-    if (raw.length === 1) onChange('0' + raw + ':00')
-    else if (raw.length === 2) onChange(raw + ':00')
-    else if (raw.length > 2) onChange(raw.slice(0, -2) + ':' + raw.slice(-2))
+    onChange(completeHHMMInput(e.target.value))
   }
 
   return (
@@ -76,7 +82,7 @@ export function TimeInput({ label, sublabel, value, onChange, prevValue = 0, col
           Poprzedni: <span className="font-mono text-navy-300">{minsToHHMM(prevValue)}</span>
         </div>
       )}
-      {value !== '' && (
+      {showDelta && value !== '' && (
         <div className={cn('text-sm font-bold mt-1', hasError ? 'text-red-400' : color)}>
           {hasError ? '⚠ Licznik nie może maleć' : `+${minsToHHMM(increment)}`}
         </div>
