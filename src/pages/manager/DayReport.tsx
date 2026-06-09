@@ -165,11 +165,13 @@ function buildEmailHtml(params: {
     )
     if (!visibleHours.length) return ''
 
-    const colors = [K.blue, K.teal, K.gold, '#7C3AED', '#DC2626']
     const machineMeta = machineIds.map((machineId, index) => ({
       id: machineId,
       name: rows.find(row => row.machineId === machineId)?.machineName ?? 'Nieznany automat',
-      color: colors[index % colors.length]
+      bg: index % 2 === 0 ? K.blueLt : K.tealLt,
+      br: index % 2 === 0 ? K.blueBr : K.tealBr,
+      tx: index % 2 === 0 ? K.blueTx : K.tealTx,
+      ac: index % 2 === 0 ? K.blue : K.teal
     }))
     const maxValue = Math.max(1, ...visibleHours.flatMap(hour =>
       machineIds.map(machineId =>
@@ -178,41 +180,47 @@ function buildEmailHtml(params: {
           .reduce((sum, report) => sum + report.good_count, 0)
       )
     ))
-    const colWidth = Math.max(48, Math.floor(620 / Math.max(1, visibleHours.length)))
 
-    const legend = machineMeta.map(machine => `
-      <span style="display:inline-block;margin:0 14px 8px 0;font-size:11px;color:${K.navy};font-family:Arial,sans-serif;white-space:nowrap">
-        <span style="display:inline-block;width:10px;height:10px;background:${machine.color};border-radius:2px;margin-right:5px;vertical-align:-1px">&nbsp;</span>${escapeHtml(machine.name)}
-      </span>
-    `).join('')
+    const tableHeaders = machineMeta.map(machine =>
+      `<th align="center" style="background:${machine.ac};color:#fff;padding:8px 10px;font-size:11px;font-weight:bold;font-family:Arial,sans-serif;border:1px solid ${machine.ac}">${escapeHtml(machine.name)}</th>`
+    ).join('')
 
-    const chartColumns = visibleHours.map(hour => {
+    const tableRows = visibleHours.map((hour, index) => {
       const hourReports = reports.filter(report => report.hour_start === hour)
       const label = hourReports[0]?.hour_block ?? `${String(hour).padStart(2, '0')}:00-${String((hour + 1) % 24).padStart(2, '0')}:00`
-      const bars = machineMeta.map(machine => {
+      const machineCells = machineMeta.map(machine => {
         const good = reports
           .filter(report => report.machine_id === machine.id && report.hour_start === hour)
           .reduce((sum, report) => sum + report.good_count, 0)
-        const height = good > 0 ? Math.max(8, Math.round(good / maxValue * 86)) : 0
-        return `<td align="center" valign="bottom" style="padding:0 1px;height:112px;vertical-align:bottom">
-  <div style="font-size:9px;color:${good > 0 ? K.navy : K.gray3};font-family:Arial,sans-serif;line-height:11px;height:22px">${good > 0 ? pieces(good) : '&nbsp;'}</div>
-  <div style="display:inline-block;width:10px;height:${height}px;background:${good > 0 ? machine.color : '#DDE3EC'};line-height:${height}px;border-radius:3px 3px 0 0">&nbsp;</div>
+        const reject = reports
+          .filter(report => report.machine_id === machine.id && report.hour_start === hour)
+          .reduce((sum, report) => sum + report.reject_count, 0)
+        const fill = good > 0 ? Math.max(6, Math.round(good / maxValue * 100)) : 0
+        return `<td align="center" style="background:${machine.bg};border:1px solid ${machine.br};padding:7px 10px;font-family:Arial,sans-serif">
+  <div style="font-size:13px;font-weight:bold;color:${machine.tx};font-family:Arial,sans-serif">${good > 0 ? `${pieces(good)} szt.` : '-'}</div>
+  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-top:5px;border-collapse:collapse">
+    <tr>
+      <td height="6" style="height:6px;background:#DDE6F2;line-height:6px;font-size:1px">
+        <table width="${fill}%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse"><tr><td height="6" style="height:6px;background:${machine.ac};line-height:6px;font-size:1px">&nbsp;</td></tr></table>
+      </td>
+    </tr>
+  </table>
+  <div style="margin-top:3px;font-size:10px;color:${reject > 0 ? K.red : K.gray3};font-family:Arial,sans-serif">odrzut: ${pieces(reject)}</div>
 </td>`
       }).join('')
 
-      return `<td width="${colWidth}" align="center" valign="bottom" style="padding:0 3px;border-bottom:1px solid ${K.gray2};vertical-align:bottom">
-  <table width="100%" cellpadding="0" cellspacing="0" border="0" style="height:118px;border-collapse:collapse"><tr>${bars}</tr></table>
-  <div style="font-size:10px;color:${K.gray3};font-family:Arial,sans-serif;margin-top:6px;white-space:nowrap">${escapeHtml(label.replace(':00', ''))}</div>
-</td>`
+      return `<tr>
+  <td style="background:${index % 2 === 0 ? K.gray1 : '#FFFFFF'};border:1px solid ${K.gray2};padding:8px 10px;color:${K.navy};font-size:12px;font-weight:bold;font-family:Arial,sans-serif;white-space:nowrap">${escapeHtml(label)}</td>
+  ${machineCells}
+</tr>`
     }).join('')
 
-    const chart = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;background:#fff;border:1px solid ${K.gray2}">
-  <tr><td style="padding:12px 14px 4px 14px">${legend}</td></tr>
-  <tr><td style="padding:4px 10px 12px 10px">
-    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
-      <tr>${chartColumns}</tr>
-    </table>
-  </td></tr>
+    const chart = `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;font-family:Arial,sans-serif">
+<thead><tr>
+  <th align="left" style="background:${K.navy};color:#fff;padding:8px 10px;font-size:11px;font-weight:bold;font-family:Arial,sans-serif;border:1px solid ${K.navy}">GODZINA</th>
+  ${tableHeaders}
+</tr></thead>
+<tbody>${tableRows}</tbody>
 </table>`
 
     return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:20px 0 12px 0"><tr><td style="border-bottom:2px solid ${K.blue};padding-bottom:6px">
@@ -321,7 +329,7 @@ ${machineRows}
         <td valign="middle" align="right" width="220" style="font-family:Arial,sans-serif;text-align:right">
           <table align="right" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse">
             <tr>
-              <td width="40" height="40" align="center" valign="middle" style="background:#111827;border:1px solid #C9A84C;border-radius:10px;color:#C9A84C;font-size:19px;font-weight:bold;font-family:Arial,sans-serif;box-shadow:0 0 14px rgba(201,168,76,.18)">⬡</td>
+              <td width="40" height="40" align="center" valign="middle" style="background:#111827;border:1px solid #C9A84C;color:#C9A84C;font-size:13px;font-weight:bold;font-family:Arial,sans-serif;line-height:14px">ML</td>
               <td style="padding-left:8px;text-align:left;font-family:Arial,sans-serif">
                 <p style="margin:0;font-size:11px;color:#E8F0FA;font-family:Arial,sans-serif">Dane pochodz\u0105 z systemu</p>
                 <p style="margin:1px 0 0;font-size:14px;font-weight:bold;color:#fff;font-family:Arial,sans-serif">MargoLine</p>
