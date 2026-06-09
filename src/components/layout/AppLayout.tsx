@@ -51,10 +51,7 @@ const NAV_MANAGER = [
 ]
 
 const NAV_VIEWER = [
-  { to: '/manager',              label: 'Live produkcja',   icon: Icons.live,    end: true },
-  { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
-  { to: '/manager/failures',      label: 'Awarie i technik', icon: Icons.failure },
-  { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
+  { to: '/demo',                 label: 'Demo systemu',     icon: Icons.dashboard, end: true },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 
@@ -155,6 +152,7 @@ export default function AppLayout() {
     : ''
 
   const handleSignOut = async () => {
+    if (profile?.role === 'viewer') sessionStorage.removeItem('margoline_viewer_demo_state')
     if (visibleActiveShift && profile?.role === 'operator') {
       setShowLogoutModal(true)
       return
@@ -165,6 +163,7 @@ export default function AppLayout() {
 
   const confirmSignOut = async () => {
     setShowLogoutModal(false)
+    if (profile?.role === 'viewer') sessionStorage.removeItem('margoline_viewer_demo_state')
     await signOut()
     navigate('/login')
   }
