@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { efficiencyColor, cn } from '@/lib/utils'
+import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
 import type { HourlyReport, Machine } from '@/types/database'
 
 // ─── Stałe brand ────────────────────────────────────────────────────────────
@@ -108,6 +108,15 @@ const shiftLabel = (hour: number) => {
   return 'III'
 }
 
+const shiftOrder = (shift: string) => ({ I: 1, II: 2, III: 3 }[shift] ?? 9)
+
+const sortReportsByProductionDay = (reports: ExportReport[]) =>
+  [...reports].sort((a, b) =>
+    a.report_date.localeCompare(b.report_date) ||
+    compareProductionHours(a.hour_start ?? 0, b.hour_start ?? 0) ||
+    String(a.machine_id).localeCompare(String(b.machine_id))
+  )
+
 // ─── budowanie arkusza dla jednej maszyny ───────────────────────────────────
 const buildMachineSheet = (
   wb:       EJS,
@@ -136,7 +145,7 @@ const buildMachineSheet = (
 
   // Dane
   const dataStart = headerRow + 1
-  reports.forEach((r, idx) => {
+  sortReportsByProductionDay(reports).forEach((r, idx) => {
     const eff = Number(r.efficiency_pct)
     const bg  = idx % 2 === 0 ? WHITE : LIGHT
     const row = ws.getRow(dataStart + idx)
@@ -263,7 +272,7 @@ const buildSummarySheet = (
   })
 
   const sorted = Object.values(groups).sort((a, b) =>
-    a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || a.shift.localeCompare(b.shift)
+    a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || shiftOrder(a.shift) - shiftOrder(b.shift)
   )
 
   const dataStart = headerRow + 1
@@ -359,10 +368,11 @@ const buildSummarySheet = (
 // ─── główny komponent ────────────────────────────────────────────────────────
 export default function ManagerExport() {
   const [dateFrom, setDateFrom] = useState(() => {
-    const d = new Date(); d.setDate(d.getDate() - 7)
+    const d = new Date(`${getProductionDate()}T12:00:00`)
+    d.setDate(d.getDate() - 7)
     return d.toISOString().split('T')[0]
   })
-  const [dateTo,     setDateTo]     = useState(new Date().toISOString().split('T')[0])
+  const [dateTo,     setDateTo]     = useState(getProductionDate())
   const [selMachine, setSelMachine] = useState('')
   const [selShift,   setSelShift]   = useState('')
   const [loading,    setLoading]    = useState(false)
@@ -391,7 +401,7 @@ export default function ManagerExport() {
       if (shiftHours[selShift]) q = q.in('hour_start', shiftHours[selShift])
     }
     const { data: reports } = await q
-    setData({ reports: (reports ?? []) as ExportReport[], machines, dateFrom, dateTo })
+    setData({ reports: sortReportsByProductionDay((reports ?? []) as ExportReport[]), machines, dateFrom, dateTo })
     setLoading(false)
   }
 

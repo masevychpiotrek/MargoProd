@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { cn } from '@/lib/utils'
+import { cn, compareProductionHours, getProductionDate } from '@/lib/utils'
 import type { HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -45,7 +45,7 @@ type ShiftEvent = { machine: string; hour: string; text: string; operator: strin
 function one<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
-function todayIso() { return new Date().toISOString().slice(0, 10) }
+function todayIso() { return getProductionDate() }
 function addDays(date: string, days: number) {
   const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
@@ -877,7 +877,12 @@ export default function ManagerDayReport() {
       setError(mRes.error?.message || rRes.error?.message || 'Błąd ładowania')
     } else {
       setMachines((mRes.data ?? []) as Machine[])
-      setReports((rRes.data ?? []) as ReportWithContext[])
+      setReports(
+        ((rRes.data ?? []) as ReportWithContext[]).sort((a, b) =>
+          a.machine_id.localeCompare(b.machine_id) ||
+          compareProductionHours(a.hour_start, b.hour_start)
+        )
+      )
       setShiftSummaries((sRes.data ?? []) as ShiftWithSummary[])
     }
     setLoading(false)

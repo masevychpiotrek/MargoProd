@@ -39,6 +39,25 @@ export const SHIFT_HOURS: Record<ShiftType, number[]> = {
   III: [22, 23, 0, 1, 2, 3, 4, 5]
 }
 
+export const PRODUCTION_DAY_START_HOUR = 6
+
+export const PRODUCTION_DAY_HOURS = Array.from(
+  { length: 24 },
+  (_, index) => (PRODUCTION_DAY_START_HOUR + index) % 24
+)
+
+export function productionHourOrder(hour: number): number {
+  return (hour - PRODUCTION_DAY_START_HOUR + 24) % 24
+}
+
+export function compareProductionHours(a: number, b: number): number {
+  return productionHourOrder(a) - productionHourOrder(b)
+}
+
+export function isProductionHourAtOrBefore(hour: number, cutoff: number): boolean {
+  return productionHourOrder(hour) <= productionHourOrder(cutoff)
+}
+
 const SHIFT_WINDOWS: Record<ShiftType, { startHour: number; endHour: number; endDayOffset: number }> = {
   I:   { startHour: 6,  endHour: 14, endDayOffset: 0 },
   II:  { startHour: 14, endHour: 22, endDayOffset: 0 },
@@ -61,6 +80,14 @@ export function formatLocalDateISO(date = new Date()): string {
 export function getShiftDateForStart(shiftType: ShiftType, now = new Date()): string {
   const date = new Date(now)
   if (shiftType === 'III' && now.getHours() < 6) {
+    date.setDate(date.getDate() - 1)
+  }
+  return formatLocalDateISO(date)
+}
+
+export function getProductionDate(now = new Date()): string {
+  const date = new Date(now)
+  if (date.getHours() < PRODUCTION_DAY_START_HOUR) {
     date.setDate(date.getDate() - 1)
   }
   return formatLocalDateISO(date)

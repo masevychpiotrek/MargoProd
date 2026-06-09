@@ -2,7 +2,18 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { useAuthStore } from '@/stores/authStore'
-import { cn, efficiencyBg, efficiencyColor, getShiftAutoCloseAt, isShiftPastAutoClose } from '@/lib/utils'
+import {
+  PRODUCTION_DAY_HOURS,
+  cn,
+  compareProductionHours,
+  efficiencyBg,
+  efficiencyColor,
+  getProductionDate,
+  getShiftAutoCloseAt,
+  isProductionHourAtOrBefore,
+  isShiftPastAutoClose,
+  productionHourOrder
+} from '@/lib/utils'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
@@ -117,6 +128,12 @@ type EditState = {
 type ShiftEditState = {
   operator1Id: string
   operator2Id: string
+  runtimeMin: string
+  readyMin: string
+  alarmMin: string
+  downtimeMin: string
+  notes: string
+  reason: string
 }
 
 type CounterRow = Pick<ReportWithContext, 'id' | 'hour_start' | 'good_count' | 'reject_count'>
@@ -160,9 +177,21 @@ function reportBlockLabel(report: Pick<ReportWithContext, 'hour_start' | 'hour_b
   return report.hour_block || `${hourLabel(report.hour_start)}-${hourLabel(report.hour_start + 1)}`
 }
 
+function lastProductionHour(reports: Pick<ReportWithContext, 'hour_start'>[]) {
+  if (!reports.length) return null
+  return reports.reduce((latest, report) =>
+    productionHourOrder(report.hour_start) > productionHourOrder(latest) ? report.hour_start : latest,
+  reports[0].hour_start)
+}
+
 function toInt(value: string) {
   const parsed = Number.parseInt(value || '0', 10)
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
+}
+
+function toOptionalInt(value: string) {
+  if (value.trim() === '') return null
+  return toInt(value)
 }
 
 function pct(value: number, target: number) {
@@ -218,7 +247,8 @@ function groupSuggestion(row: Omit<GroupRow, 'suggestion'>) {
 
 export default function ManagerDashboard() {
   const { profile } = useAuthStore()
-  const { time, dateISO } = useClock()
+  const { time } = useClock()
+  const productionDate = getProductionDate()
   const canEdit = profile?.role === 'manager' || profile?.role === 'admin'
   const [machines, setMachines] = useState<Machine[]>([])
   const [operators, setOperators] = useState<Pick<Profile, 'id' | 'full_name'>[]>([])
@@ -232,11 +262,11 @@ export default function ManagerDashboard() {
   const [editError, setEditError] = useState('')
   const [mode, setMode] = useState<Mode>('day')
   const [activeTab, setActiveTab] = useState<ManagerTab>('production')
-  const [selectedDate, setSelectedDate] = useState(dateISO)
-  const [fromDate, setFromDate] = useState(dateISO)
-  const [toDate, setToDate] = useState(dateISO)
-  const [month, setMonth] = useState(dateISO.slice(5, 7))
-  const [year, setYear] = useState(dateISO.slice(0, 4))
+  const [selectedDate, setSelectedDate] = useState(productionDate)
+  const [fromDate, setFromDate] = useState(productionDate)
+  const [toDate, setToDate] = useState(productionDate)
+  const [month, setMonth] = useState(productionDate.slice(5, 7))
+  const [year, setYear] = useState(productionDate.slice(0, 4))
   const [shiftFilter, setShiftFilter] = useState<ShiftFilter>('all')
   const [machineFilter, setMachineFilter] = useState('all')
   const [editing, setEditing] = useState<ReportWithContext | null>(null)
@@ -663,7 +693,7 @@ export default function ManagerDashboard() {
     return machines
       .filter(machine => machineFilter === 'all' || machine.id === machineFilter)
       .map(machine => {
-        const trend = (byMachine[machine.id] ?? []).sort((a, b) => a.hour - b.hour)
+        const trend = (byMachine[machine.id] ?? []).sort((a, b) => compareProductionHours(a.hour, b.hour))
         if (trend.length < 2) return { machineId: machine.id, machineName: machine.name, avgDelta: null, trend }
         const deltas = trend.slice(1).map((point, index) => point.wepq - trend[index].wepq)
         const avgDelta = Math.round((deltas.reduce((sum, delta) => sum + delta, 0) / deltas.length) * 10) / 10
@@ -673,7 +703,9 @@ export default function ManagerDashboard() {
   }, [dayReports, machineFilter, machineTargetById, machines])
 
   const wepqHourlyLineChart = useMemo(() => {
-    const hours = Array.from(new Set(dayReports.map(report => report.hour_start))).sort((a, b) => a - b)
+    const hours = PRODUCTION_DAY_HOURS.filter(hour =>
+      dayReports.some(report => report.hour_start === hour)
+    )
     const visibleMachines = machines.filter(machine => machineFilter === 'all' || machine.id === machineFilter)
     const colors = ['#3B82F6', '#22C55E', '#F59E0B', '#EF4444']
 
@@ -840,9 +872,7 @@ export default function ManagerDashboard() {
     const currentTarget = currentReports.reduce((sum, report) =>
       sum + reportTarget(report, machineTargetById[report.machine_id] ?? TARGET), 0
     )
-    const currentHour = currentReports.length
-      ? Math.max(...currentReports.map(report => report.hour_start))
-      : null
+    const currentHour = lastProductionHour(currentReports)
 
     const byDate = scopedHistory.reduce<Record<string, ReportWithContext[]>>((acc, report) => {
       if (!acc[report.report_date]) acc[report.report_date] = []
@@ -852,7 +882,7 @@ export default function ManagerDashboard() {
 
     const historicalDays = Object.entries(byDate)
       .map(([date, rows]) => {
-        const sorted = [...rows].sort((a, b) => a.hour_start - b.hour_start)
+        const sorted = [...rows].sort((a, b) => compareProductionHours(a.hour_start, b.hour_start))
         const finalGood = sorted.reduce((sum, report) => sum + report.good_count, 0)
         const finalReject = sorted.reduce((sum, report) => sum + report.reject_count, 0)
         const finalTarget = sorted.reduce((sum, report) =>
@@ -861,7 +891,7 @@ export default function ManagerDashboard() {
         const cutoffGood = currentHour === null
           ? 0
           : sorted
-            .filter(report => report.hour_start <= currentHour)
+            .filter(report => isProductionHourAtOrBefore(report.hour_start, currentHour))
             .reduce((sum, report) => sum + report.good_count, 0)
         return {
           date,
@@ -901,9 +931,9 @@ export default function ManagerDashboard() {
       .filter(day => day.rows.length >= 2)
       .slice(0, 12)
       .map(day => {
-        const localCutoff = currentHour ?? Math.max(...day.rows.map(report => report.hour_start))
+        const localCutoff = currentHour ?? lastProductionHour(day.rows) ?? day.rows[0].hour_start
         const partialGood = day.rows
-          .filter(report => report.hour_start <= localCutoff)
+          .filter(report => isProductionHourAtOrBefore(report.hour_start, localCutoff))
           .reduce((sum, report) => sum + report.good_count, 0)
         const localShare = day.finalGood > 0 && partialGood > 0 ? partialGood / day.finalGood : learnedShare
         const predicted = localShare ? Math.round(partialGood / localShare) : partialGood
@@ -940,7 +970,7 @@ export default function ManagerDashboard() {
   }, [dayReports, historyReports, machineFilter, machineTargetById, machines, selectedDate, shiftFilter])
 
   const hourlyChart = useMemo(() => {
-    const hours = Array.from({ length: 24 }, (_, hour) => hour).filter(hour =>
+    const hours = PRODUCTION_DAY_HOURS.filter(hour =>
       dayReports.some(report => report.hour_start === hour)
     )
     const visibleMachines = machines.filter(machine =>
@@ -983,12 +1013,18 @@ export default function ManagerDashboard() {
     setEditingShift(shift)
     setShiftEditState({
       operator1Id: shift.operator_1_id,
-      operator2Id: shift.operator_2_id ?? ''
+      operator2Id: shift.operator_2_id ?? '',
+      runtimeMin: String(shift.summary_runtime_min ?? ''),
+      readyMin: String(shift.summary_ready_min ?? ''),
+      alarmMin: String(shift.summary_alarm_min ?? ''),
+      downtimeMin: String(shift.summary_downtime_min ?? ''),
+      notes: shift.summary_notes ?? '',
+      reason: ''
     })
     setShiftEditError('')
   }
 
-  const saveShiftOperators = async () => {
+  const saveShiftCorrection = async () => {
     if (!canEdit) return
     if (!editingShift || !shiftEditState) return
     if (!shiftEditState.operator1Id) {
@@ -999,25 +1035,47 @@ export default function ManagerDashboard() {
       setShiftEditError('Drugi operator musi byc inny niz pierwszy.')
       return
     }
+    const runtimeMin = toOptionalInt(shiftEditState.runtimeMin)
+    const readyMin = toOptionalInt(shiftEditState.readyMin)
+    const alarmMin = toOptionalInt(shiftEditState.alarmMin)
+    const downtimeMin = toOptionalInt(shiftEditState.downtimeMin)
+    const totalTime = (runtimeMin ?? 0) + (readyMin ?? 0) + (alarmMin ?? 0) + (downtimeMin ?? 0)
+    if (totalTime > 16 * 60) {
+      setShiftEditError('Suma czasu jest za duza. Sprawdz wpisane minuty.')
+      return
+    }
 
     setShiftSaving(true)
     setShiftEditError('')
     const payload = {
       operator_1_id: shiftEditState.operator1Id,
-      operator_2_id: shiftEditState.operator2Id || null
+      operator_2_id: shiftEditState.operator2Id || null,
+      summary_runtime_min: runtimeMin,
+      summary_ready_min: readyMin,
+      summary_alarm_min: alarmMin,
+      summary_downtime_min: downtimeMin,
+      summary_notes: shiftEditState.notes.trim() || null
     }
     const { error } = await supabase.from('shifts').update(payload).eq('id', editingShift.id)
 
     if (error) {
-      setShiftEditError(error.message || 'Nie udalo sie zapisac operatorow zmiany.')
+      setShiftEditError(error.message || 'Nie udalo sie zapisac korekty zmiany.')
       setShiftSaving(false)
       return
     }
 
-    await logAudit('shift_operator_update', 'shifts', editingShift.id, {
+    await logAudit('shift_manager_correction', 'shifts', editingShift.id, {
       operator_1_id: editingShift.operator_1_id,
-      operator_2_id: editingShift.operator_2_id
-    }, payload)
+      operator_2_id: editingShift.operator_2_id,
+      summary_runtime_min: editingShift.summary_runtime_min,
+      summary_ready_min: editingShift.summary_ready_min,
+      summary_alarm_min: editingShift.summary_alarm_min,
+      summary_downtime_min: editingShift.summary_downtime_min,
+      summary_notes: editingShift.summary_notes
+    }, {
+      ...payload,
+      reason: shiftEditState.reason.trim() || 'korekta czasu pracy przez kierownika'
+    })
     setEditingShift(null)
     setShiftEditState(null)
     setShiftSaving(false)
@@ -1156,7 +1214,7 @@ export default function ManagerDashboard() {
   const dayTimeline = [...dayReports].sort((a, b) =>
     (machineNameById[a.machine_id] ?? '').localeCompare(machineNameById[b.machine_id] ?? '') ||
     (one(a.shift)?.shift_type ?? '').localeCompare(one(b.shift)?.shift_type ?? '') ||
-    a.hour_start - b.hour_start
+    compareProductionHours(a.hour_start, b.hour_start)
   )
 
   const selectedRangeLabel = mode === 'day'
@@ -1706,7 +1764,7 @@ export default function ManagerDashboard() {
               className="btn-secondary text-xs py-1.5 px-3"
               onClick={() => {
                 const next = addDays(selectedDate, 1)
-                setSelectedDate(next > dateISO ? dateISO : next)
+                setSelectedDate(next > productionDate ? productionDate : next)
                 setMode('day')
               }}
             >
@@ -1978,10 +2036,10 @@ export default function ManagerDashboard() {
 
       {editingShift && shiftEditState && (
         <div className="fixed inset-0 z-50 bg-black/70 flex items-center justify-center p-4">
-          <div className="card w-full max-w-xl">
+          <div className="card w-full max-w-2xl max-h-[90vh] overflow-y-auto">
             <div className="card-header">
               <div>
-                <div className="card-title">Korekta operatorow zmiany</div>
+                <div className="card-title">Korekta zmiany</div>
                 <div className="card-sub">
                   {editingShift.shift_date} | Zmiana {editingShift.shift_type} | {machineNameById[editingShift.machine_id] ?? '-'}
                 </div>
@@ -2015,6 +2073,57 @@ export default function ManagerDashboard() {
                     .map(operator => <option key={operator.id} value={operator.id}>{operator.full_name}</option>)}
                 </select>
               </label>
+
+              <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Rozliczenie czasu zmiany</div>
+                <div className="mt-3 grid grid-cols-2 gap-3">
+                  {([
+                    ['runtimeMin', 'Czas pracy'],
+                    ['readyMin', 'Gotowosc'],
+                    ['alarmMin', 'Alarmy'],
+                    ['downtimeMin', 'Postoje']
+                  ] as const).map(([key, label]) => (
+                    <label key={key} className="block">
+                      <span className="text-xs text-navy-500 font-bold uppercase tracking-wider">{label} (min)</span>
+                      <input
+                        className="input mt-1"
+                        type="number"
+                        min="0"
+                        value={shiftEditState[key]}
+                        onChange={e => setShiftEditState({ ...shiftEditState, [key]: e.target.value })}
+                      />
+                    </label>
+                  ))}
+                </div>
+                <div className="mt-2 text-xs text-navy-400">
+                  Suma: <span className="font-mono text-white">{minsToHHMM(
+                    toInt(shiftEditState.runtimeMin) +
+                    toInt(shiftEditState.readyMin) +
+                    toInt(shiftEditState.alarmMin) +
+                    toInt(shiftEditState.downtimeMin)
+                  )}</span>
+                </div>
+              </div>
+
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Notatka z rozliczenia</span>
+                <textarea
+                  className="input mt-1 min-h-[88px]"
+                  value={shiftEditState.notes}
+                  onChange={e => setShiftEditState({ ...shiftEditState, notes: e.target.value })}
+                  placeholder="np. czas dopisany po weryfikacji raportu zmiany"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Powod korekty</span>
+                <input
+                  className="input mt-1"
+                  value={shiftEditState.reason}
+                  onChange={e => setShiftEditState({ ...shiftEditState, reason: e.target.value })}
+                  placeholder="np. operator nie zamknal zmiany"
+                />
+              </label>
             </div>
 
             {shiftEditError && (
@@ -2025,8 +2134,8 @@ export default function ManagerDashboard() {
 
             <div className="mt-5 flex justify-end gap-2">
               <button className="btn-secondary" onClick={() => { setEditingShift(null); setShiftEditError('') }} disabled={shiftSaving}>Anuluj</button>
-              <button className="btn-primary" onClick={saveShiftOperators} disabled={shiftSaving}>
-                {shiftSaving ? 'Zapisywanie...' : 'Zapisz operatorow'}
+              <button className="btn-primary" onClick={saveShiftCorrection} disabled={shiftSaving}>
+                {shiftSaving ? 'Zapisywanie...' : 'Zapisz korekte zmiany'}
               </button>
             </div>
           </div>
