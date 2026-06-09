@@ -53,18 +53,33 @@ Deno.serve(async (req) => {
     if (password.length < 6) return json({ error: 'Haslo musi miec minimum 6 znakow.' })
     if (!ALLOWED_ROLES.has(role)) return json({ error: 'Nieprawidlowa rola uzytkownika.' })
 
-    const sqlCreate = await admin.rpc('create_user_with_profile', {
-      p_email: email,
-      p_password: password,
-      p_name: fullName,
-      p_role: role,
+    const metadata = { full_name: fullName, name: fullName, role }
+    const created = await admin.auth.admin.createUser({
+      email,
+      password,
+      email_confirm: true,
+      user_metadata: metadata,
+      app_metadata: {
+        provider: 'email',
+        providers: ['email'],
+      },
     })
 
-    let userId = sqlCreate.data as string | null
-    if (sqlCreate.error || !userId) {
-      const metadata = { full_name: fullName, name: fullName, role }
-      const result = await admin.auth.admin.createUser({
-        email,
+    let userId = created.data.user?.id ?? null
+    if (created.error || !userId) {
+      const sqlCreate = await admin.rpc('create_user_with_profile', {
+        p_email: email,
+        p_password: password,
+        p_name: fullName,
+        p_role: role,
+      })
+
+      userId = sqlCreate.data as string | null
+      if (sqlCreate.error || !userId) {
+        throw new Error(created.error?.message || sqlCreate.error?.message || 'Nie udalo sie utworzyc konta.')
+      }
+
+      const repaired = await admin.auth.admin.updateUserById(userId, {
         password,
         email_confirm: true,
         user_metadata: metadata,
@@ -74,11 +89,9 @@ Deno.serve(async (req) => {
         },
       })
 
-      if (result.error) {
-        throw new Error(sqlCreate.error?.message || result.error.message || 'Nie udalo sie utworzyc konta.')
+      if (repaired.error) {
+        throw new Error(repaired.error.message || 'Konto istnieje, ale Supabase Auth nie pozwolil go naprawic.')
       }
-
-      userId = result.data.user?.id ?? null
     }
     if (!userId) throw new Error('Supabase nie zwrocil ID uzytkownika.')
 
