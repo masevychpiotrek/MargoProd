@@ -22,6 +22,20 @@ const CHART_OPTIONS = {
   }
 }
 
+const EXECUTIVE_CHART_OPTIONS = {
+  ...CHART_OPTIONS,
+  scales: {
+    y: { beginAtZero: true, position: 'left' as const, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#7B89A8' } },
+    y1: {
+      beginAtZero: true,
+      position: 'right' as const,
+      grid: { drawOnChartArea: false },
+      ticks: { color: '#C9A84C', callback: (value: string | number) => `${value}%` }
+    },
+    x: { grid: { display: false }, ticks: { color: '#7B89A8' } }
+  }
+}
+
 type Mode = 'day' | 'range' | 'month'
 
 type ReportWithShift = HourlyReport & {
@@ -79,6 +93,10 @@ function mins(value: number) {
   return h ? `${h}h ${String(m).padStart(2, '0')}min` : `${m}min`
 }
 
+function perHour(piecesCount: number, runtimeMin: number) {
+  return runtimeMin > 0 ? Math.round(piecesCount / runtimeMin * 60) : 0
+}
+
 function hasShiftSummary(shift: ShiftSummary) {
   return [
     shift.summary_good_count,
@@ -132,12 +150,13 @@ function buildReasonText(params: {
 
 export default function ExecutiveDashboard() {
   const today = getProductionDate()
+  const defaultDate = addDays(today, -1)
   const [mode, setMode] = useState<Mode>('day')
-  const [selectedDate, setSelectedDate] = useState(today)
-  const [fromDate, setFromDate] = useState(addDays(today, -6))
-  const [toDate, setToDate] = useState(today)
-  const [month, setMonth] = useState(today.slice(5, 7))
-  const [year, setYear] = useState(today.slice(0, 4))
+  const [selectedDate, setSelectedDate] = useState(defaultDate)
+  const [fromDate, setFromDate] = useState(addDays(defaultDate, -6))
+  const [toDate, setToDate] = useState(defaultDate)
+  const [month, setMonth] = useState(defaultDate.slice(5, 7))
+  const [year, setYear] = useState(defaultDate.slice(0, 4))
   const [machines, setMachines] = useState<Machine[]>([])
   const [reports, setReports] = useState<ReportWithShift[]>([])
   const [shifts, setShifts] = useState<ShiftSummary[]>([])
@@ -226,6 +245,7 @@ export default function ExecutiveDashboard() {
       downtime: number
       reports: number
       failures: number
+      hasRuntime: boolean
     }> = {}
 
     machines.forEach(machine => {
@@ -240,11 +260,14 @@ export default function ExecutiveDashboard() {
         alarm: 0,
         downtime: 0,
         reports: 0,
-        failures: 0
+        failures: 0,
+        hasRuntime: false
       }
     })
 
     reports.forEach(report => {
+      const shiftType = one(report.shift)?.shift_type ?? shiftFromHour(report.hour_start)
+      const summaryKey = `${report.report_date}|${shiftType}|${report.machine_id}`
       const machine = map[report.machine_id] ?? {
         machineId: report.machine_id,
         machineName: machineById[report.machine_id]?.name ?? 'Nieznana maszyna',
@@ -256,13 +279,16 @@ export default function ExecutiveDashboard() {
         alarm: 0,
         downtime: 0,
         reports: 0,
-        failures: 0
+        failures: 0,
+        hasRuntime: false
       }
       map[report.machine_id] = machine
       machine.good += report.good_count
       machine.reject += report.reject_count
-      machine.target += TARGET_PER_HOUR
       machine.reports += 1
+      if (!shiftSummaryByKey[summaryKey]) {
+        machine.target += TARGET_PER_HOUR
+      }
     })
 
     shifts.filter(hasShiftSummary).forEach(shift => {
@@ -280,6 +306,13 @@ export default function ExecutiveDashboard() {
       machine.downtime += shift.summary_downtime_min ?? 0
       if ((shift.summary_runtime_min ?? 0) > 0) {
         machine.target += Math.round(TARGET_PER_HOUR * (shift.summary_runtime_min ?? 0) / 60)
+        machine.hasRuntime = true
+      }
+    })
+
+    Object.values(map).forEach(machine => {
+      if (machine.target === 0 && machine.reports > 0) {
+        machine.target = machine.reports * TARGET_PER_HOUR
       }
     })
 
@@ -288,7 +321,7 @@ export default function ExecutiveDashboard() {
     })
 
     return Object.values(map).filter(row => row.good || row.reject || row.reports || row.failures)
-  }, [failures, machineById, machines, reports, shifts])
+  }, [failures, machineById, machines, reports, shiftSummaryByKey, shifts])
 
   const shiftRows = useMemo(() => {
     const map: Record<string, {
@@ -301,6 +334,8 @@ export default function ExecutiveDashboard() {
       target: number
       runtime: number
       loss: number
+      goodRate: number
+      totalRate: number
       missingSummary: boolean
       notes: string[]
     }> = {}
@@ -319,6 +354,8 @@ export default function ExecutiveDashboard() {
           target: 0,
           runtime: 0,
           loss: 0,
+          goodRate: 0,
+          totalRate: 0,
           missingSummary: true,
           notes: []
         }
@@ -341,6 +378,8 @@ export default function ExecutiveDashboard() {
         target: 0,
         runtime: 0,
         loss: 0,
+        goodRate: 0,
+        totalRate: 0,
         missingSummary: true,
         notes: []
       }
@@ -349,6 +388,8 @@ export default function ExecutiveDashboard() {
       row.runtime = shift.summary_runtime_min ?? 0
       row.loss = (shift.summary_ready_min ?? 0) + (shift.summary_alarm_min ?? 0) + (shift.summary_downtime_min ?? 0)
       row.target = row.runtime > 0 ? Math.round(TARGET_PER_HOUR * row.runtime / 60) : row.target
+      row.goodRate = perHour(row.good, row.runtime)
+      row.totalRate = perHour(row.good + row.reject, row.runtime)
       row.missingSummary = false
       if (shift.summary_notes) row.notes.push(shift.summary_notes)
       map[key] = row
@@ -362,16 +403,27 @@ export default function ExecutiveDashboard() {
   }, [machineById, reports, shiftSummaryByKey])
 
   const dailyTrend = useMemo(() => {
-    const map: Record<string, { good: number; target: number }> = {}
-    reports.forEach(report => {
-      if (!map[report.report_date]) map[report.report_date] = { good: 0, target: 0 }
-      map[report.report_date].good += report.good_count
-      map[report.report_date].target += TARGET_PER_HOUR
+    const map: Record<string, { good: number; target: number; reject: number; loss: number }> = {}
+    shiftRows.forEach(row => {
+      if (!map[row.date]) map[row.date] = { good: 0, target: 0, reject: 0, loss: 0 }
+      map[row.date].good += row.good
+      map[row.date].target += row.target
+      map[row.date].reject += row.reject
+      map[row.date].loss += row.loss
     })
     return Object.entries(map)
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([date, item]) => ({ date: date.slice(5), good: item.good, target: item.target }))
-  }, [reports])
+      .map(([date, item]) => ({
+        date: date.slice(5),
+        fullDate: date,
+        good: item.good,
+        target: item.target,
+        reject: item.reject,
+        loss: item.loss,
+        realization: pct(item.good, item.target),
+        rejectPct: pct1(item.reject, item.good + item.reject)
+      }))
+  }, [shiftRows])
 
   const hourlyGrowth = useMemo(() => {
     const hours = Array.from(new Set(reports.map(report => report.hour_start))).sort(compareProductionHours)
@@ -392,8 +444,12 @@ export default function ExecutiveDashboard() {
     const target = machineRows.reduce((sum, row) => sum + row.target, 0)
     const runtime = machineRows.reduce((sum, row) => sum + row.runtime, 0)
     const loss = machineRows.reduce((sum, row) => sum + row.ready + row.alarm + row.downtime, 0)
+    const goodRate = perHour(good, runtime)
+    const totalRate = perHour(good + reject, runtime)
     const rejectPct = pct1(reject, good + reject)
     const realization = pct(good, target)
+    const availability = runtime + loss > 0 ? Math.round(runtime / (runtime + loss) * 100) : 0
+    const rejectScore = Math.max(0, 100 - Math.round(rejectPct * 10))
     const missingSummaries = shiftRows.filter(row => row.missingSummary && (row.good || row.reject)).length
     const criticalFailures = failures.filter(failure => failure.severity === 'critical').length
     const weakest = [...machineRows]
@@ -408,7 +464,11 @@ export default function ExecutiveDashboard() {
       missingSummaries,
       criticalFailures
     })
-    return { good, reject, target, runtime, loss, rejectPct, realization, missingSummaries, criticalFailures, weakest, reasonText }
+    const healthScore = Math.max(0, Math.min(100, Math.round(realization * 0.55 + availability * 0.25 + rejectScore * 0.2 - missingSummaries * 3)))
+    const riskLevel = healthScore >= 90 ? 'Stabilnie' : healthScore >= 75 ? 'Pod kontrola' : healthScore >= 60 ? 'Ryzyko' : 'Wymaga decyzji'
+    const targetGap = Math.max(0, target - good)
+    const targetGapHours = targetGap > 0 ? Math.round(targetGap / TARGET_PER_HOUR * 10) / 10 : 0
+    return { good, reject, target, runtime, loss, goodRate, totalRate, targetGap, targetGapHours, rejectPct, realization, availability, healthScore, riskLevel, missingSummaries, criticalFailures, weakest, reasonText }
   }, [failures, machineRows, shiftRows])
 
   const lossReasons = useMemo(() => {
@@ -437,6 +497,48 @@ export default function ExecutiveDashboard() {
     return list
   }, [kpi])
 
+  const machineAnalysis = useMemo(() => {
+    return machineRows.map(row => {
+      const goodRate = perHour(row.good, row.runtime)
+      const totalRate = perHour(row.good + row.reject, row.runtime)
+      const epq = pct(row.good, row.target)
+      const rejectPct = pct1(row.reject, row.good + row.reject)
+      const gap = Math.max(0, row.target - row.good)
+      const lossPieces = Math.round((row.ready + row.alarm + row.downtime) * TARGET_PER_HOUR / 60)
+      const focus = !row.hasRuntime
+        ? 'Brakuje rozliczenia czasu pracy. Najpierw domknac dane zmiany.'
+        : epq < 75
+          ? 'Najpierw sprawdzic tempo pracy i powody zatrzyman.'
+          : rejectPct > 5
+            ? 'Najpierw sprawdzic jakosc i powtarzalnosc odrzutu.'
+            : lossPieces > 0
+              ? 'Sprawdzic, czy straty czasu maja opisane przyczyny.'
+              : 'Proces wyglada stabilnie w wybranym zakresie.'
+      const verdict = !row.hasRuntime
+        ? 'Niepelne dane'
+        : epq >= 95 && rejectPct <= 5
+          ? 'Stabilny'
+          : epq >= 80 && rejectPct <= 5
+            ? 'Do obserwacji'
+            : 'Wymaga reakcji'
+      return {
+        ...row,
+        goodRate,
+        totalRate,
+        epq,
+        rejectPct,
+        gap,
+        gapHours: gap > 0 ? Math.round(gap / TARGET_PER_HOUR * 10) / 10 : 0,
+        lossPieces,
+        focus,
+        verdict
+      }
+    }).sort((a, b) => a.epq - b.epq)
+  }, [machineRows])
+
+  const bestMachine = [...machineAnalysis].sort((a, b) => b.epq - a.epq)[0]
+  const worstMachine = machineAnalysis[0]
+
   const machineChart = {
     labels: machineRows.map(row => row.machineName),
     datasets: [
@@ -457,6 +559,51 @@ export default function ExecutiveDashboard() {
     ]
   }
 
+  const rateChart = {
+    labels: machineAnalysis.map(row => row.machineName),
+    datasets: [
+      {
+        label: 'Dobre szt/h',
+        data: machineAnalysis.map(row => row.goodRate),
+        backgroundColor: 'rgba(34,197,94,0.72)',
+        borderRadius: 4
+      },
+      {
+        label: 'Total szt/h',
+        data: machineAnalysis.map(row => row.totalRate),
+        backgroundColor: 'rgba(59,130,246,0.72)',
+        borderRadius: 4
+      },
+      {
+        type: 'line' as const,
+        label: 'Norma 3200 szt/h',
+        data: machineAnalysis.map(() => TARGET_PER_HOUR),
+        borderColor: '#C9A84C',
+        backgroundColor: 'rgba(201,168,76,0.12)',
+        tension: 0,
+        pointRadius: 0
+      }
+    ]
+  }
+
+  const gapChart = {
+    labels: machineAnalysis.map(row => row.machineName),
+    datasets: [
+      {
+        label: 'Brak do celu',
+        data: machineAnalysis.map(row => row.gap),
+        backgroundColor: 'rgba(239,68,68,0.70)',
+        borderRadius: 4
+      },
+      {
+        label: 'Strata czasu w szt.',
+        data: machineAnalysis.map(row => row.lossPieces),
+        backgroundColor: 'rgba(245,158,11,0.70)',
+        borderRadius: 4
+      }
+    ]
+  }
+
   const trendChart = {
     labels: dailyTrend.map(item => item.date),
     datasets: [
@@ -464,6 +611,71 @@ export default function ExecutiveDashboard() {
       { label: 'Cel', data: dailyTrend.map(item => item.target), borderColor: '#C9A84C', backgroundColor: 'rgba(201,168,76,0.12)', tension: 0.25 }
     ]
   }
+
+  const executivePeriodChart = {
+    labels: dailyTrend.map(item => item.date),
+    datasets: [
+      {
+        type: 'bar' as const,
+        label: 'Produkcja',
+        data: dailyTrend.map(item => item.good),
+        backgroundColor: 'rgba(59,130,246,0.72)',
+        borderRadius: 4,
+        yAxisID: 'y'
+      },
+      {
+        type: 'bar' as const,
+        label: 'Cel',
+        data: dailyTrend.map(item => item.target),
+        backgroundColor: 'rgba(201,168,76,0.35)',
+        borderRadius: 4,
+        yAxisID: 'y'
+      },
+      {
+        type: 'line' as const,
+        label: 'Realizacja %',
+        data: dailyTrend.map(item => item.realization),
+        borderColor: '#22C55E',
+        backgroundColor: 'rgba(34,197,94,0.15)',
+        tension: 0.25,
+        yAxisID: 'y1'
+      },
+      {
+        type: 'line' as const,
+        label: 'Odrzut %',
+        data: dailyTrend.map(item => item.rejectPct),
+        borderColor: '#EF4444',
+        backgroundColor: 'rgba(239,68,68,0.12)',
+        tension: 0.25,
+        yAxisID: 'y1'
+      }
+    ]
+  }
+
+  const biggestDailyDrop = dailyTrend
+    .filter(item => item.target > 0)
+    .sort((a, b) => a.realization - b.realization)[0]
+
+  const executiveSignals = [
+    {
+      label: 'Ocena procesu',
+      value: `${kpi.healthScore}/100`,
+      sub: kpi.riskLevel,
+      color: kpi.healthScore >= 90 ? 'text-green-400' : kpi.healthScore >= 75 ? 'text-amber-300' : 'text-red-400'
+    },
+    {
+      label: 'Dostepnosc',
+      value: kpi.availability ? `${kpi.availability}%` : '-',
+      sub: 'praca / caly rozliczony czas',
+      color: kpi.availability >= 85 ? 'text-green-400' : kpi.availability >= 70 ? 'text-amber-300' : 'text-red-400'
+    },
+    {
+      label: 'Najsłabszy dzien',
+      value: biggestDailyDrop ? `${biggestDailyDrop.realization}%` : '-',
+      sub: biggestDailyDrop?.fullDate ?? 'brak danych',
+      color: biggestDailyDrop && biggestDailyDrop.realization < 80 ? 'text-red-400' : 'text-amber-300'
+    }
+  ]
 
   const hourlyChart = {
     labels: hourlyGrowth.map(row => row.label),
@@ -528,6 +740,49 @@ export default function ExecutiveDashboard() {
 
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
+      <div className="rounded-2xl border border-brand/25 bg-brand/10 px-4 py-3">
+        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <div className="text-sm font-bold text-white">Domyślnie pokazujemy ostatni zamknięty dzień produkcyjny.</div>
+            <div className="mt-1 text-sm text-navy-300">
+              Bieżący dzień może wyglądać słabo, dopóki zmiany nie zostaną zakończone i rozliczone.
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={() => { setMode('day'); setSelectedDate(today) }}
+            className="btn-secondary whitespace-nowrap px-4 py-2 text-xs"
+          >
+            Podejrzyj dzisiaj
+          </button>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
+        {executiveSignals.map(item => (
+          <div key={item.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">{item.label}</div>
+            <div className={cn('mt-2 text-3xl font-black', item.color)}>{loading ? '...' : item.value}</div>
+            <div className="mt-1 text-sm text-navy-400">{item.sub}</div>
+          </div>
+        ))}
+      </div>
+
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+        {[
+          { label: 'Śr. wydajność dobrych', value: kpi.goodRate ? `${pieces(kpi.goodRate)} szt/h` : '-', sub: 'tylko sztuki zgodne', color: kpi.goodRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.goodRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
+          { label: 'Śr. tempo maszyny', value: kpi.totalRate ? `${pieces(kpi.totalRate)} szt/h` : '-', sub: 'dobre + odrzut', color: kpi.totalRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.totalRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
+          { label: 'Brak do celu', value: `${pieces(kpi.targetGap)} szt`, sub: kpi.targetGapHours ? `ok. ${kpi.targetGapHours}h normy` : 'cel domknięty', color: kpi.targetGap ? 'text-red-400' : 'text-green-400' },
+          { label: 'Największe ryzyko', value: worstMachine?.machineName ?? '-', sub: worstMachine ? `${worstMachine.epq}% W EPQ | ${pieces(worstMachine.goodRate)} szt/h` : 'brak danych', color: worstMachine && worstMachine.epq < 80 ? 'text-red-400' : 'text-amber-300' }
+        ].map(item => (
+          <div key={item.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">{item.label}</div>
+            <div className={cn('mt-2 text-2xl font-black', item.color)}>{loading ? '...' : item.value}</div>
+            <div className="mt-1 text-sm text-navy-400">{item.sub}</div>
+          </div>
+        ))}
+      </div>
+
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
         {[
           { label: 'Produkcja', value: `${pieces(kpi.good)} szt`, sub: `cel ${pieces(kpi.target)} szt`, color: 'text-brand' },
@@ -545,6 +800,18 @@ export default function ExecutiveDashboard() {
         ))}
       </div>
 
+      <div className="card border-brand/20">
+        <div className="card-header">
+          <div>
+            <div className="card-title">Obraz wybranego okresu</div>
+            <div className="card-sub">Jeden wykres: produkcja, cel, realizacja i odrzut. To jest główny widok dla zarządu.</div>
+          </div>
+        </div>
+        <div className="h-[360px]">
+          <Bar data={executivePeriodChart as never} options={EXECUTIVE_CHART_OPTIONS as never} />
+        </div>
+      </div>
+
       <div className="card border-brand/25">
         <div className="card-header">
           <div>
@@ -559,6 +826,16 @@ export default function ExecutiveDashboard() {
       </div>
 
       <div className="grid gap-4 xl:grid-cols-2">
+        <div className="card xl:col-span-2">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Średnia wydajność godzinowa automatów</div>
+              <div className="card-sub">Dobre szt/h i total szt/h w porównaniu do normy producenta 3200 szt/h</div>
+            </div>
+          </div>
+          <div className="h-[320px]"><Bar data={rateChart as never} options={CHART_OPTIONS as never} /></div>
+        </div>
+
         <div className="card">
           <div className="card-header">
             <div>
@@ -577,6 +854,16 @@ export default function ExecutiveDashboard() {
             </div>
           </div>
           <div className="h-[300px]"><Bar data={rejectChart} options={CHART_OPTIONS as never} /></div>
+        </div>
+
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Strata do celu i wpływ czasu</div>
+              <div className="card-sub">Ile sztuk zabrakło oraz ile potencjału zabrały straty czasu</div>
+            </div>
+          </div>
+          <div className="h-[300px]"><Bar data={gapChart} options={CHART_OPTIONS as never} /></div>
         </div>
 
         <div className="card">
@@ -644,6 +931,81 @@ export default function ExecutiveDashboard() {
       <div className="card">
         <div className="card-header">
           <div>
+            <div className="card-title">Analiza automatów</div>
+            <div className="card-sub">Porównanie procesu: tempo, odrzut, strata do celu i potencjalny wpływ czasu</div>
+          </div>
+          {bestMachine && (
+            <div className="grid gap-2 text-right sm:grid-cols-2">
+              <div className="rounded-xl border border-green-500/25 bg-green-500/10 px-3 py-2">
+                <div className="text-xs font-bold uppercase tracking-wider text-green-300">Najlepszy automat</div>
+                <div className="text-sm font-black text-white">{bestMachine.machineName} | {bestMachine.epq}%</div>
+              </div>
+              {worstMachine && (
+                <div className="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-red-300">Do kontroli</div>
+                  <div className="text-sm font-black text-white">{worstMachine.machineName} | {worstMachine.epq}%</div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+        <div className="grid gap-3 lg:grid-cols-2">
+          {machineAnalysis.map(row => (
+            <div key={row.machineId} className="rounded-2xl border border-navy-700 bg-navy-900 p-4">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <div className="text-lg font-black text-white">{row.machineName}</div>
+                  <div className="mt-1 text-sm text-navy-400">
+                    {pieces(row.good)} szt | odrzut {row.rejectPct}% | {row.failures} awarii
+                  </div>
+                </div>
+                <span className={cn('rounded-full px-3 py-1 text-xs font-bold', row.epq >= 90 ? 'bg-green-500/10 text-green-300' : row.epq >= 75 ? 'bg-amber-500/10 text-amber-300' : 'bg-red-500/10 text-red-300')}>
+                  {row.verdict} | {row.epq}% W EPQ
+                </span>
+              </div>
+              <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                <div className="rounded-xl bg-navy-800 p-3">
+                  <div className="text-xs uppercase tracking-wider text-navy-500">Dobre szt/h</div>
+                  <div className={cn('mt-1 font-mono text-xl font-black', row.goodRate >= TARGET_PER_HOUR ? 'text-green-400' : row.goodRate >= 2500 ? 'text-amber-300' : 'text-red-400')}>{row.goodRate ? pieces(row.goodRate) : '-'}</div>
+                </div>
+                <div className="rounded-xl bg-navy-800 p-3">
+                  <div className="text-xs uppercase tracking-wider text-navy-500">Total szt/h</div>
+                  <div className={cn('mt-1 font-mono text-xl font-black', row.totalRate >= TARGET_PER_HOUR ? 'text-green-400' : row.totalRate >= 2500 ? 'text-amber-300' : 'text-red-400')}>{row.totalRate ? pieces(row.totalRate) : '-'}</div>
+                </div>
+                <div className="rounded-xl bg-navy-800 p-3">
+                  <div className="text-xs uppercase tracking-wider text-navy-500">Brak do celu</div>
+                  <div className={cn('mt-1 font-mono text-xl font-black', row.gap ? 'text-red-400' : 'text-green-400')}>{pieces(row.gap)}</div>
+                  <div className="mt-1 text-xs text-navy-500">{row.gapHours ? `ok. ${row.gapHours}h normy` : 'brak luki'}</div>
+                </div>
+                <div className="rounded-xl bg-navy-800 p-3">
+                  <div className="text-xs uppercase tracking-wider text-navy-500">Straty czasu</div>
+                  <div className={cn('mt-1 font-mono text-xl font-black', row.lossPieces ? 'text-amber-300' : 'text-green-400')}>{pieces(row.lossPieces)} szt</div>
+                  <div className="mt-1 text-xs text-navy-500">potencjał wg 3200 szt/h</div>
+                </div>
+              </div>
+              <div className="mt-4 rounded-xl border border-navy-700 bg-navy-800 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-navy-500">Wniosek</div>
+                <p className="mt-1 text-sm leading-relaxed text-navy-100">{row.focus}</p>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className={cn('rounded-lg px-3 py-2 font-bold', row.hasRuntime ? 'bg-green-500/10 text-green-300' : 'bg-amber-500/10 text-amber-300')}>
+                  {row.hasRuntime ? 'Czas rozliczony' : 'Brak czasu'}
+                </div>
+                <div className={cn('rounded-lg px-3 py-2 font-bold', row.rejectPct > 5 ? 'bg-red-500/10 text-red-300' : 'bg-green-500/10 text-green-300')}>
+                  Odrzut {row.rejectPct}%
+                </div>
+                <div className={cn('rounded-lg px-3 py-2 font-bold', row.failures ? 'bg-amber-500/10 text-amber-300' : 'bg-green-500/10 text-green-300')}>
+                  Awarie {row.failures}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div>
             <div className="card-title">Wynik wedlug zmian i maszyn</div>
             <div className="card-sub">Bez danych personalnych, tylko proces i odchylenia</div>
           </div>
@@ -652,14 +1014,14 @@ export default function ExecutiveDashboard() {
           <table className="w-full min-w-[900px] text-sm">
             <thead>
               <tr className="border-b border-navy-700">
-                {['Data', 'Zmiana', 'Maszyna', 'Produkcja', 'Cel', 'W EPQ', 'Odrzut', 'Strata czasu', 'Status'].map(header => (
+                {['Data', 'Zmiana', 'Maszyna', 'Produkcja', 'Cel', 'Szt/h', 'Total szt/h', 'W EPQ', 'Odrzut', 'Strata czasu', 'Status'].map(header => (
                   <th key={header} className="px-3 py-2 text-left text-xs font-bold uppercase tracking-wider text-navy-400">{header}</th>
                 ))}
               </tr>
             </thead>
             <tbody>
               {shiftRows.length === 0 && (
-                <tr><td colSpan={9} className="py-8 text-center text-navy-500">Brak danych w wybranym zakresie</td></tr>
+                <tr><td colSpan={11} className="py-8 text-center text-navy-500">Brak danych w wybranym zakresie</td></tr>
               )}
               {shiftRows.map(row => {
                 const epq = pct(row.good, row.target)
@@ -671,6 +1033,8 @@ export default function ExecutiveDashboard() {
                     <td className="px-3 py-2 text-navy-100">{row.machineName}</td>
                     <td className="px-3 py-2 font-mono font-bold text-white">{pieces(row.good)}</td>
                     <td className="px-3 py-2 font-mono text-navy-300">{pieces(row.target)}</td>
+                    <td className={cn('px-3 py-2 font-mono font-bold', row.goodRate >= TARGET_PER_HOUR ? 'text-green-400' : row.goodRate >= 2500 ? 'text-amber-300' : 'text-red-400')}>{row.goodRate ? pieces(row.goodRate) : '-'}</td>
+                    <td className={cn('px-3 py-2 font-mono font-bold', row.totalRate >= TARGET_PER_HOUR ? 'text-green-400' : row.totalRate >= 2500 ? 'text-amber-300' : 'text-red-400')}>{row.totalRate ? pieces(row.totalRate) : '-'}</td>
                     <td className={cn('px-3 py-2 font-mono font-bold', efficiencyColor(epq))}>{epq}%</td>
                     <td className={cn('px-3 py-2 font-mono font-bold', rejectPct > 5 ? 'text-red-400' : rejectPct > 2 ? 'text-amber-400' : 'text-green-400')}>{rejectPct}%</td>
                     <td className="px-3 py-2 font-mono text-amber-300">{row.loss ? mins(row.loss) : '-'}</td>
