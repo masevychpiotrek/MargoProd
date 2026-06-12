@@ -8,6 +8,7 @@ import { Bar, Line } from 'react-chartjs-2'
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
 
 const TARGET_PER_HOUR = 3200
+const TARGET_PER_SHIFT = 18000
 const SHIFTS: ShiftType[] = ['I', 'II', 'III']
 
 const CHART_OPTIONS = {
@@ -126,24 +127,24 @@ function buildReasonText(params: {
 }) {
   const reasons: string[] = []
   if (params.realization >= 100) {
-    reasons.push('Cel produkcyjny zostal osiagniety w analizowanym zakresie.')
+    reasons.push('Analizowany zakres osiagnal zalozony poziom realizacji produkcji.')
   } else {
-    reasons.push(`Cel nie zostal osiagniety. Realizacja wyniosla ${params.realization}% wzgledem normy producenta.`)
+    reasons.push(`Realizacja wyniosla ${params.realization}% wzgledem celu zmianowego.`)
   }
   if (params.weakestMachine && params.weakestMachineEpq > 0 && params.weakestMachineEpq < 85) {
-    reasons.push(`Najwieksze odchylenie widac na ${params.weakestMachine}, gdzie W EPQ wynioslo ${params.weakestMachineEpq}%.`)
+    reasons.push(`Najwieksze odchylenie od celu odnotowano na ${params.weakestMachine}: W EPQ ${params.weakestMachineEpq}%.`)
   }
   if (params.rejectPct > 5) {
-    reasons.push(`Odrzut przekroczyl prog 5% i wymaga analizy przyczyn jakosciowych.`)
+    reasons.push('Poziom odrzutu przekroczyl prog kontrolny 5%.')
   }
   if (params.lossMinutes > 0) {
-    reasons.push(`Zarejestrowano ${mins(params.lossMinutes)} strat czasu w alarmach, postojach lub braku gotowosci.`)
+    reasons.push(`Zarejestrowane straty czasu wyniosly ${mins(params.lossMinutes)}.`)
   }
   if (params.criticalFailures > 0) {
-    reasons.push(`Wystapily ${params.criticalFailures} krytyczne zgloszenia techniczne.`)
+    reasons.push(`Odnotowano ${params.criticalFailures} krytyczne zgloszenia techniczne.`)
   }
   if (params.missingSummaries > 0) {
-    reasons.push(`Brakuje ${params.missingSummaries} rozliczen konca zmiany, co obniza jakosc analizy czasu pracy.`)
+    reasons.push(`Niekompletne rozliczenia zmian: ${params.missingSummaries}.`)
   }
   return reasons.join(' ')
 }
@@ -265,6 +266,8 @@ export default function ExecutiveDashboard() {
       }
     })
 
+    const countedShiftTargets = new Set<string>()
+
     reports.forEach(report => {
       const shiftType = one(report.shift)?.shift_type ?? shiftFromHour(report.hour_start)
       const summaryKey = `${report.report_date}|${shiftType}|${report.machine_id}`
@@ -286,8 +289,9 @@ export default function ExecutiveDashboard() {
       machine.good += report.good_count
       machine.reject += report.reject_count
       machine.reports += 1
-      if (!shiftSummaryByKey[summaryKey]) {
-        machine.target += TARGET_PER_HOUR
+      if (!shiftSummaryByKey[summaryKey] && !countedShiftTargets.has(summaryKey)) {
+        machine.target += TARGET_PER_SHIFT
+        countedShiftTargets.add(summaryKey)
       }
     })
 
@@ -304,15 +308,13 @@ export default function ExecutiveDashboard() {
       machine.ready += shift.summary_ready_min ?? 0
       machine.alarm += shift.summary_alarm_min ?? 0
       machine.downtime += shift.summary_downtime_min ?? 0
-      if ((shift.summary_runtime_min ?? 0) > 0) {
-        machine.target += Math.round(TARGET_PER_HOUR * (shift.summary_runtime_min ?? 0) / 60)
-        machine.hasRuntime = true
-      }
+      machine.target += TARGET_PER_SHIFT
+      if ((shift.summary_runtime_min ?? 0) > 0) machine.hasRuntime = true
     })
 
     Object.values(map).forEach(machine => {
       if (machine.target === 0 && machine.reports > 0) {
-        machine.target = machine.reports * TARGET_PER_HOUR
+        machine.target = TARGET_PER_SHIFT
       }
     })
 
@@ -362,7 +364,7 @@ export default function ExecutiveDashboard() {
       }
       map[key].good += report.good_count
       map[key].reject += report.reject_count
-      map[key].target += TARGET_PER_HOUR
+      map[key].target = TARGET_PER_SHIFT
       const note = [report.downtime_reason, report.reject_reason, report.notes].filter(Boolean).join(' ')
       if (note) map[key].notes.push(note)
     })
@@ -387,7 +389,7 @@ export default function ExecutiveDashboard() {
       row.reject = shift.summary_reject_count ?? row.reject
       row.runtime = shift.summary_runtime_min ?? 0
       row.loss = (shift.summary_ready_min ?? 0) + (shift.summary_alarm_min ?? 0) + (shift.summary_downtime_min ?? 0)
-      row.target = row.runtime > 0 ? Math.round(TARGET_PER_HOUR * row.runtime / 60) : row.target
+      row.target = TARGET_PER_SHIFT
       row.goodRate = perHour(row.good, row.runtime)
       row.totalRate = perHour(row.good + row.reject, row.runtime)
       row.missingSummary = false
@@ -465,7 +467,7 @@ export default function ExecutiveDashboard() {
       criticalFailures
     })
     const healthScore = Math.max(0, Math.min(100, Math.round(realization * 0.55 + availability * 0.25 + rejectScore * 0.2 - missingSummaries * 3)))
-    const riskLevel = healthScore >= 90 ? 'Stabilnie' : healthScore >= 75 ? 'Pod kontrola' : healthScore >= 60 ? 'Ryzyko' : 'Wymaga decyzji'
+    const riskLevel = healthScore >= 90 ? 'Stabilnie' : healthScore >= 75 ? 'Pod kontrola' : healthScore >= 60 ? 'Podwyzszone ryzyko' : 'Znaczne odchylenie'
     const targetGap = Math.max(0, target - good)
     const targetGapHours = targetGap > 0 ? Math.round(targetGap / TARGET_PER_HOUR * 10) / 10 : 0
     return { good, reject, target, runtime, loss, goodRate, totalRate, targetGap, targetGapHours, rejectPct, realization, availability, healthScore, riskLevel, missingSummaries, criticalFailures, weakest, reasonText }
@@ -479,7 +481,7 @@ export default function ExecutiveDashboard() {
     const timeLoss = Math.round(kpi.loss * TARGET_PER_HOUR / 60)
     const missing = kpi.missingSummaries
     const items = [
-      { label: 'Niska wydajnosc', value: lowOutput, detail: 'brakujace sztuki wzgledem normy' },
+      { label: 'Niska wydajnosc', value: lowOutput, detail: 'brakujace sztuki wzgledem celu zmianowego' },
       { label: 'Odrzut', value: rejectLoss, detail: 'sztuki niezgodne' },
       { label: 'Straty czasu', value: timeLoss, detail: `${mins(kpi.loss)} poza praca` },
       { label: 'Braki rozliczen', value: missing, detail: 'zmiany bez czasu pracy' }
@@ -489,11 +491,11 @@ export default function ExecutiveDashboard() {
 
   const recommendations = useMemo(() => {
     const list: string[] = []
-    if (kpi.realization < 90 && kpi.weakest) list.push(`Priorytet: analiza ${kpi.weakest.machineName}, bo ma najnizsze wykonanie celu.`)
-    if (kpi.rejectPct > 5) list.push('Odrzut przekracza 5%. Wymagana analiza stacji i powtarzalnosci problemu.')
-    if (kpi.loss > 120) list.push('Straty czasu przekraczaja 2 godziny. Porownac alarmy z opisami awarii.')
-    if (kpi.missingSummaries > 0) list.push('Domknac rozliczenia zmian, bo bez nich zarzad nie widzi pelnej dostepnosci maszyn.')
-    if (!list.length) list.push('Wynik stabilny. Utrzymac kontrole odrzutu i regularne rozliczanie zmian.')
+    if (kpi.realization < 90 && kpi.weakest) list.push(`Najwieksze odchylenie od celu dotyczy ${kpi.weakest.machineName}.`)
+    if (kpi.rejectPct > 5) list.push('Poziom odrzutu przekroczyl prog kontrolny 5%.')
+    if (kpi.loss > 120) list.push('Straty czasu przekroczyly 2 godziny w analizowanym zakresie.')
+    if (kpi.missingSummaries > 0) list.push('Zakres zawiera niekompletne rozliczenia zmian.')
+    if (!list.length) list.push('Wynik procesu pozostaje stabilny w analizowanym zakresie.')
     return list
   }, [kpi])
 
@@ -506,21 +508,21 @@ export default function ExecutiveDashboard() {
       const gap = Math.max(0, row.target - row.good)
       const lossPieces = Math.round((row.ready + row.alarm + row.downtime) * TARGET_PER_HOUR / 60)
       const focus = !row.hasRuntime
-        ? 'Brakuje rozliczenia czasu pracy. Najpierw domknac dane zmiany.'
+        ? 'Niekompletne rozliczenie czasu pracy ogranicza pelna ocene wskaznikow.'
         : epq < 75
-          ? 'Najpierw sprawdzic tempo pracy i powody zatrzyman.'
+          ? 'Glownym obszarem odchylenia jest tempo procesu oraz dostepnosc maszyny.'
           : rejectPct > 5
-            ? 'Najpierw sprawdzic jakosc i powtarzalnosc odrzutu.'
+            ? 'Glownym obszarem odchylenia jest poziom odrzutu jakosciowego.'
             : lossPieces > 0
-              ? 'Sprawdzic, czy straty czasu maja opisane przyczyny.'
-              : 'Proces wyglada stabilnie w wybranym zakresie.'
+              ? 'Na wynik wplynely zarejestrowane straty czasu.'
+              : 'Proces pozostaje stabilny w analizowanym zakresie.'
       const verdict = !row.hasRuntime
         ? 'Niepelne dane'
         : epq >= 95 && rejectPct <= 5
           ? 'Stabilny'
           : epq >= 80 && rejectPct <= 5
             ? 'Do obserwacji'
-            : 'Wymaga reakcji'
+            : 'Odchylenie'
       return {
         ...row,
         goodRate,
@@ -691,10 +693,10 @@ export default function ExecutiveDashboard() {
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <div className="text-xs font-bold uppercase tracking-widest text-brand">Panel zarzadu</div>
-          <h1 className="mt-1 text-3xl font-black text-white">Wynik produkcji i przyczyny odchylen</h1>
+          <div className="text-xs font-bold uppercase tracking-widest text-brand">Raport zarządczy</div>
+          <h1 className="mt-1 text-3xl font-black text-white">Wynik produkcji i analiza odchyleń</h1>
           <p className="mt-1 max-w-3xl text-sm text-navy-400">
-            Widok decyzyjny: cel, wykonanie, strata, odrzut, awarie oraz uzasadnienie wyniku bez edycji danych.
+            Cel, wykonanie, jakość, dostępność oraz wpływ zdarzeń technicznych w wybranym zakresie.
           </p>
         </div>
         <div className="rounded-2xl border border-navy-600 bg-navy-800 px-4 py-3 text-right">
@@ -740,24 +742,6 @@ export default function ExecutiveDashboard() {
 
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
-      <div className="rounded-2xl border border-brand/25 bg-brand/10 px-4 py-3">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="text-sm font-bold text-white">Domyślnie pokazujemy ostatni zamknięty dzień produkcyjny.</div>
-            <div className="mt-1 text-sm text-navy-300">
-              Bieżący dzień może wyglądać słabo, dopóki zmiany nie zostaną zakończone i rozliczone.
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={() => { setMode('day'); setSelectedDate(today) }}
-            className="btn-secondary whitespace-nowrap px-4 py-2 text-xs"
-          >
-            Podejrzyj dzisiaj
-          </button>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {executiveSignals.map(item => (
           <div key={item.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">
@@ -770,10 +754,10 @@ export default function ExecutiveDashboard() {
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
         {[
-          { label: 'Śr. wydajność dobrych', value: kpi.goodRate ? `${pieces(kpi.goodRate)} szt/h` : '-', sub: 'tylko sztuki zgodne', color: kpi.goodRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.goodRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
-          { label: 'Śr. tempo maszyny', value: kpi.totalRate ? `${pieces(kpi.totalRate)} szt/h` : '-', sub: 'dobre + odrzut', color: kpi.totalRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.totalRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
-          { label: 'Brak do celu', value: `${pieces(kpi.targetGap)} szt`, sub: kpi.targetGapHours ? `ok. ${kpi.targetGapHours}h normy` : 'cel domknięty', color: kpi.targetGap ? 'text-red-400' : 'text-green-400' },
-          { label: 'Największe ryzyko', value: worstMachine?.machineName ?? '-', sub: worstMachine ? `${worstMachine.epq}% W EPQ | ${pieces(worstMachine.goodRate)} szt/h` : 'brak danych', color: worstMachine && worstMachine.epq < 80 ? 'text-red-400' : 'text-amber-300' }
+          { label: 'Śr. wydajność zgodna', value: kpi.goodRate ? `${pieces(kpi.goodRate)} szt/h` : '-', sub: 'produkcja zgodna', color: kpi.goodRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.goodRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
+          { label: 'Śr. tempo procesu', value: kpi.totalRate ? `${pieces(kpi.totalRate)} szt/h` : '-', sub: 'produkcja całkowita', color: kpi.totalRate >= TARGET_PER_HOUR ? 'text-green-400' : kpi.totalRate >= 2500 ? 'text-amber-300' : 'text-red-400' },
+          { label: 'Odchylenie od celu', value: `${pieces(kpi.targetGap)} szt`, sub: kpi.targetGapHours ? `${kpi.targetGapHours}h potencjalu` : 'cel zrealizowany', color: kpi.targetGap ? 'text-red-400' : 'text-green-400' },
+          { label: 'Największe odchylenie', value: worstMachine?.machineName ?? '-', sub: worstMachine ? `${worstMachine.epq}% W EPQ | ${pieces(worstMachine.goodRate)} szt/h` : 'brak danych', color: worstMachine && worstMachine.epq < 80 ? 'text-red-400' : 'text-amber-300' }
         ].map(item => (
           <div key={item.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">
             <div className="text-xs font-bold uppercase tracking-wider text-navy-400">{item.label}</div>
@@ -786,7 +770,7 @@ export default function ExecutiveDashboard() {
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-6">
         {[
           { label: 'Produkcja', value: `${pieces(kpi.good)} szt`, sub: `cel ${pieces(kpi.target)} szt`, color: 'text-brand' },
-          { label: 'Realizacja celu', value: `${kpi.realization}%`, sub: 'wzgledem 3200 szt/h', color: efficiencyColor(kpi.realization) },
+            { label: 'Realizacja celu', value: `${kpi.realization}%`, sub: 'cel 18 000 szt / zmiana / automat', color: efficiencyColor(kpi.realization) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${pieces(kpi.reject)} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' },
           { label: 'Czas pracy', value: kpi.runtime ? mins(kpi.runtime) : '-', sub: 'z rozliczen zmian', color: 'text-green-400' },
           { label: 'Straty czasu', value: kpi.loss ? mins(kpi.loss) : '-', sub: 'gotowosc + alarm + postoj', color: kpi.loss > 120 ? 'text-red-400' : 'text-amber-400' },
@@ -804,7 +788,7 @@ export default function ExecutiveDashboard() {
         <div className="card-header">
           <div>
             <div className="card-title">Obraz wybranego okresu</div>
-            <div className="card-sub">Jeden wykres: produkcja, cel, realizacja i odrzut. To jest główny widok dla zarządu.</div>
+            <div className="card-sub">Zestawienie produkcji, celu, realizacji oraz odrzutu w jednym ujęciu.</div>
           </div>
         </div>
         <div className="h-[360px]">
@@ -816,10 +800,10 @@ export default function ExecutiveDashboard() {
         <div className="card-header">
           <div>
             <div className="card-title">Uzasadnienie wyniku</div>
-            <div className="card-sub">Automatyczny opis dla zarzadu na podstawie produkcji, odrzutu, strat czasu i awarii</div>
+            <div className="card-sub">Syntetyczne podsumowanie produkcji, jakości, strat czasu i zdarzeń technicznych</div>
           </div>
           <span className={cn('rounded-full px-3 py-1 text-xs font-bold', kpi.realization >= 100 ? 'bg-green-500/10 text-green-300' : kpi.realization >= 90 ? 'bg-amber-500/10 text-amber-300' : 'bg-red-500/10 text-red-300')}>
-            {kpi.realization >= 100 ? 'Cel osiagniety' : kpi.realization >= 90 ? 'Ryzyko odchylenia' : 'Cel nieosiagniety'}
+            {kpi.realization >= 100 ? 'Realizacja celu' : kpi.realization >= 90 ? 'Odchylenie kontrolowane' : 'Odchylenie od celu'}
           </span>
         </div>
         <p className="text-base leading-relaxed text-navy-100">{loading ? 'Ladowanie analizy...' : kpi.reasonText}</p>
@@ -840,7 +824,7 @@ export default function ExecutiveDashboard() {
           <div className="card-header">
             <div>
               <div className="card-title">Realizacja vs cel</div>
-              <div className="card-sub">Porownanie automatow wzgledem normy producenta</div>
+              <div className="card-sub">Zestawienie automatów względem celu 18 000 szt na zmianę</div>
             </div>
           </div>
           <div className="h-[300px]"><Bar data={machineChart} options={CHART_OPTIONS as never} /></div>
@@ -849,7 +833,7 @@ export default function ExecutiveDashboard() {
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Odrzut per automat</div>
+              <div className="card-title">Odrzut według automatów</div>
               <div className="card-sub">Prog ostrzegawczy: 5%</div>
             </div>
           </div>
@@ -859,8 +843,8 @@ export default function ExecutiveDashboard() {
         <div className="card">
           <div className="card-header">
             <div>
-              <div className="card-title">Strata do celu i wpływ czasu</div>
-              <div className="card-sub">Ile sztuk zabrakło oraz ile potencjału zabrały straty czasu</div>
+              <div className="card-title">Odchylenie od celu i wpływ czasu</div>
+              <div className="card-sub">Luka produkcyjna oraz wpływ zarejestrowanych strat czasu</div>
             </div>
           </div>
           <div className="h-[300px]"><Bar data={gapChart} options={CHART_OPTIONS as never} /></div>
@@ -876,14 +860,14 @@ export default function ExecutiveDashboard() {
           <div className="h-[300px]"><Line data={trendChart} options={CHART_OPTIONS as never} /></div>
         </div>
 
-        <div className="card">
+        <div className="card xl:col-span-2">
           <div className="card-header">
             <div>
               <div className="card-title">Przyrost godzinowy</div>
-              <div className="card-sub">Szybki obraz przebiegu dnia po automatach</div>
+              <div className="card-sub">Rozkład produkcji godzinowej według automatów</div>
             </div>
           </div>
-          <div className="h-[300px]"><Bar data={hourlyChart} options={CHART_OPTIONS as never} /></div>
+          <div className="h-[360px]"><Bar data={hourlyChart} options={CHART_OPTIONS as never} /></div>
         </div>
       </div>
 
@@ -892,7 +876,7 @@ export default function ExecutiveDashboard() {
           <div className="card-header">
             <div>
               <div className="card-title">Ranking przyczyn strat</div>
-              <div className="card-sub">Co najbardziej odciagnelo wynik od celu</div>
+              <div className="card-sub">Największe źródła odchylenia od celu</div>
             </div>
           </div>
           <div className="space-y-3">
@@ -914,7 +898,7 @@ export default function ExecutiveDashboard() {
           <div className="card-header">
             <div>
               <div className="card-title">Rekomendacje</div>
-              <div className="card-sub">Krotka lista tematow do decyzji lub kontroli</div>
+              <div className="card-sub">Priorytety wynikające z danych produkcyjnych</div>
             </div>
           </div>
           <div className="grid gap-3 md:grid-cols-2">
@@ -932,7 +916,7 @@ export default function ExecutiveDashboard() {
         <div className="card-header">
           <div>
             <div className="card-title">Analiza automatów</div>
-            <div className="card-sub">Porównanie procesu: tempo, odrzut, strata do celu i potencjalny wpływ czasu</div>
+            <div className="card-sub">Ocena automatów według tempa, jakości, celu i strat czasu</div>
           </div>
           {bestMachine && (
             <div className="grid gap-2 text-right sm:grid-cols-2">
@@ -942,7 +926,7 @@ export default function ExecutiveDashboard() {
               </div>
               {worstMachine && (
                 <div className="rounded-xl border border-red-500/25 bg-red-500/10 px-3 py-2">
-                  <div className="text-xs font-bold uppercase tracking-wider text-red-300">Do kontroli</div>
+                  <div className="text-xs font-bold uppercase tracking-wider text-red-300">Największe odchylenie</div>
                   <div className="text-sm font-black text-white">{worstMachine.machineName} | {worstMachine.epq}%</div>
                 </div>
               )}
@@ -975,7 +959,7 @@ export default function ExecutiveDashboard() {
                 <div className="rounded-xl bg-navy-800 p-3">
                   <div className="text-xs uppercase tracking-wider text-navy-500">Brak do celu</div>
                   <div className={cn('mt-1 font-mono text-xl font-black', row.gap ? 'text-red-400' : 'text-green-400')}>{pieces(row.gap)}</div>
-                  <div className="mt-1 text-xs text-navy-500">{row.gapHours ? `ok. ${row.gapHours}h normy` : 'brak luki'}</div>
+                  <div className="mt-1 text-xs text-navy-500">{row.gapHours ? `ok. ${row.gapHours}h potencjalu` : 'brak luki'}</div>
                 </div>
                 <div className="rounded-xl bg-navy-800 p-3">
                   <div className="text-xs uppercase tracking-wider text-navy-500">Straty czasu</div>
@@ -1040,7 +1024,7 @@ export default function ExecutiveDashboard() {
                     <td className="px-3 py-2 font-mono text-amber-300">{row.loss ? mins(row.loss) : '-'}</td>
                     <td className="px-3 py-2">
                       <span className={cn('rounded-full px-2 py-1 text-xs font-bold', row.missingSummary ? 'bg-amber-500/10 text-amber-300' : epq >= 90 ? 'bg-green-500/10 text-green-300' : 'bg-red-500/10 text-red-300')}>
-                        {row.missingSummary ? 'Brak rozliczenia' : epq >= 90 ? 'Stabilnie' : 'Wymaga analizy'}
+                        {row.missingSummary ? 'Niekompletne dane' : epq >= 90 ? 'Stabilnie' : 'Odchylenie'}
                       </span>
                     </td>
                   </tr>

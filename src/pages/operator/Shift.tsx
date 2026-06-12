@@ -16,6 +16,7 @@ interface ProductionOrder {
 interface Assortment { id: string; name: string; code: string }
 interface ExistingShift { id: string; ended_at: string | null }
 const ORDERS_ENABLED = false
+const TARGET_PER_SHIFT = 18000
 
 function minsToHHMM(mins: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`
@@ -291,7 +292,7 @@ export default function OperatorShift() {
     const good = Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
     const reject = Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
     const totalTime = (runtime ?? 0) + (ready ?? 0) + (alarm ?? 0) + (downtime ?? 0)
-    const expected = activeMachine ? activeMachine.target_per_hour * shiftReports.length : 0
+    const expected = TARGET_PER_SHIFT
     const lowResult = expected > 0 && good < Math.round(expected * 0.85)
     const highReject = rejectPct(good, reject) > 5
     if (totalTime <= 0) {
@@ -329,7 +330,7 @@ export default function OperatorShift() {
     : null
   const totalGood = shiftReports.reduce((s, r) => s + r.good_count, 0)
   const totalReject = shiftReports.reduce((s, r) => s + r.reject_count, 0)
-  const totalExpected = activeMachine ? shiftReports.length * activeMachine.target_per_hour : 0
+  const totalExpected = TARGET_PER_SHIFT
   const shiftRejectPct = rejectPct(totalGood, totalReject)
   const avgEff = shiftReports.length && activeMachine
     ? Math.round(totalGood / totalExpected * 100)
@@ -350,7 +351,7 @@ export default function OperatorShift() {
   const endFormDowntime = parseHHMM(endForm.downtime) ?? 0
   const endFormTotalTime = endFormRuntime + endFormReady + endFormAlarm + endFormDowntime
   const endFormMachineRate = hourlyRate(endFormGood + endFormReject, endFormRuntime)
-  const endExpected = activeMachine ? shiftReports.length * activeMachine.target_per_hour : 0
+  const endExpected = TARGET_PER_SHIFT
   const endEff = endExpected > 0 ? Math.round(endFormGood / endExpected * 100) : 0
   const endNeedsNotes = (endExpected > 0 && endFormGood < Math.round(endExpected * 0.85)) || endFormRejectPct > 5
 
@@ -579,11 +580,11 @@ export default function OperatorShift() {
                 </div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
-                <div className="text-xs text-navy-400">Norma wpisow</div>
+                <div className="text-xs text-navy-400">Cel zmiany</div>
                 <div className="font-mono text-lg font-bold text-cyan-300">{totalExpected.toLocaleString('pl-PL')}</div>
               </div>
               <div className="rounded-lg bg-navy-800 p-3">
-                <div className="text-xs text-navy-400">Srednie W EPQ</div>
+                <div className="text-xs text-navy-400">Realizacja celu</div>
                 <div className="font-mono text-lg font-bold text-white">{avgEff}%</div>
               </div>
             </div>

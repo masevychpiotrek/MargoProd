@@ -305,7 +305,7 @@ export default function OperatorDashboard() {
             <div className="kpi-card">
               <div className="kpi-label">Śr. efektywność</div>
               <div className={cn('kpi-value', efficiencyColor(avgEff))}>{avgEff > 0 ? avgEff + '%' : '—'}</div>
-              <div className="kpi-sub">vs target {TARGET} szt/h</div>
+              <div className="kpi-sub">wpisy godzinowe vs {TARGET} szt/h</div>
             </div>
             <div className="kpi-card">
               <div className="kpi-label">Odrzut łącznie</div>

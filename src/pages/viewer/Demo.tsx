@@ -141,7 +141,8 @@ export default function ViewerDemo() {
     const reject = state.results.reduce((sum, row) => sum + row.reject, 0)
     const total = good + reject
     const rejectPct = total ? Math.round((reject / total) * 1000) / 10 : 0
-    const epq = Math.round((good / Math.max(state.results.length * 3200, 1)) * 100)
+    const shiftTargets = new Set(state.results.map(row => row.machine)).size || 1
+    const epq = Math.round((good / Math.max(shiftTargets * 18000, 1)) * 100)
     return { good, reject, total, rejectPct, epq }
   }, [state.results])
 
@@ -167,7 +168,7 @@ export default function ViewerDemo() {
         {[
           { label: 'Produkcja', value: `${totals.good.toLocaleString('pl-PL')} szt`, sub: 'dobrych sztuk' },
           { label: 'Odrzut', value: `${totals.rejectPct}%`, sub: `${totals.reject.toLocaleString('pl-PL')} szt` },
-          { label: 'W EPQ', value: `${totals.epq}%`, sub: 'cel 3200 szt/h' },
+          { label: 'W EPQ', value: `${totals.epq}%`, sub: 'cel 18 000 szt / zmiana' },
           { label: 'Awarie', value: state.failures.length, sub: 'zgloszenia demo' }
         ].map(card => (
           <div key={card.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">
@@ -316,7 +317,7 @@ export default function ViewerDemo() {
               {state.results.map(result => {
                 const total = result.good + result.reject
                 const rejectPct = total ? Math.round((result.reject / total) * 1000) / 10 : 0
-                const epq = Math.round((result.good / 3200) * 100)
+                const epq = Math.round((result.good / 18000) * 100)
                 return (
                   <div key={result.id} className="rounded-2xl border border-navy-700 bg-navy-900 p-4">
                     <div className="flex flex-wrap items-center justify-between gap-3">

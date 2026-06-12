@@ -21,7 +21,8 @@ import { Bar, Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
 
-const TARGET = 3200 // manufacturer EPQ base
+const TARGET = 3200 // hourly machine performance base
+const TARGET_PER_SHIFT = 18000
 const SHIFTS = ['I', 'II', 'III'] as const
 
 const CHART_OPTS = {
@@ -227,10 +228,6 @@ function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : null
 }
 
-function runtimeTarget(ratePerHour: number, runtimeMin: number) {
-  return runtimeMin > 0 ? Math.round(ratePerHour * runtimeMin / 60) : 0
-}
-
 function reportTarget(_report: ReportWithContext, _machineRate: number) {
   return TARGET
 }
@@ -432,7 +429,6 @@ export default function ManagerDashboard() {
       const shiftType = one(report.shift)?.shift_type ?? '-'
       const key = `${report.report_date}|${shiftType}|${report.machine_id}`
       const rate = machineTargetById[report.machine_id] ?? TARGET
-      const target = reportTarget(report, rate)
       const eff = reportWepq(report, rate)
       const reject = reportRejectPct(report)
 
@@ -451,7 +447,7 @@ export default function ManagerDashboard() {
 
       acc[key].good += report.good_count
       acc[key].reject += report.reject_count
-      acc[key].target += target
+      acc[key].target = TARGET_PER_SHIFT
       acc[key].reports += 1
       if (eff > 0 && eff < 80) {
         acc[key].lowOutput += 1
@@ -481,10 +477,7 @@ export default function ManagerDashboard() {
       const ready = hasSummary ? shift?.summary_ready_min ?? 0 : 0
       const alarm = hasSummary ? shift?.summary_alarm_min ?? 0 : 0
       const downtime = hasSummary ? shift?.summary_downtime_min ?? 0 : 0
-      const machineTarget = machineTargetById[machineId] ?? TARGET
-      const target = hasSummary && runtime > 0
-        ? runtimeTarget(machineTarget, runtime)
-        : reportGroup?.target ?? 0
+      const target = reportGroup || shift ? TARGET_PER_SHIFT : 0
       const base = {
         key,
         date,
@@ -807,10 +800,9 @@ export default function ManagerDashboard() {
       const totalGood = shiftReports.reduce((sum, report) => sum + report.good_count, 0)
       const hoursWorked = shiftReports.length
       const rate = hoursWorked > 0 ? Math.round(totalGood / hoursWorked) : 0
-      const totalShiftHours = 8
-      const remainingHours = Math.max(0, totalShiftHours - hoursWorked)
+      const remainingHours = Math.max(0, 8 - hoursWorked)
       const forecast = totalGood + rate * remainingHours
-      const target = (machineTargetById[shift.machine_id] ?? TARGET) * totalShiftHours
+      const target = TARGET_PER_SHIFT
 
       return {
         shiftId: shift.id,
@@ -863,11 +855,14 @@ export default function ManagerDashboard() {
       machines: Set<string>
       shifts: Set<string>
     }> = {}
+    const countedOperatorShiftTargets = new Set<string>()
 
     filteredReports.forEach(report => {
       const operatorId = report.operator_id
       const operatorName = one(report.operator)?.full_name ?? 'Nieznany operator'
-      const target = reportTarget(report, machineTargetById[report.machine_id] ?? TARGET)
+      const shiftType = one(report.shift)?.shift_type ?? '-'
+      const targetKey = `${operatorId}|${report.report_date}|${shiftType}|${report.machine_id}`
+      const target = countedOperatorShiftTargets.has(targetKey) ? 0 : TARGET_PER_SHIFT
       const wepq = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
       const rejectPct = reportRejectPct(report)
 
@@ -891,7 +886,8 @@ export default function ManagerDashboard() {
       map[operatorId].target += target
       map[operatorId].reports += 1
       map[operatorId].machines.add(machineNameById[report.machine_id] ?? '-')
-      map[operatorId].shifts.add(one(report.shift)?.shift_type ?? '-')
+      map[operatorId].shifts.add(shiftType)
+      countedOperatorShiftTargets.add(targetKey)
       if (wepq > 0 && wepq < 80) map[operatorId].lowOutput += 1
       if (rejectPct > 5) map[operatorId].highReject += 1
     })
@@ -919,9 +915,10 @@ export default function ManagerDashboard() {
     const currentReports = dayReports
     const currentGood = currentReports.reduce((sum, report) => sum + report.good_count, 0)
     const currentReject = currentReports.reduce((sum, report) => sum + report.reject_count, 0)
-    const currentTarget = currentReports.reduce((sum, report) =>
-      sum + reportTarget(report, machineTargetById[report.machine_id] ?? TARGET), 0
-    )
+    const currentTargetKeys = new Set(currentReports.map(report =>
+      `${report.report_date}|${one(report.shift)?.shift_type ?? '-'}|${report.machine_id}`
+    ))
+    const currentTarget = currentTargetKeys.size * TARGET_PER_SHIFT
     const currentHour = lastProductionHour(currentReports)
 
     const byDate = scopedHistory.reduce<Record<string, ReportWithContext[]>>((acc, report) => {
@@ -935,9 +932,9 @@ export default function ManagerDashboard() {
         const sorted = [...rows].sort((a, b) => compareProductionHours(a.hour_start, b.hour_start))
         const finalGood = sorted.reduce((sum, report) => sum + report.good_count, 0)
         const finalReject = sorted.reduce((sum, report) => sum + report.reject_count, 0)
-        const finalTarget = sorted.reduce((sum, report) =>
-          sum + reportTarget(report, machineTargetById[report.machine_id] ?? TARGET), 0
-        )
+        const finalTarget = new Set(sorted.map(report =>
+          `${report.report_date}|${one(report.shift)?.shift_type ?? '-'}|${report.machine_id}`
+        )).size * TARGET_PER_SHIFT
         const cutoffGood = currentHour === null
           ? 0
           : sorted
@@ -971,11 +968,11 @@ export default function ManagerDashboard() {
       ? Math.round((historicalDays.reduce((sum, day) => sum + pct1(day.finalReject, day.finalGood + day.finalReject), 0) / historicalDays.length) * 10) / 10
       : pct1(currentReject, currentGood + currentReject)
     const expectedReject = Math.round(forecastGood * forecastRejectPct / Math.max(0.1, 100 - forecastRejectPct))
-    const forecastTarget = currentTarget > 0 && currentGood > 0
-      ? Math.round(currentTarget * (forecastGood / currentGood))
-      : Math.round((machineFilter === 'all'
-        ? machines.reduce((sum) => sum + TARGET, 0)
-        : machineTargetById[machineFilter] ?? TARGET) * 8)
+    const visibleMachineCount = machineFilter === 'all' ? machines.length : 1
+    const visibleShiftCount = shiftFilter === 'all' ? SHIFTS.length : 1
+    const forecastTarget = currentTarget > 0
+      ? currentTarget
+      : visibleMachineCount * visibleShiftCount * TARGET_PER_SHIFT
 
     const backtests = historicalDays
       .filter(day => day.rows.length >= 2)
@@ -1418,9 +1415,9 @@ export default function ManagerDashboard() {
         <>
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
-          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `norma z czasu ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / norma z czasu pracy', color: efficiencyColor(kpi.avgWepq) },
-          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / norma', color: efficiencyColor(kpi.wepqTotal) },
+          { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `cel ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
+          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / cel zmianowy', color: efficiencyColor(kpi.avgWepq) },
+          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / cel', color: efficiencyColor(kpi.wepqTotal) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
         ].map(item => (
           <div key={item.label} className="kpi-card">
