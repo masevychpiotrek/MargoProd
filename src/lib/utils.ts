@@ -30,7 +30,8 @@ export const ROLE_LABELS: Record<string, string> = {
   manager:  'Kierownik',
   admin:    'Administrator',
   specialist: 'Specjalista',
-  viewer: 'Gość'
+  viewer: 'Gość',
+  executive: 'Zarzad'
 }
 
 export const SHIFT_HOURS: Record<ShiftType, number[]> = {

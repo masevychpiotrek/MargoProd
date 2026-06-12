@@ -55,6 +55,11 @@ const NAV_VIEWER = [
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 
+
+const NAV_EXECUTIVE = [
+  { to: '/executive',            label: 'Panel zarzadu',    icon: Icons.live, end: true },
+  { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
+]
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
   { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
@@ -137,6 +142,7 @@ export default function AppLayout() {
   const navItems = profile?.role === 'admin'      ? NAV_ADMIN
     : profile?.role === 'specialist' ? NAV_SPECIALIST
     : profile?.role === 'manager'    ? NAV_MANAGER
+    : profile?.role === 'executive'  ? NAV_EXECUTIVE
     : profile?.role === 'viewer'     ? NAV_VIEWER
     : NAV_OPERATOR
   const visibleActiveShift = profile?.role === 'operator' &&

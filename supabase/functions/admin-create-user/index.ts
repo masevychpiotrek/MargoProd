@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ALLOWED_ROLES = new Set(['operator', 'manager', 'specialist', 'viewer', 'admin'])
+const ALLOWED_ROLES = new Set(['operator', 'manager', 'specialist', 'viewer', 'executive', 'admin'])
 
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {

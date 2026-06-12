@@ -17,6 +17,7 @@ const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ViewerDemo         = lazy(() => import('@/pages/viewer/Demo'))
+const ExecutiveDashboard = lazy(() => import('@/pages/executive/Dashboard'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
 const AdminUsers         = lazy(() => import('@/pages/admin/Users'))
 const AdminAudit         = lazy(() => import('@/pages/admin/Audit'))
@@ -113,6 +114,7 @@ function RoleRedirect() {
   if (profile?.role === 'admin')      return <Navigate to="/admin" replace />
   if (profile?.role === 'manager')    return <Navigate to="/manager" replace />
   if (profile?.role === 'viewer')     return <Navigate to="/demo" replace />
+  if (profile?.role === 'executive')  return <Navigate to="/executive" replace />
   if (profile?.role === 'specialist') return <Navigate to="/specialist" replace />
   return <Navigate to="/operator" replace />
 }
@@ -135,6 +137,7 @@ const router = createBrowserRouter([
       { index: true, element: <RoleRedirect /> },
       { path: 'password', element: <RequireAuth><Wrap><OperatorPassword /></Wrap></RequireAuth> },
       { path: 'demo', element: <RequireAuth roles={['viewer', 'admin']}><Wrap><ViewerDemo /></Wrap></RequireAuth> },
+      { path: 'executive', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },
 
       // ── OPERATOR ──
       {

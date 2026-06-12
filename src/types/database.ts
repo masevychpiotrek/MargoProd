@@ -1,7 +1,7 @@
 // Auto-generated types — odzwierciedlają schemat bazy
 // Można aktualizować przez: npx supabase gen types typescript --project-id TWOJ_ID
 
-export type UserRole = 'operator' | 'manager' | 'admin' | 'specialist' | 'viewer'
+export type UserRole = 'operator' | 'manager' | 'admin' | 'specialist' | 'viewer' | 'executive'
 export type ShiftType = 'I' | 'II' | 'III'
 export type ReportStatus = 'pending' | 'submitted' | 'approved' | 'rejected'
 export type DowntimeCategory =
