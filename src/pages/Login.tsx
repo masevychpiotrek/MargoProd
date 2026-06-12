@@ -223,8 +223,16 @@ export default function LoginPage() {
             }}>BETA</span>
           </div>
           <p className="text-sm" style={{ color: '#6b7f99' }}>System Monitorowania Produkcji</p>
-          <p className="mt-2 text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: '#c9a84c' }}>
-            Built on data. Driven by precision.
+          <p
+            className="mt-3 text-[11px] font-semibold uppercase"
+            style={{
+              color: '#c9a84c',
+              letterSpacing: '0.28em',
+              fontFamily: 'Georgia, Cambria, serif',
+              textShadow: '0 0 20px rgba(201,168,76,0.18)'
+            }}
+          >
+            From years. For years. Quality.
           </p>
         </div>
 
