@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
+import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
@@ -14,7 +14,7 @@ interface ProductionOrder {
   assortment?: { name: string }
 }
 interface Assortment { id: string; name: string; code: string }
-interface ExistingShift { id: string; ended_at: string | null; started_at?: string | null }
+interface ExistingShift { id: string; ended_at: string | null; started_at?: string | null; shift_date: string; shift_type: ShiftType }
 const ORDERS_ENABLED = false
 const TARGET_PER_SHIFT = 18000
 
@@ -170,7 +170,7 @@ export default function OperatorShift() {
     const shiftDate = getShiftDateForStart(selectedShift)
     const { data, error } = await supabase
       .from('shifts')
-      .select('id, ended_at, started_at')
+      .select('id, ended_at, started_at, shift_date, shift_type')
       .eq('machine_id', selectedMachine)
       .eq('shift_date', shiftDate)
       .eq('shift_type', selectedShift)
@@ -184,6 +184,18 @@ export default function OperatorShift() {
     return { data: activeShift ?? shifts[0] ?? null, error: null }
   }
 
+  const handleExistingShiftBlock = (existingShift: ExistingShift) => {
+    const canRestore = !!existingShift.ended_at && !isShiftPastAutoClose(existingShift.shift_date, existingShift.shift_type)
+    if (canRestore) setRestorableShift(existingShift)
+    else setRestorableShift(null)
+
+    setError(existingShift.ended_at
+      ? canRestore
+        ? 'Ta zmiana byla juz uruchomiona na tej maszynie. Nie mozna rozpoczac jej drugi raz.'
+        : 'Ta zmiana byla juz uruchomiona i minal czas na jej przywrocenie. Kierownik musi usunac bledny rekord albo skorygowac zmiane.'
+      : 'Ta zmiana jest juz aktywna na tej maszynie. Najpierw zakoncz obecna zmiane albo wybierz inna maszyne.')
+  }
+
   // Właściwy start — po potwierdzeniu
   const doStart = async () => {
     if (!selectedMachine) { setError('Wybierz maszynę'); return }
@@ -192,10 +204,7 @@ export default function OperatorShift() {
     setError('')
     const { data: existingShift } = await findExistingShift()
     if (existingShift) {
-      if (existingShift.ended_at) setRestorableShift(existingShift as ExistingShift)
-      setError(existingShift.ended_at
-        ? 'Ta zmiana była już uruchomiona na tej maszynie. Nie można rozpocząć jej drugi raz.'
-        : 'Ta zmiana jest już aktywna na tej maszynie. Najpierw zakończ obecną zmianę albo wybierz inną maszynę.')
+      handleExistingShiftBlock(existingShift)
       return
     }
     let orderId = selectedOrderId
@@ -237,10 +246,7 @@ export default function OperatorShift() {
     setError('')
     const { data: existingShift } = await findExistingShift()
     if (existingShift) {
-      if (existingShift.ended_at) setRestorableShift(existingShift as ExistingShift)
-      setError(existingShift.ended_at
-        ? 'Ta zmiana była już uruchomiona na tej maszynie. Nie można rozpocząć jej drugi raz.'
-        : 'Ta zmiana jest już aktywna na tej maszynie. Najpierw zakończ obecną zmianę albo wybierz inną maszynę.')
+      handleExistingShiftBlock(existingShift)
       return
     }
     doStart()

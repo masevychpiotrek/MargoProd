@@ -151,6 +151,22 @@ export const useShiftStore = create<ShiftState>()(
         if (!profile) return { error: 'Brak zalogowanego operatora.' }
 
         set({ isLoading: true })
+        const { data: currentShift, error: currentShiftError } = await supabase
+          .from('shifts')
+          .select('id, shift_date, shift_type')
+          .eq('id', shiftId)
+          .maybeSingle()
+
+        if (currentShiftError || !currentShift) {
+          set({ isLoading: false })
+          return { error: currentShiftError?.message ?? 'Nie znaleziono zmiany do przywrocenia.' }
+        }
+
+        if (isShiftPastAutoClose(currentShift.shift_date, currentShift.shift_type as ShiftType)) {
+          set({ isLoading: false })
+          return { error: 'Nie mozna przywrocic tej zmiany, bo minela godzina bufora po jej zakonczeniu. Kierownik musi usunac bledna zmiane albo skorygowac ja w panelu.' }
+        }
+
         const { error } = await supabase
           .from('shifts')
           .update({
