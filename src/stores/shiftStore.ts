@@ -25,7 +25,7 @@ interface ShiftState {
 
   startShift: (machineId: string, shiftType: ShiftType, operator2Id?: string) => Promise<{ error: string | null }>
   endShift: (summary?: ShiftEndSummary) => Promise<{ error: string | null }>
-  reopenShift: (shiftId: string) => Promise<{ error: string | null }>
+  reopenShift: (shiftId: string, operator2Id?: string) => Promise<{ error: string | null }>
   loadActiveShift: () => Promise<void>
 }
 
@@ -146,21 +146,28 @@ export const useShiftStore = create<ShiftState>()(
         return { error: null }
       },
 
-      reopenShift: async (shiftId) => {
+      reopenShift: async (shiftId, operator2Id) => {
+        const profile = useAuthStore.getState().profile
+        if (!profile) return { error: 'Brak zalogowanego operatora.' }
+
         set({ isLoading: true })
         const { error } = await supabase
           .from('shifts')
-          .update({ ended_at: null })
+          .update({
+            ended_at: null,
+            operator_1_id: profile.id,
+            operator_2_id: operator2Id ?? null
+          })
           .eq('id', shiftId)
 
         if (error) {
           set({ isLoading: false })
-          return { error: error.message }
+          return { error: `${error.message}. Ta zmiana moze byc przypisana do innego operatora - popraw obsade zmiany w panelu kierownika albo uruchom zmiane od nowa po usunieciu blednego rekordu.` }
         }
 
         const { data: shift, error: loadError } = await supabase
           .from('shifts')
-          .select('*, machine:machines(*)')
+          .select('*, machine:machines(*), operator_1:profiles!operator_1_id(*), operator_2:profiles!operator_2_id(*)')
           .eq('id', shiftId)
           .maybeSingle()
 

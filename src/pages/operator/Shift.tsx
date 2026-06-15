@@ -249,7 +249,7 @@ export default function OperatorShift() {
   const handleReopenShift = async () => {
     if (!restorableShift) return
     setError('')
-    const { error: reopenError } = await reopenShift(restorableShift.id)
+    const { error: reopenError } = await reopenShift(restorableShift.id, selectedOp2 || undefined)
     if (reopenError) {
       setError('Nie udalo sie przywrocic zmiany: ' + reopenError)
       return
