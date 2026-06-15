@@ -255,6 +255,7 @@ export default function OperatorShift() {
       return
     }
     setRestorableShift(null)
+    navigate('/operator/report')
   }
 
   // Sprawdź brakujące godziny przed zakończeniem zmiany
