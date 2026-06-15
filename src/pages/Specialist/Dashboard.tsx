@@ -509,7 +509,8 @@ function FailureCard(props: {
   const st = STATUS_CFG[r.status] ?? STATUS_CFG.new
   const age = ageMinutes(r.created_at)
   const machineName = r.machine?.name ?? '-'
-  const reporterName = r.reporter?.full_name ?? '-'
+  const isAuto = !!r.auto_generated
+  const reporterName = isAuto ? 'System MargoLine' : (r.reporter?.full_name ?? '-')
   const assigneeName = r.assignee?.full_name ?? ''
 
   return (
@@ -519,6 +520,7 @@ function FailureCard(props: {
           <div className="flex items-center gap-2">
             <span className={cn('h-2.5 w-2.5 rounded-full', sev.dot)} />
             <div className="font-bold text-white">{machineName}</div>
+            {isAuto && <span className="rounded-full border border-cyan-400/30 bg-cyan-400/10 px-2 py-0.5 text-xs font-bold text-cyan-300">SYSTEM</span>}
             <span className={cn('rounded-full border px-2 py-0.5 text-xs font-bold', sev.cls)}>{sev.label}</span>
             <span className={cn('rounded-full border px-2 py-0.5 text-xs font-bold', st.cls)}>{st.label}</span>
           </div>
@@ -526,6 +528,14 @@ function FailureCard(props: {
             {CAT_LABELS[r.category] ?? r.category} {r.station ? `- ${r.station}` : ''} - {minutesLabel(age)} temu
           </div>
           <p className={cn('mt-3 text-sm leading-relaxed text-navy-100', props.compact && 'line-clamp-2')}>{r.description}</p>
+          {isAuto && r.auto_metrics && (
+            <div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-4">
+              <Metric label="Dobre" value={Number(r.auto_metrics.good_count ?? 0).toLocaleString('pl-PL')} />
+              <Metric label="Odrzut" value={`${Number(r.auto_metrics.reject_pct ?? 0).toLocaleString('pl-PL')}%`} tone={Number(r.auto_metrics.reject_pct ?? 0) > 5 ? 'text-red-300' : 'text-white'} />
+              <Metric label="Prog odrzutu" value={`${Number(r.auto_metrics.reject_limit_pct ?? 5).toLocaleString('pl-PL')}%`} />
+              <Metric label="Niskie wyniki" value={String(r.auto_metrics.low_output_count ?? 0)} tone={Number(r.auto_metrics.low_output_count ?? 0) >= 2 ? 'text-amber-300' : 'text-white'} />
+            </div>
+          )}
           <div className="mt-2 text-xs text-navy-500">
             Zglosil: {reporterName}{assigneeName ? ` - prowadzi: ${assigneeName}` : ''}
           </div>

@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
+import { syncProductionAlert } from '@/lib/productionAlerts'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 3200 // manufacturer EPQ base
@@ -459,15 +460,35 @@ export default function OperatorReport() {
         order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
         order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
       }
-      const { error } = editingReportId
-        ? await supabase.from('hourly_reports').update(payload).eq('id', editingReportId)
-        : await supabase.from('hourly_reports').insert(payload)
+      const { data: savedReport, error } = editingReportId
+        ? await supabase.from('hourly_reports').update(payload).eq('id', editingReportId).select('id').single()
+        : await supabase.from('hourly_reports').insert(payload).select('id').single()
       if (error) {
         const message = getSaveErrorMessage(error.message)
         setErrors([message])
         reportValidationError(message)
         await loadReports()
         return
+      }
+      if (!testMode && savedReport?.id) {
+        syncProductionAlert({
+          reportId: savedReport.id,
+          shiftId: activeShift.id,
+          machineId: activeShift.machine_id,
+          operatorId: profile.id,
+          machineName: activeMachine?.name ?? 'Maszyna',
+          operatorName: profile.full_name,
+          shiftLabel: activeShift.shift_type,
+          reportDate: activeShift.shift_date,
+          hourBlock: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour),
+          hourStart: selectedHour,
+          goodCount: incGood,
+          rejectCount: incReject,
+          target: reportTarget,
+          resultReason: downtimeReason || null,
+          rejectReason: rejectReason || null,
+          notes: notes || null
+        }).catch(() => undefined)
       }
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setEditingReportId(null)

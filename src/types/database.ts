@@ -179,6 +179,10 @@ export interface FailureReport {
   assigned_to:      string | null
   acknowledged_at:  string | null
   resolved_at:      string | null
+  auto_generated?:  boolean
+  hourly_report_id?: string | null
+  auto_alert_type?: string | null
+  auto_metrics?:    Record<string, unknown>
   created_at:       string
   updated_at:       string
   // joined
