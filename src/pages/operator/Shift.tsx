@@ -14,7 +14,7 @@ interface ProductionOrder {
   assortment?: { name: string }
 }
 interface Assortment { id: string; name: string; code: string }
-interface ExistingShift { id: string; ended_at: string | null }
+interface ExistingShift { id: string; ended_at: string | null; started_at?: string | null }
 const ORDERS_ENABLED = false
 const TARGET_PER_SHIFT = 18000
 
@@ -45,6 +45,10 @@ function hourlyRate(pieces: number, runtimeMin: number) {
 
 function rejectPct(good: number, reject: number) {
   return good + reject > 0 ? Math.round(reject / (good + reject) * 1000) / 10 : 0
+}
+
+function isSelectableOperator(profile: Profile | null | undefined) {
+  return profile?.role === 'operator' && profile.is_active !== false && !profile.deleted_at
 }
 
 // Godziny poszczególnych zmian
@@ -88,7 +92,9 @@ export default function OperatorShift() {
 
   useEffect(() => {
     getMachines().then(({ data }) => { if (data) setMachines(data as Machine[]) })
-    getProfiles().then(({ data }) => { if (data) setOperators(data as Profile[]) })
+    getProfiles().then(({ data }) => {
+      if (data) setOperators((data as Profile[]).filter(isSelectableOperator))
+    })
     if (ORDERS_ENABLED) {
       supabase.from('assortments').select('*').eq('is_active', true).order('sort_order')
         .then(({ data }) => { if (data) setAssortments(data as Assortment[]) })
@@ -162,15 +168,20 @@ export default function OperatorShift() {
 
   const findExistingShift = async () => {
     const shiftDate = getShiftDateForStart(selectedShift)
-    return supabase
+    const { data, error } = await supabase
       .from('shifts')
-      .select('id, ended_at')
+      .select('id, ended_at, started_at')
       .eq('machine_id', selectedMachine)
       .eq('shift_date', shiftDate)
       .eq('shift_type', selectedShift)
       .order('started_at', { ascending: false })
-      .limit(1)
-      .maybeSingle()
+      .limit(20)
+
+    if (error) return { data: null, error }
+
+    const shifts = (data ?? []) as ExistingShift[]
+    const activeShift = shifts.find(shift => !shift.ended_at)
+    return { data: activeShift ?? shifts[0] ?? null, error: null }
   }
 
   // Właściwy start — po potwierdzeniu
@@ -741,7 +752,7 @@ export default function OperatorShift() {
           <label className="label">Operator Moduł 2 <span className="text-navy-500 font-normal normal-case">(opcjonalnie)</span></label>
           <select value={selectedOp2} onChange={e => setSelectedOp2(e.target.value)} className="input">
             <option value="">— Brak drugiego operatora —</option>
-            {operators.filter(o => o.id !== profile?.id).map(o => (
+            {operators.filter(o => isSelectableOperator(o) && o.id !== profile?.id).map(o => (
               <option key={o.id} value={o.id}>{o.full_name}</option>
             ))}
           </select>

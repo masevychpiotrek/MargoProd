@@ -148,16 +148,25 @@ export const useShiftStore = create<ShiftState>()(
 
       reopenShift: async (shiftId) => {
         set({ isLoading: true })
-        const { data: shift, error } = await supabase
+        const { error } = await supabase
           .from('shifts')
           .update({ ended_at: null })
           .eq('id', shiftId)
-          .select('*, machine:machines(*)')
-          .single()
 
-        if (error || !shift) {
+        if (error) {
           set({ isLoading: false })
-          return { error: error?.message ?? 'Nie udalo sie przywrocic zmiany.' }
+          return { error: error.message }
+        }
+
+        const { data: shift, error: loadError } = await supabase
+          .from('shifts')
+          .select('*, machine:machines(*)')
+          .eq('id', shiftId)
+          .maybeSingle()
+
+        if (loadError || !shift) {
+          set({ isLoading: false })
+          return { error: loadError?.message ?? 'Nie udalo sie odczytac przywroconej zmiany.' }
         }
 
         const machine = shift.machine as Machine
