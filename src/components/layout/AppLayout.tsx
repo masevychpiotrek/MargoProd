@@ -64,6 +64,7 @@ const NAV_EXECUTIVE = [
   { to: '/executive/charts',     label: 'Wykresy',          icon: Icons.live },
   { to: '/executive/machines',   label: 'Automaty',         icon: Icons.machines },
   { to: '/executive/details',    label: 'Szczegoly',        icon: Icons.report },
+  { to: '/executive/report',    label: 'Raport dnia',      icon: Icons.live },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 const NAV_SPECIALIST = [

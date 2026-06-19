@@ -53,6 +53,24 @@ const PERCENT_CHART_OPTS = {
   }
 }
 
+const MONTHLY_PERCENT_CHART_OPTS = {
+  responsive: true,
+  maintainAspectRatio: false,
+  plugins: { legend: { labels: { color: '#8892AA', font: { size: 11 }, boxWidth: 12 } } },
+  scales: {
+    y: {
+      beginAtZero: true,
+      max: 120,
+      grid: { color: 'rgba(255,255,255,0.06)' },
+      ticks: {
+        color: '#7B89A8',
+        callback: (value: string | number) => `${Number(value).toFixed(0)}%`
+      }
+    },
+    x: { grid: { display: false }, ticks: { color: '#7B89A8', maxRotation: 55, minRotation: 55 } }
+  }
+}
+
 type Mode = 'day' | 'range' | 'month'
 type ShiftFilter = 'all' | ShiftType
 type ManagerTab = 'production' | 'monthly' | 'operators' | 'forecast'
@@ -227,6 +245,10 @@ function pct1(value: number, target: number) {
   return target > 0 ? Math.round(value / target * 1000) / 10 : 0
 }
 
+function pctValue(value: number, target: number) {
+  return target > 0 ? Math.round(value / target * 1000) / 10 : 0
+}
+
 function monthTargetKey(year: string, month: string) {
   return `${MONTHLY_TARGET_STORAGE_PREFIX}.${year}-${month}`
 }
@@ -267,6 +289,14 @@ function calendarDaysOfMonth(year: string, month: string) {
     })
   }
   return days
+}
+
+function previousMonth(year: string, month: string) {
+  const date = new Date(Number(year), Number(month) - 2, 1, 12)
+  return {
+    year: String(date.getFullYear()),
+    month: String(date.getMonth() + 1).padStart(2, '0')
+  }
 }
 
 function hourlyRate(pieces: number, runtimeMin: number) {
@@ -1103,24 +1133,39 @@ export default function ManagerDashboard() {
   const monthlyPlan = useMemo(() => {
     const workdays = workdaysOfMonth(year, month)
     const calendarDays = calendarDaysOfMonth(year, month)
+    const prev = previousMonth(year, month)
+    const previousCalendarDays = calendarDaysOfMonth(prev.year, prev.month)
     const dailyPlan = workdays.length && monthlyTarget > 0 ? monthlyTarget / workdays.length : 0
     const productionByDate = filteredReports.reduce<Record<string, number>>((acc, report) => {
       acc[report.report_date] = (acc[report.report_date] ?? 0) + report.good_count
       return acc
     }, {})
+    const previousProductionByDay = historyReports.reduce<Record<string, number>>((acc, report) => {
+      if (!report.report_date.startsWith(`${prev.year}-${prev.month}`)) return acc
+      const day = report.report_date.slice(8, 10)
+      acc[day] = (acc[day] ?? 0) + report.good_count
+      return acc
+    }, {})
+    const previousHasData = Object.values(previousProductionByDay).some(value => value > 0)
 
     let cumulativeActual = 0
+    let cumulativePrevious = 0
     let cumulativePlan = 0
     const today = getProductionDate()
     const points = calendarDays.map(day => {
       if (day.workday) cumulativePlan += dailyPlan
       cumulativeActual += productionByDate[day.date] ?? 0
+      const previousDay = previousCalendarDays.find(item => item.label === day.label)
+      cumulativePrevious += previousProductionByDay[day.label] ?? 0
       const isFuture = day.date > today
       return {
         date: day.date,
         label: day.workday ? day.label : `${day.label} W`,
         plan: Math.round(cumulativePlan),
-        actual: isFuture ? null : cumulativeActual
+        actual: isFuture ? null : cumulativeActual,
+        planPct: pctValue(cumulativePlan, monthlyTarget),
+        actualPct: isFuture ? null : pctValue(cumulativeActual, monthlyTarget),
+        previousPct: previousHasData && previousDay ? pctValue(cumulativePrevious, monthlyTarget) : null
       }
     })
 
@@ -1139,34 +1184,50 @@ export default function ManagerDashboard() {
       gapToToday,
       remaining: Math.max(0, monthlyTarget - actual),
       realization: pct(actual, monthlyTarget),
-      elapsedWorkdays: Math.min(elapsedWorkdays, workdays.length || elapsedWorkdays)
+      elapsedWorkdays: Math.min(elapsedWorkdays, workdays.length || elapsedWorkdays),
+      previousLabel: `${prev.month}.${prev.year}`,
+      previousHasData
     }
-  }, [filteredReports, month, monthlyTarget, year])
+  }, [filteredReports, historyReports, month, monthlyTarget, year])
 
   const monthlyLineChart = useMemo(() => ({
     labels: monthlyPlan.points.map(point => point.label),
     datasets: [
       {
-        label: 'Plan narastajaco',
-        data: monthlyPlan.points.map(point => point.plan),
-        borderColor: '#C9A84C',
-        backgroundColor: 'rgba(201,168,76,0.14)',
+        label: 'Plan idealny',
+        data: monthlyPlan.points.map(point => point.planPct),
+        borderColor: '#1F6F9B',
+        backgroundColor: 'rgba(31,111,155,0.10)',
         tension: 0,
         stepped: 'after' as const,
-        pointRadius: monthlyPlan.points.map(point => point.label.includes('W') ? 0 : 2)
+        pointRadius: 2,
+        borderWidth: 2
       },
       {
-        label: 'Wykonanie narastajaco',
-        data: monthlyPlan.points.map(point => point.actual),
-        borderColor: '#22C55E',
-        backgroundColor: 'rgba(34,197,94,0.14)',
+        label: 'Plan faktyczny',
+        data: monthlyPlan.points.map(point => point.actualPct),
+        borderColor: '#F97316',
+        backgroundColor: 'rgba(249,115,22,0.10)',
         tension: 0,
         stepped: 'after' as const,
         pointRadius: 3,
+        borderWidth: 2,
         spanGaps: false
-      }
+      },
+      ...(monthlyPlan.previousHasData ? [{
+        label: `Realizacja ${monthlyPlan.previousLabel}`,
+        data: monthlyPlan.points.map(point => point.previousPct),
+        borderColor: '#16A34A',
+        backgroundColor: 'rgba(22,163,74,0.10)',
+        borderDash: [8, 4],
+        tension: 0,
+        stepped: 'after' as const,
+        pointRadius: 0,
+        borderWidth: 2,
+        spanGaps: false
+      }] : [])
     ]
-  }), [monthlyPlan.points])
+  }), [monthlyPlan.points, monthlyPlan.previousHasData, monthlyPlan.previousLabel])
 
   const saveMonthlyTarget = () => {
     const cleanValue = String(monthlyTarget)
@@ -1545,71 +1606,58 @@ export default function ManagerDashboard() {
           <div className="card-header">
             <div>
               <div className="card-title">Realizacja miesiaca</div>
-              <div className="card-sub">Plan i wykonanie narastajaco po dniach roboczych od poniedzialku do piatku.</div>
+              <div className="card-sub">Wykres procentowy: plan idealny, plan faktyczny i porownanie poprzedniego miesiaca.</div>
             </div>
-            <div className={cn('rounded-full px-3 py-1 text-xs font-bold', monthlyTarget > 0 && monthlyPlan.gapToToday <= 0 ? 'bg-green-500/10 text-green-300' : 'bg-red-500/10 text-red-300')}>
-              {monthlyTarget > 0
-                ? monthlyPlan.gapToToday > 0
-                  ? `Brakuje ${monthlyPlan.gapToToday.toLocaleString('pl-PL')} szt`
-                  : `Nadwyzka ${Math.abs(monthlyPlan.gapToToday).toLocaleString('pl-PL')} szt`
-                : 'Brak planu'}
+            <div className="flex flex-wrap items-end gap-2">
+              <label className="block w-28">
+                <span className="label">Miesiac</span>
+                <select className="input py-2" value={month} onChange={e => { setMonth(e.target.value); setMode('month') }}>
+                  {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(value => <option key={value} value={value}>{value}</option>)}
+                </select>
+              </label>
+              <label className="block w-28">
+                <span className="label">Rok</span>
+                <input className="input py-2" type="number" value={year} onChange={e => { setYear(e.target.value); setMode('month') }} />
+              </label>
+              <label className="block w-44">
+                <span className="label">Plan sztuk</span>
+                <input className="input py-2 font-mono font-bold" type="number" min="0" step="1000" value={monthlyTargetInput} onChange={e => setMonthlyTargetInput(e.target.value)} />
+              </label>
+              <button type="button" className="btn-primary py-2" onClick={saveMonthlyTarget}>Zapisz</button>
             </div>
           </div>
 
-          <div className="grid gap-4 xl:grid-cols-[0.78fr_1.22fr]">
-            <div className="space-y-3">
-              <div className="grid grid-cols-2 gap-2">
-                <label className="block">
-                  <span className="label">Miesiac</span>
-                  <select className="input" value={month} onChange={e => { setMonth(e.target.value); setMode('month') }}>
-                    {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(value => <option key={value} value={value}>{value}</option>)}
-                  </select>
-                </label>
-                <label className="block">
-                  <span className="label">Rok</span>
-                  <input className="input" type="number" value={year} onChange={e => { setYear(e.target.value); setMode('month') }} />
-                </label>
-              </div>
+          {monthlySaveMessage && (
+            <div className="mb-4 rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm font-bold text-green-300">
+              {monthlySaveMessage}
+            </div>
+          )}
 
-              <label className="block">
-                <span className="label">Plan miesieczny sztuk</span>
-                <input
-                  className="input-lg"
-                  type="number"
-                  min="0"
-                  step="1000"
-                  value={monthlyTargetInput}
-                  onChange={e => setMonthlyTargetInput(e.target.value)}
-                  placeholder="1600000"
-                />
-              </label>
-
-              <button type="button" className="btn-primary w-full" onClick={saveMonthlyTarget}>
-                Zapisz plan miesieczny
-              </button>
-
-              {monthlySaveMessage && (
-                <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm font-bold text-green-300">
-                  {monthlySaveMessage}
-                </div>
-              )}
-
-              <div className="grid grid-cols-2 gap-2">
-                {[
-                  ['Dni robocze', monthlyPlan.workdays.length],
-                  ['Plan / dzien', monthlyTarget ? `${monthlyPlan.dailyPlan.toLocaleString('pl-PL')}` : '-'],
-                  ['Robocze minelo', `${monthlyPlan.elapsedWorkdays}/${monthlyPlan.workdays.length || 0}`],
-                  ['Realizacja', monthlyTarget ? `${monthlyPlan.realization}%` : '-']
-                ].map(([label, value]) => (
-                  <div key={label} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
-                    <div className="text-xs font-bold uppercase tracking-wider text-navy-500">{label}</div>
-                    <div className="mt-1 font-mono text-lg font-black text-white">{value}</div>
-                  </div>
-                ))}
-              </div>
+          <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
+            <div className="overflow-hidden rounded-xl border border-navy-700">
+              <table className="w-full text-xs">
+                <thead className="bg-green-800 text-white">
+                  <tr>
+                    {['Data', 'Plan [%]', 'Realizacja [%]', 'Plan [szt]', 'Realizacja [szt]'].map(header => (
+                      <th key={header} className="px-2 py-2 text-left font-black">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyPlan.points.map(point => (
+                    <tr key={point.date} className={cn('border-b border-navy-800', point.label.includes('W') ? 'bg-navy-800/70' : 'bg-navy-900')}>
+                      <td className="px-2 py-1.5 font-mono font-bold text-white">{point.label}</td>
+                      <td className="px-2 py-1.5 font-mono text-green-300">{point.planPct.toLocaleString('pl-PL')}%</td>
+                      <td className="px-2 py-1.5 font-mono text-amber-200">{point.actualPct == null ? '-' : `${point.actualPct.toLocaleString('pl-PL')}%`}</td>
+                      <td className="px-2 py-1.5 font-mono text-blue-200">{point.plan ? point.plan.toLocaleString('pl-PL') : '-'}</td>
+                      <td className="px-2 py-1.5 font-mono text-white">{point.actual == null ? '-' : point.actual.toLocaleString('pl-PL')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
 
-            <div className="rounded-2xl border border-navy-700 bg-navy-900 p-4">
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-4">
               <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
                 {[
                   { label: 'Cel miesiaca', value: monthlyTarget ? `${monthlyTarget.toLocaleString('pl-PL')} szt` : '-', color: 'text-brand' },
@@ -1623,12 +1671,16 @@ export default function ManagerDashboard() {
                   </div>
                 ))}
               </div>
-
-              <div className="mt-5 h-[360px]">
+              <div className="mt-5 h-[520px]">
                 {monthlyTarget > 0
-                  ? <Line data={monthlyLineChart} options={CHART_OPTS as never} />
-                  : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz plan miesieczny i zapisz, zeby zobaczyc linie planu.</div>}
+                  ? <Line data={monthlyLineChart} options={MONTHLY_PERCENT_CHART_OPTS as never} />
+                  : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz plan miesieczny i zapisz, zeby zobaczyc wykres procentowy.</div>}
               </div>
+              {monthlyTarget > 0 && !monthlyPlan.previousHasData && (
+                <div className="mt-3 rounded-lg border border-amber-400/25 bg-amber-400/10 px-3 py-2 text-sm font-bold text-amber-200">
+                  Realizacja poprzedniego miesiaca ({monthlyPlan.previousLabel}): brak danych.
+                </div>
+              )}
             </div>
           </div>
         </div>

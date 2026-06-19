@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
@@ -39,7 +39,7 @@ const EXECUTIVE_CHART_OPTIONS = {
 }
 
 type Mode = 'day' | 'range' | 'month'
-type ExecutiveTab = 'summary' | 'charts' | 'machines' | 'details'
+type ExecutiveTab = 'summary' | 'charts' | 'machines' | 'details' | 'report'
 
 type ReportWithShift = HourlyReport & {
   shift?: { shift_type: ShiftType; shift_date?: string } | { shift_type: ShiftType; shift_date?: string }[] | null
@@ -173,7 +173,9 @@ export default function ExecutiveDashboard() {
       ? 'machines'
       : location.pathname.endsWith('/details')
         ? 'details'
-        : 'summary'
+        : location.pathname.endsWith('/report')
+          ? 'report'
+          : 'summary'
 
   const range = useMemo(() => {
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
@@ -1120,6 +1122,179 @@ export default function ExecutiveDashboard() {
         </div>
       )}
       </div>
+      )}
+
+      {activeTab === 'report' && (
+        <div className="space-y-5">
+          {mode !== 'day' ? (
+            <div className="rounded-2xl border border-amber-500/30 bg-amber-500/10 px-5 py-4 text-amber-300 text-sm">
+              Raport dzienny dostępny tylko w trybie <strong>Dzień</strong>. Wybierz tryb i datę powyżej.
+            </div>
+          ) : (
+            <>
+              {/* KPI bar */}
+              <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+                {(() => {
+                  const dayRows = shiftRows.filter(r => r.date === selectedDate)
+                  const totalGood = dayRows.reduce((s, r) => s + r.good, 0)
+                  const totalReject = dayRows.reduce((s, r) => s + r.reject, 0)
+                  const totalTarget = dayRows.reduce((s, r) => s + r.target, 0)
+                  const rejectPct = totalGood + totalReject > 0 ? pct1(totalReject, totalGood + totalReject) : 0
+                  const realization = totalTarget > 0 ? pct(totalGood, totalTarget) : 0
+                  return [
+                    { label: 'Produkcja zgodna', value: `${pieces(totalGood)} szt`, color: 'text-brand' },
+                    { label: 'Realizacja celu', value: `${realization}%`, color: realization >= 100 ? 'text-green-400' : realization >= 85 ? 'text-amber-300' : 'text-red-400' },
+                    { label: 'Odrzut', value: `${rejectPct}%`, color: rejectPct > 5 ? 'text-red-400' : rejectPct > 2 ? 'text-amber-300' : 'text-green-400' },
+                    { label: 'Odrzut (szt)', value: `${pieces(totalReject)} szt`, color: 'text-navy-300' }
+                  ].map(item => (
+                    <div key={item.label} className="kpi-card">
+                      <div className="kpi-label">{item.label}</div>
+                      <div className={cn('kpi-value text-xl', item.color)}>{loading ? '...' : item.value}</div>
+                    </div>
+                  ))
+                })()}
+              </div>
+
+              {/* Production table: machine × shift */}
+              <div className="card">
+                <div className="card-header">
+                  <div>
+                    <div className="card-title">Wyniki produkcyjne według zmian</div>
+                    <div className="card-sub">Dane z {selectedDate} — produkcja zgodna, odrzut i przyczyny przestojów</div>
+                  </div>
+                </div>
+                <div className="overflow-x-auto">
+                  <table className="w-full min-w-[800px] text-sm">
+                    <thead>
+                      <tr className="border-b border-navy-700">
+                        <th className="px-4 py-3 text-left text-xs font-bold uppercase tracking-wider text-navy-400">Automat</th>
+                        {SHIFTS.map(s => (
+                          <th key={s} colSpan={2} className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-navy-400 border-l border-navy-700">
+                            Zmiana {s}
+                          </th>
+                        ))}
+                        <th className="px-4 py-3 text-center text-xs font-bold uppercase tracking-wider text-navy-400 border-l border-navy-700">Razem</th>
+                      </tr>
+                      <tr className="border-b border-navy-800">
+                        <th className="px-4 py-1"></th>
+                        {SHIFTS.map(s => (
+                          <React.Fragment key={s}>
+                            <th className="px-3 py-1 text-center text-xs text-green-400 border-l border-navy-700">Zgodna</th>
+                            <th className="px-3 py-1 text-center text-xs text-red-400">Odrzut</th>
+                          </React.Fragment>
+                        ))}
+                        <th className="px-4 py-1 text-center text-xs text-navy-400 border-l border-navy-700">Zgodna</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {machines.map(machine => {
+                        const byShift: Record<string, typeof shiftRows[number] | undefined> = {}
+                        SHIFTS.forEach(s => {
+                          byShift[s] = shiftRows.find(r => r.date === selectedDate && r.machineName === machine.name && r.shift === s)
+                        })
+                        const machineTotal = SHIFTS.reduce((sum, s) => sum + (byShift[s]?.good ?? 0), 0)
+                        if (SHIFTS.every(s => !byShift[s])) return null
+                        return (
+                          <tr key={machine.id} className="border-b border-navy-800 hover:bg-navy-800/40">
+                            <td className="px-4 py-3 font-bold text-white">{machine.name}</td>
+                            {SHIFTS.map(s => {
+                              const row = byShift[s]
+                              const rejectPct = row && row.good + row.reject > 0 ? pct1(row.reject, row.good + row.reject) : 0
+                              const noProduction = !row || (row.good === 0 && row.reject === 0)
+                              const reason = row?.notes.find(n => n.trim())
+                              return (
+                                <React.Fragment key={s}>
+                                  <td className="px-3 py-3 text-center border-l border-navy-700">
+                                    {noProduction ? (
+                                      <div className="text-center">
+                                        <span className="text-xs text-navy-500 block">—</span>
+                                        {reason && (
+                                          <span className="text-xs text-amber-400 block mt-1 leading-tight max-w-[120px] mx-auto">{reason}</span>
+                                        )}
+                                      </div>
+                                    ) : (
+                                      <span className="font-mono font-bold text-white">{pieces(row!.good)}</span>
+                                    )}
+                                  </td>
+                                  <td className="px-3 py-3 text-center">
+                                    {!noProduction && (
+                                      <span className={cn('font-mono text-xs', rejectPct > 5 ? 'text-red-400 font-bold' : rejectPct > 2 ? 'text-amber-300' : 'text-navy-400')}>
+                                        {rejectPct > 0 ? `${rejectPct}%` : '—'}
+                                      </span>
+                                    )}
+                                  </td>
+                                </React.Fragment>
+                              )
+                            })}
+                            <td className="px-4 py-3 text-center font-mono font-bold text-brand border-l border-navy-700">
+                              {pieces(machineTotal)}
+                            </td>
+                          </tr>
+                        )
+                      })}
+                      {/* Totals row */}
+                      {(() => {
+                        const dayRows = shiftRows.filter(r => r.date === selectedDate)
+                        return (
+                          <tr className="border-t-2 border-navy-600 bg-navy-800/60">
+                            <td className="px-4 py-3 text-xs font-bold uppercase tracking-wider text-navy-400">Łącznie</td>
+                            {SHIFTS.map(s => {
+                              const shiftGood = dayRows.filter(r => r.shift === s).reduce((sum, r) => sum + r.good, 0)
+                              const shiftReject = dayRows.filter(r => r.shift === s).reduce((sum, r) => sum + r.reject, 0)
+                              const rPct = shiftGood + shiftReject > 0 ? pct1(shiftReject, shiftGood + shiftReject) : 0
+                              return (
+                                <React.Fragment key={s}>
+                                  <td className="px-3 py-3 text-center border-l border-navy-700">
+                                    <span className="font-mono font-bold text-green-400">{pieces(shiftGood)}</span>
+                                  </td>
+                                  <td className="px-3 py-3 text-center">
+                                    <span className={cn('font-mono text-xs font-bold', rPct > 5 ? 'text-red-400' : 'text-navy-400')}>
+                                      {rPct > 0 ? `${rPct}%` : '—'}
+                                    </span>
+                                  </td>
+                                </React.Fragment>
+                              )
+                            })}
+                            <td className="px-4 py-3 text-center font-mono font-bold text-brand border-l border-navy-700">
+                              {pieces(dayRows.reduce((s, r) => s + r.good, 0))}
+                            </td>
+                          </tr>
+                        )
+                      })()}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+
+              {/* Uwagi kierownika — notatki z poszczególnych zmian */}
+              {(() => {
+                const dayNotes = shiftRows.filter(r => r.date === selectedDate && r.notes.length > 0)
+                if (dayNotes.length === 0) return null
+                return (
+                  <div className="card">
+                    <div className="card-header">
+                      <div>
+                        <div className="card-title">Komentarze kierownika</div>
+                        <div className="card-sub">Informacje ze zmian — postoje, odrzuty, zdarzenia</div>
+                      </div>
+                    </div>
+                    <div className="mt-4 grid gap-3 xl:grid-cols-3">
+                      {dayNotes.map(row => (
+                        <div key={row.key} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                          <div className="flex items-center gap-2 mb-2">
+                            <span className="text-xs font-bold uppercase tracking-wider text-brand">Zmiana {row.shift}</span>
+                            <span className="text-white font-bold text-sm">{row.machineName}</span>
+                          </div>
+                          <p className="text-sm text-navy-200 leading-relaxed whitespace-pre-wrap">{row.notes.join(' • ')}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )
+              })()}
+            </>
+          )}
+        </div>
       )}
     </div>
   )

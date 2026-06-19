@@ -933,12 +933,13 @@ interface ReportModalProps {
   totals: ShiftSummary
   shiftTotals: Record<ShiftType, ShiftSummary>
   eventsByShift: Record<ShiftType, ShiftEvent[]>
+  shiftSummaries: ShiftWithSummary[]
   onClose: () => void
 }
 
 type NoProductionGap = { machineId: string; machineName: string; shift: ShiftType }
 
-function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, onClose }: ReportModalProps) {
+function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, shiftSummaries, onClose }: ReportModalProps) {
   const gaps: NoProductionGap[] = rows.flatMap(row =>
     SHIFTS.filter(s => !row.shifts[s].good && !row.shifts[s].reports).map(s => ({
       machineId: row.machineId, machineName: row.machineName, shift: s
@@ -966,11 +967,26 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
 
   function gapKey(g: NoProductionGap) { return `${g.machineId}__${g.shift}` }
 
-  function startGenerate() {
+  async function startGenerate() {
     if (generated.current) return
     generated.current = true
+    // Persist gap reasons to shifts.summary_notes so executive panel can see them
+    await Promise.all(gaps.map(async g => {
+      const reason = gapReasons[gapKey(g)]?.trim()
+      if (!reason) return
+      const existing = shiftSummaries.find(s => s.machine_id === g.machineId && s.shift_type === g.shift && s.shift_date === date)
+      if (existing) {
+        await supabase.from('shifts').update({ summary_notes: reason }).eq('id', existing.id)
+      } else {
+        await supabase.from('shifts').upsert({
+          machine_id: g.machineId, shift_type: g.shift, shift_date: date, summary_notes: reason
+        }, { onConflict: 'machine_id,shift_type,shift_date' })
+      }
+    }))
     generate(gapReasons)
   }
+
+  const allGapsFilled = gaps.every(g => gapReasons[gapKey(g)]?.trim())
 
   async function generate(reasons: Record<string, string>) {
     setStep('loading')
@@ -1089,30 +1105,39 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
           {/* PREFLIGHT — powody braków produkcji */}
           {step === 'preflight' && (
             <div className="space-y-4">
-              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
-                Wykryto {gaps.length} {gaps.length === 1 ? 'zmianę' : 'zmiany'} bez produkcji. Możesz wpisać powód — AI uwzględni go w raporcie.
+              <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+                <span className="font-bold">Wymagane wyjaśnienie</span> — wykryto {gaps.length} {gaps.length === 1 ? 'zmianę' : 'zmiany'} bez produkcji. Przed wygenerowaniem raportu należy opisać przyczynę każdego przestoju. Opis będzie widoczny w panelu zarządu.
               </div>
               <div className="space-y-3 max-h-72 overflow-y-auto">
-                {gaps.map(g => (
-                  <div key={gapKey(g)} className="rounded-xl border border-navy-600 bg-navy-900 p-4">
-                    <div className="flex items-center gap-2 mb-2">
-                      <span className="text-xs font-bold text-navy-400 uppercase tracking-wider">Zmiana {g.shift}</span>
-                      <span className="text-white font-bold text-sm">{g.machineName}</span>
-                      <span className="ml-auto text-xs text-navy-500">0 szt.</span>
+                {gaps.map(g => {
+                  const filled = !!gapReasons[gapKey(g)]?.trim()
+                  return (
+                    <div key={gapKey(g)} className={cn('rounded-xl border p-4', filled ? 'border-navy-600 bg-navy-900' : 'border-red-500/40 bg-red-500/5')}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <span className="text-xs font-bold text-navy-400 uppercase tracking-wider">Zmiana {g.shift}</span>
+                        <span className="text-white font-bold text-sm">{g.machineName}</span>
+                        <span className={cn('ml-auto text-xs font-bold', filled ? 'text-green-400' : 'text-red-400')}>
+                          {filled ? '✓' : '* wymagane'}
+                        </span>
+                      </div>
+                      <input
+                        type="text"
+                        className={cn('input text-sm', !filled && 'border-red-500/50 focus:border-red-400')}
+                        placeholder="np. planowy postój techniczny, brak zlecenia, święto zakładu..."
+                        value={gapReasons[gapKey(g)] ?? ''}
+                        onChange={e => setGapReasons(prev => ({ ...prev, [gapKey(g)]: e.target.value }))}
+                      />
                     </div>
-                    <input
-                      type="text"
-                      className="input text-sm"
-                      placeholder="np. planowy postój techniczny, brak zlecenia, święto..."
-                      value={gapReasons[gapKey(g)] ?? ''}
-                      onChange={e => setGapReasons(prev => ({ ...prev, [gapKey(g)]: e.target.value }))}
-                    />
-                  </div>
-                ))}
+                  )
+                })}
               </div>
               <div className="flex gap-3 pt-1">
-                <button onClick={startGenerate} className="btn-primary flex-1 py-3 font-bold">
-                  Generuj raport
+                <button
+                  onClick={startGenerate}
+                  disabled={!allGapsFilled}
+                  className="btn-primary flex-1 py-3 font-bold disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {allGapsFilled ? 'Generuj raport' : `Uzupełnij wszystkie pola (${gaps.filter(g => !gapReasons[gapKey(g)]?.trim()).length} brakujących)`}
                 </button>
                 <button onClick={onClose} className="btn-secondary px-5 py-3">Anuluj</button>
               </div>
@@ -1415,6 +1440,7 @@ export default function ManagerDayReport() {
           totals={totals}
           shiftTotals={shiftTotals}
           eventsByShift={eventsByShift}
+          shiftSummaries={shiftSummaries}
           onClose={() => setModalState('closed')}
         />
       )}
