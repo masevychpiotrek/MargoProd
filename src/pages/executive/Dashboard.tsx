@@ -1110,7 +1110,7 @@ export default function ExecutiveDashboard() {
                   {rows.slice(0, 6).map(row => (
                     <div key={row.key} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
                       <div className="text-xs font-bold uppercase tracking-wider text-brand">{row.machineName} - {row.date}</div>
-                      <p className="mt-2 line-clamp-4 text-sm leading-relaxed text-navy-200">{row.notes.join(' ')}</p>
+                      <p className="mt-2 whitespace-pre-wrap break-words text-sm leading-relaxed text-navy-200">{row.notes.join(' ')}</p>
                     </div>
                   ))}
                 </div>

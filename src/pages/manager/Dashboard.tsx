@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { useAuthStore } from '@/stores/authStore'
@@ -254,6 +255,20 @@ function workdaysOfMonth(year: string, month: string) {
   return days
 }
 
+function calendarDaysOfMonth(year: string, month: string) {
+  const days: { date: string; label: string; workday: boolean }[] = []
+  const totalDays = new Date(Number(year), Number(month), 0).getDate()
+  for (let day = 1; day <= totalDays; day += 1) {
+    const date = new Date(Number(year), Number(month) - 1, day, 12)
+    days.push({
+      date: iso(date),
+      label: String(day).padStart(2, '0'),
+      workday: isWorkday(date)
+    })
+  }
+  return days
+}
+
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : null
 }
@@ -294,6 +309,8 @@ function groupSuggestion(row: Omit<GroupRow, 'suggestion'>) {
 }
 
 export default function ManagerDashboard() {
+  const location = useLocation()
+  const navigate = useNavigate()
   const { profile } = useAuthStore()
   const { time } = useClock()
   const productionDate = getProductionDate()
@@ -309,7 +326,6 @@ export default function ManagerDashboard() {
   const [deleting, setDeleting] = useState(false)
   const [editError, setEditError] = useState('')
   const [mode, setMode] = useState<Mode>('day')
-  const [activeTab, setActiveTab] = useState<ManagerTab>('production')
   const [selectedDate, setSelectedDate] = useState(productionDate)
   const [fromDate, setFromDate] = useState(productionDate)
   const [toDate, setToDate] = useState(productionDate)
@@ -331,6 +347,13 @@ export default function ManagerDashboard() {
   const loadRequestSeq = useRef(0)
   const groupsTableRef = useRef<HTMLDivElement>(null)
   const dayTimelineRef = useRef<HTMLDivElement>(null)
+  const activeTab: ManagerTab = location.pathname.endsWith('/monthly')
+    ? 'monthly'
+    : location.pathname.endsWith('/operators')
+      ? 'operators'
+      : location.pathname.endsWith('/forecast')
+        ? 'forecast'
+        : 'production'
 
   const queryRange = useMemo(() => {
     if (activeTab === 'monthly') return { from: startOfMonth(year, month), to: endOfMonth(year, month) }
@@ -1079,23 +1102,24 @@ export default function ManagerDashboard() {
   const monthlyTarget = Math.max(0, Number.parseInt(monthlyTargetInput || '0', 10) || 0)
   const monthlyPlan = useMemo(() => {
     const workdays = workdaysOfMonth(year, month)
-    const workdaySet = new Set(workdays)
+    const calendarDays = calendarDaysOfMonth(year, month)
     const dailyPlan = workdays.length && monthlyTarget > 0 ? monthlyTarget / workdays.length : 0
     const productionByDate = filteredReports.reduce<Record<string, number>>((acc, report) => {
-      if (!workdaySet.has(report.report_date)) return acc
       acc[report.report_date] = (acc[report.report_date] ?? 0) + report.good_count
       return acc
     }, {})
 
     let cumulativeActual = 0
+    let cumulativePlan = 0
     const today = getProductionDate()
-    const points = workdays.map((date, index) => {
-      cumulativeActual += productionByDate[date] ?? 0
-      const isFuture = date > today
+    const points = calendarDays.map(day => {
+      if (day.workday) cumulativePlan += dailyPlan
+      cumulativeActual += productionByDate[day.date] ?? 0
+      const isFuture = day.date > today
       return {
-        date,
-        label: date.slice(8, 10),
-        plan: Math.round(dailyPlan * (index + 1)),
+        date: day.date,
+        label: day.workday ? day.label : `${day.label} W`,
+        plan: Math.round(cumulativePlan),
         actual: isFuture ? null : cumulativeActual
       }
     })
@@ -1107,6 +1131,7 @@ export default function ManagerDashboard() {
 
     return {
       workdays,
+      calendarDays,
       points,
       actual,
       dailyPlan: Math.round(dailyPlan),
@@ -1126,15 +1151,17 @@ export default function ManagerDashboard() {
         data: monthlyPlan.points.map(point => point.plan),
         borderColor: '#C9A84C',
         backgroundColor: 'rgba(201,168,76,0.14)',
-        tension: 0.25,
-        pointRadius: 2
+        tension: 0,
+        stepped: 'after' as const,
+        pointRadius: monthlyPlan.points.map(point => point.label.includes('W') ? 0 : 2)
       },
       {
         label: 'Wykonanie narastajaco',
         data: monthlyPlan.points.map(point => point.actual),
         borderColor: '#22C55E',
         backgroundColor: 'rgba(34,197,94,0.14)',
-        tension: 0.25,
+        tension: 0,
+        stepped: 'after' as const,
         pointRadius: 3,
         spanGaps: false
       }
@@ -1175,7 +1202,7 @@ export default function ManagerDashboard() {
   }
 
   const focusGroup = (row: GroupRow, target: 'table' | 'timeline' = 'table') => {
-    setActiveTab('production')
+    navigate('/manager')
     setMode('day')
     setSelectedDate(row.date)
     setMachineFilter(row.machineId)
@@ -1193,7 +1220,7 @@ export default function ManagerDashboard() {
       const report = filteredReports.find(row => row.id === item.reportId)
       if (!report) return
       const shiftType = one(report.shift)?.shift_type ?? 'all'
-      setActiveTab('production')
+      navigate('/manager')
       setMode('day')
       setSelectedDate(report.report_date)
       setMachineFilter(report.machine_id)
@@ -1451,27 +1478,6 @@ export default function ManagerDashboard() {
           </div>
           <button onClick={load} className="btn-secondary text-xs py-1.5 px-3">Odswiez</button>
         </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1 sm:grid-cols-2 xl:grid-cols-4">
-        {([
-          ['production', 'Produkcja'],
-          ['monthly', 'Realizacja miesiaca'],
-          ['operators', 'Ranking operatorow'],
-          ['forecast', 'Prognoza dnia']
-        ] as const).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => {
-              setActiveTab(value)
-              if (value === 'monthly') setMode('month')
-            }}
-            className={cn('rounded-xl px-3 py-2 text-sm font-bold transition-all', activeTab === value ? 'btn-primary' : 'text-navy-300 hover:bg-navy-800 hover:text-white')}
-          >
-            {label}
-          </button>
-        ))}
       </div>
 
       <div className="card">

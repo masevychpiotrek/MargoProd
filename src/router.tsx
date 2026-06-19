@@ -163,6 +163,18 @@ const router = createBrowserRouter([
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
       },
       {
+        path: 'manager/monthly',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/operators',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/forecast',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDashboard /></Wrap></RequireAuth>
+      },
+      {
         path: 'manager/day-report',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerDayReport /></Wrap></RequireAuth>
       },

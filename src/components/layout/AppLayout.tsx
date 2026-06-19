@@ -43,7 +43,10 @@ const NAV_OPERATOR = [
 ]
 
 const NAV_MANAGER = [
-  { to: '/manager',              label: 'Live produkcja',   icon: Icons.live,    end: true },
+  { to: '/manager',              label: 'Produkcja',        icon: Icons.live,    end: true },
+  { to: '/manager/monthly',      label: 'Realizacja mies.', icon: Icons.plan },
+  { to: '/manager/operators',    label: 'Ranking operatorow', icon: Icons.users },
+  { to: '/manager/forecast',     label: 'Prognoza dnia',    icon: Icons.dashboard },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
   { to: '/manager/failures',      label: 'Awarie i technik', icon: Icons.failure },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
