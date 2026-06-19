@@ -24,19 +24,6 @@ const CHART_OPTIONS = {
   }
 }
 
-const EXECUTIVE_CHART_OPTIONS = {
-  ...CHART_OPTIONS,
-  scales: {
-    y: { beginAtZero: true, position: 'left' as const, grid: { color: 'rgba(255,255,255,0.05)' }, ticks: { color: '#7B89A8' } },
-    y1: {
-      beginAtZero: true,
-      position: 'right' as const,
-      grid: { drawOnChartArea: false },
-      ticks: { color: '#C9A84C', callback: (value: string | number) => `${value}%` }
-    },
-    x: { grid: { display: false }, ticks: { color: '#7B89A8' } }
-  }
-}
 
 type Mode = 'day' | 'range' | 'month'
 type ExecutiveTab = 'summary' | 'charts' | 'machines' | 'details' | 'report'
@@ -167,6 +154,9 @@ export default function ExecutiveDashboard() {
   const [failures, setFailures] = useState<FailureReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [editingGap, setEditingGap] = useState<{ machineId: string; machineDate: string; shift: ShiftType } | null>(null)
+  const [editGapValue, setEditGapValue] = useState('')
+  const [savingGap, setSavingGap] = useState(false)
   const activeTab: ExecutiveTab = location.pathname.endsWith('/charts')
     ? 'charts'
     : location.pathname.endsWith('/machines')
@@ -176,6 +166,22 @@ export default function ExecutiveDashboard() {
         : location.pathname.endsWith('/report')
           ? 'report'
           : 'summary'
+
+  async function saveGapReason() {
+    if (!editingGap || !editGapValue.trim()) return
+    setSavingGap(true)
+    const { machineId, machineDate, shift } = editingGap
+    const existing = shifts.find(s => s.machine_id === machineId && s.shift_type === shift && s.shift_date === machineDate)
+    if (existing) {
+      await supabase.from('shifts').update({ summary_notes: editGapValue.trim() }).eq('id', existing.id)
+    } else {
+      await supabase.from('shifts').upsert({
+        machine_id: machineId, shift_type: shift, shift_date: machineDate, summary_notes: editGapValue.trim()
+      }, { onConflict: 'machine_id,shift_type,shift_date' })
+    }
+    setSavingGap(false)
+    setEditingGap(null)
+  }
 
   const range = useMemo(() => {
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
@@ -701,6 +707,67 @@ export default function ExecutiveDashboard() {
     }))
   }
 
+  const monthlyPlanChart = useMemo(() => {
+    if (dailyTrend.length === 0) return null
+    let cumGood = 0, cumTarget = 0
+    const rows = dailyTrend.map(item => {
+      cumGood += item.good
+      cumTarget += item.target
+      return { date: item.date, good: item.good, target: item.target, cumGood, cumTarget, realization: item.realization }
+    })
+    return {
+      labels: rows.map(r => r.date),
+      datasets: [
+        {
+          type: 'bar' as const,
+          label: 'Produkcja dzienna',
+          data: rows.map(r => r.good),
+          backgroundColor: rows.map(r => r.realization >= 100 ? 'rgba(34,197,94,0.75)' : r.realization >= 85 ? 'rgba(59,130,246,0.75)' : 'rgba(239,68,68,0.70)'),
+          borderRadius: 5,
+          yAxisID: 'y',
+          order: 2
+        },
+        {
+          type: 'line' as const,
+          label: 'Plan dzienny',
+          data: rows.map(r => r.target),
+          borderColor: 'rgba(201,168,76,0.9)',
+          backgroundColor: 'transparent',
+          borderWidth: 2,
+          borderDash: [6, 3],
+          pointRadius: 0,
+          yAxisID: 'y',
+          order: 1
+        },
+        {
+          type: 'line' as const,
+          label: 'Narastająco (produkcja)',
+          data: rows.map(r => r.cumGood),
+          borderColor: '#3B82F6',
+          backgroundColor: 'rgba(59,130,246,0.08)',
+          borderWidth: 2.5,
+          tension: 0.3,
+          pointRadius: 2,
+          fill: true,
+          yAxisID: 'y2',
+          order: 0
+        },
+        {
+          type: 'line' as const,
+          label: 'Narastająco (plan)',
+          data: rows.map(r => r.cumTarget),
+          borderColor: 'rgba(201,168,76,0.7)',
+          backgroundColor: 'transparent',
+          borderWidth: 1.5,
+          borderDash: [4, 4],
+          pointRadius: 0,
+          yAxisID: 'y2',
+          order: 0
+        }
+      ]
+    }
+  }, [dailyTrend])
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -802,13 +869,80 @@ export default function ExecutiveDashboard() {
         <div className="card-header">
           <div>
             <div className="card-title">Obraz wybranego okresu</div>
-            <div className="card-sub">Zestawienie produkcji, celu, realizacji oraz odrzutu w jednym ujęciu.</div>
+            <div className="card-sub">Dzienna produkcja (słupki) vs plan (linia przerywana) — kolor wskazuje realizację celu.</div>
           </div>
         </div>
-        <div className="h-[360px]">
-          <Bar data={executivePeriodChart as never} options={EXECUTIVE_CHART_OPTIONS as never} />
+        <div className="h-[340px]">
+          <Bar data={executivePeriodChart as never} options={{
+            responsive: true,
+            maintainAspectRatio: false,
+            interaction: { mode: 'index' as const, intersect: false },
+            plugins: {
+              legend: { labels: { color: '#8892AA', font: { size: 11 }, boxWidth: 10, padding: 16 } },
+              tooltip: {
+                backgroundColor: '#0F1A2E',
+                borderColor: 'rgba(59,130,246,0.3)',
+                borderWidth: 1,
+                titleColor: '#CBD5E1',
+                bodyColor: '#94A3B8',
+                padding: 10
+              }
+            },
+            scales: {
+              y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7B89A8' }, title: { display: true, text: 'szt.', color: '#64748B', font: { size: 10 } } },
+              y1: { beginAtZero: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: '#7B89A8', callback: (v: string | number) => `${v}%` }, max: 120 },
+              x: { grid: { display: false }, ticks: { color: '#7B89A8', font: { size: 10 } } }
+            }
+          } as never} />
         </div>
       </div>
+
+      {monthlyPlanChart && (
+        <div className="card">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Plan miesięczny — realizacja narastająca</div>
+              <div className="card-sub">Słupki = produkcja dzienna | linia niebieska = narastająco | linia złota = gdzie powinniśmy być</div>
+            </div>
+            {(() => {
+              const last = dailyTrend[dailyTrend.length - 1]
+              if (!last) return null
+              let cumGood = 0, cumTarget = 0
+              dailyTrend.forEach(d => { cumGood += d.good; cumTarget += d.target })
+              const monthPct = cumTarget > 0 ? Math.round(cumGood / cumTarget * 100) : 0
+              return (
+                <span className={cn('rounded-full px-3 py-1 text-xs font-bold', monthPct >= 100 ? 'bg-green-500/10 text-green-300' : monthPct >= 90 ? 'bg-amber-500/10 text-amber-300' : 'bg-red-500/10 text-red-300')}>
+                  {monthPct}% planu łącznie
+                </span>
+              )
+            })()}
+          </div>
+          <div className="h-[360px]">
+            <Bar data={monthlyPlanChart as never} options={{
+              responsive: true,
+              maintainAspectRatio: false,
+              interaction: { mode: 'index' as const, intersect: false },
+              plugins: {
+                legend: { labels: { color: '#8892AA', font: { size: 11 }, boxWidth: 10, padding: 16 } },
+                tooltip: {
+                  backgroundColor: '#0F1A2E',
+                  borderColor: 'rgba(59,130,246,0.3)',
+                  borderWidth: 1,
+                  titleColor: '#CBD5E1',
+                  bodyColor: '#94A3B8',
+                  padding: 10,
+                  callbacks: { label: (ctx: { dataset: { label?: string }; formattedValue: string }) => `${ctx.dataset.label}: ${ctx.formattedValue} szt` }
+                }
+              },
+              scales: {
+                y: { beginAtZero: true, grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#7B89A8' }, title: { display: true, text: 'dzienna (szt)', color: '#64748B', font: { size: 10 } } },
+                y2: { beginAtZero: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: '#3B82F6' }, title: { display: true, text: 'narastająco (szt)', color: '#3B82F6', font: { size: 10 } } },
+                x: { grid: { display: false }, ticks: { color: '#7B89A8', font: { size: 10 } } }
+              }
+            } as never} />
+          </div>
+        </div>
+      )}
 
       <div className="card border-brand/25">
         <div className="card-header">
@@ -1202,27 +1336,53 @@ export default function ExecutiveDashboard() {
                               const rejectPct = row && row.good + row.reject > 0 ? pct1(row.reject, row.good + row.reject) : 0
                               const noProduction = !row || (row.good === 0 && row.reject === 0)
                               const reason = row?.notes.find(n => n.trim())
+                              const isEditing = editingGap?.machineId === machine.id && editingGap?.machineDate === selectedDate && editingGap?.shift === s
                               return (
                                 <React.Fragment key={s}>
-                                  <td className="px-3 py-3 text-center border-l border-navy-700">
+                                  <td className={cn('px-3 py-3 text-center border-l border-navy-700', noProduction && 'bg-red-500/5')} colSpan={noProduction ? 2 : 1}>
                                     {noProduction ? (
-                                      <div className="text-center">
-                                        <span className="text-xs text-navy-500 block">—</span>
-                                        {reason && (
-                                          <span className="text-xs text-amber-400 block mt-1 leading-tight max-w-[120px] mx-auto">{reason}</span>
-                                        )}
-                                      </div>
+                                      isEditing ? (
+                                        <div className="flex items-center gap-1 min-w-[180px]" onClick={e => e.stopPropagation()}>
+                                          <input
+                                            autoFocus
+                                            className="flex-1 rounded-lg border border-brand/50 bg-navy-800 px-2 py-1 text-xs text-white outline-none focus:border-brand"
+                                            placeholder="przyczyna postoju..."
+                                            value={editGapValue}
+                                            onChange={e => setEditGapValue(e.target.value)}
+                                            onKeyDown={e => { if (e.key === 'Enter') saveGapReason(); if (e.key === 'Escape') setEditingGap(null) }}
+                                          />
+                                          <button
+                                            onClick={saveGapReason}
+                                            disabled={savingGap || !editGapValue.trim()}
+                                            className="rounded-lg bg-brand px-2 py-1 text-xs font-bold text-navy-950 disabled:opacity-40"
+                                          >
+                                            {savingGap ? '...' : 'OK'}
+                                          </button>
+                                          <button onClick={() => setEditingGap(null)} className="text-navy-500 hover:text-navy-300 text-xs px-1">✕</button>
+                                        </div>
+                                      ) : (
+                                        <div className="flex items-center justify-center gap-2 group cursor-pointer"
+                                          onClick={() => { setEditingGap({ machineId: machine.id, machineDate: selectedDate, shift: s }); setEditGapValue(reason ?? '') }}>
+                                          <span className="text-xs text-red-400/70 font-bold">przestój</span>
+                                          {reason ? (
+                                            <span className="text-xs text-amber-400 leading-tight max-w-[140px] truncate" title={reason}>{reason}</span>
+                                          ) : (
+                                            <span className="text-xs text-navy-600 group-hover:text-navy-400 italic">+ wpisz przyczynę</span>
+                                          )}
+                                          <span className="text-navy-600 group-hover:text-brand text-xs opacity-0 group-hover:opacity-100 transition-opacity">✎</span>
+                                        </div>
+                                      )
                                     ) : (
                                       <span className="font-mono font-bold text-white">{pieces(row!.good)}</span>
                                     )}
                                   </td>
-                                  <td className="px-3 py-3 text-center">
-                                    {!noProduction && (
+                                  {!noProduction && (
+                                    <td className="px-3 py-3 text-center">
                                       <span className={cn('font-mono text-xs', rejectPct > 5 ? 'text-red-400 font-bold' : rejectPct > 2 ? 'text-amber-300' : 'text-navy-400')}>
                                         {rejectPct > 0 ? `${rejectPct}%` : '—'}
                                       </span>
-                                    )}
-                                  </td>
+                                    </td>
+                                  )}
                                 </React.Fragment>
                               )
                             })}
