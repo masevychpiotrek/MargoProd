@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import type { AuditLog, Machine, Profile, Shift } from '@/types/database'
+import { usePresenceList, type PresenceUser } from '@/hooks/usePresence'
 
 interface Stats {
   users: number
@@ -54,9 +55,21 @@ function describeWhy(log: Activity) {
   return 'brak opisu'
 }
 
+const ROLE_COLORS: Record<string, string> = {
+  admin: 'bg-purple-500/20 text-purple-300', manager: 'bg-blue-500/20 text-blue-300',
+  executive: 'bg-amber-500/20 text-amber-300', operator: 'bg-green-500/20 text-green-300',
+  specialist: 'bg-cyan-500/20 text-cyan-300', viewer: 'bg-navy-700/50 text-navy-300',
+}
+const ROLE_PL: Record<string, string> = {
+  admin: 'Admin', manager: 'Kierownik', executive: 'Zarząd',
+  operator: 'Operator', specialist: 'Serwis', viewer: 'Gość'
+}
+
 export default function AdminDashboard() {
   const navigate = useNavigate()
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([])
+  const { subscribe } = usePresenceList()
   const [stats, setStats] = useState<Stats>({
     users: 0, inactiveUsers: 0, operators: 0, machines: 0,
     activeShifts: 0, reportsToday: 0, auditToday: 0
@@ -109,7 +122,8 @@ export default function AdminDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, load)
       .subscribe()
-    return () => { channel.current?.unsubscribe() }
+    const unsubPresence = subscribe(setOnlineUsers)
+    return () => { channel.current?.unsubscribe(); unsubPresence() }
   }, [])
 
   const issues = useMemo(() => {
@@ -149,6 +163,40 @@ export default function AdminDashboard() {
             <div className="kpi-sub">{t.sub}</div>
           </button>
         ))}
+      </div>
+
+      {/* Live presence */}
+      <div className="rounded-2xl border border-green-500/20 bg-green-500/5 px-4 py-3">
+        <div className="flex items-center justify-between mb-3">
+          <div className="flex items-center gap-2">
+            <span className="inline-block w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-sm font-bold text-white">Kto jest teraz w systemie</span>
+          </div>
+          <span className="text-xs font-mono text-green-400 font-bold">{onlineUsers.length} online</span>
+        </div>
+        {onlineUsers.length === 0 ? (
+          <p className="text-xs text-navy-500 italic">Brak aktywnych sesji</p>
+        ) : (
+          <div className="flex flex-wrap gap-2">
+            {onlineUsers.map(u => (
+              <div key={u.user_id} className="flex items-center gap-2 rounded-xl border border-navy-700 bg-navy-900 px-3 py-2">
+                <div className="relative">
+                  <div className="w-7 h-7 rounded-full bg-navy-700 flex items-center justify-center text-xs font-bold text-white">
+                    {u.full_name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
+                  </div>
+                  <span className="absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-400 border-2 border-navy-900" />
+                </div>
+                <div>
+                  <div className="text-xs font-bold text-white leading-tight">{u.full_name}</div>
+                  <div className="text-xs text-navy-400 leading-tight">{u.page}</div>
+                </div>
+                <span className={cn('text-xs font-bold rounded-full px-2 py-0.5', ROLE_COLORS[u.role] ?? 'bg-navy-700 text-navy-300')}>
+                  {ROLE_PL[u.role] ?? u.role}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="grid gap-4 xl:grid-cols-3">

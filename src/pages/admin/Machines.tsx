@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, logAudit } from '@/lib/supabase'
 import type { Machine } from '@/types/database'
 
 export default function AdminMachines() {
@@ -29,12 +29,18 @@ export default function AdminMachines() {
     const { error } = await supabase.from('machines').update(changes).eq('id', m.id)
     setSaving(null)
     if (error) { setMsg('Błąd: ' + error.message) }
-    else { setMsg(`${m.name} zaktualizowany`); load() }
+    else {
+      const oldVals = Object.fromEntries(Object.keys(changes).map(k => [k, (m as unknown as Record<string, unknown>)[k]]))
+      await logAudit('config_change', 'machines', m.id, { name: m.name, ...oldVals }, { name: m.name, ...changes })
+      setMsg(`${m.name} zaktualizowany`)
+      load()
+    }
     setTimeout(() => setMsg(''), 3000)
   }
 
   const toggleActive = async (m: Machine) => {
     await supabase.from('machines').update({ is_active: !m.is_active }).eq('id', m.id)
+    await logAudit('config_change', 'machines', m.id, { name: m.name, is_active: m.is_active }, { name: m.name, is_active: !m.is_active })
     load()
   }
 

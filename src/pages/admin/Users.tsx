@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { supabase } from '@/lib/supabase'
+import { supabase, logAudit } from '@/lib/supabase'
 import { ROLE_LABELS, cn } from '@/lib/utils'
 import type { Profile, UserRole } from '@/types/database'
 import RFIDModal from '@/components/admin/RFIDModal'
@@ -54,6 +54,7 @@ export default function AdminUsers() {
 
   const handleToggleActive = async (user: UserRow) => {
     await supabase.from('profiles').update({ is_active: !user.is_active }).eq('id', user.id)
+    await logAudit('user_update', 'profiles', user.id, { is_active: user.is_active }, { is_active: !user.is_active, full_name: user.full_name })
     setMsg(user.is_active ? `Konto ${user.full_name} dezaktywowane` : `Konto ${user.full_name} aktywowane`)
     loadUsers()
     setTimeout(() => setMsg(''), 3000)
@@ -61,6 +62,7 @@ export default function AdminUsers() {
 
   const handleRoleChange = async (user: UserRow, role: UserRole) => {
     await supabase.from('profiles').update({ role }).eq('id', user.id)
+    await logAudit('user_update', 'profiles', user.id, { role: user.role, full_name: user.full_name }, { role, full_name: user.full_name })
     setMsg(`Rola ${user.full_name} zmieniona na ${ROLE_LABELS[role]}`)
     loadUsers()
     setTimeout(() => setMsg(''), 3000)
@@ -122,6 +124,7 @@ export default function AdminUsers() {
       setSaving(false)
       return
     }
+    await logAudit('user_create', 'profiles', createResult?.id, undefined, { full_name: newName.trim(), email, role: newRole })
     setMsg(`Uzytkownik ${newName.trim()} zostal dodany. Przy pierwszym logowaniu system wymusi zmiane hasla.`)
     setShowAdd(false)
     setNewName(''); setNewEmail(''); setNewPass('Margomed123'); setNewRole('operator')
@@ -140,6 +143,7 @@ export default function AdminUsers() {
       setTimeout(() => setMsg(''), 5000)
       return
     }
+    await logAudit('user_delete', 'profiles', user.id, { full_name: user.full_name, role: user.role }, undefined)
     setMsg(`Uzytkownik ${user.full_name} usuniety`)
     loadUsers()
     setTimeout(() => setMsg(''), 3000)

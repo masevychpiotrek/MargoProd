@@ -14,6 +14,8 @@ export type AuditAction =
   | 'user_create' | 'user_update' | 'user_delete' | 'password_change'
   | 'shift_start' | 'shift_end' | 'config_change'
   | 'failure_report_create' | 'failure_report_update'
+  | 'shift_manager_correction' | 'manager_report_update' | 'manager_report_delete'
+  | 'manager_order_update' | 'manager_order_report_update'
 
 export type FailureSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type FailureStatus   = 'new' | 'acknowledged' | 'in_progress' | 'unresolved' | 'resolved'

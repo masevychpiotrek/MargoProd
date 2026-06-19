@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
-import { supabase } from '@/lib/supabase'
+import { supabase, logAudit } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
@@ -490,6 +490,13 @@ export default function OperatorReport() {
           notes: notes || null
         }).catch(() => undefined)
       }
+      void logAudit(
+        editingReportId ? 'report_update' : 'report_create',
+        'hourly_reports',
+        savedReport?.id ?? editingReportId ?? undefined,
+        editingReportId ? { hour_start: selectedHour, machine_id: activeShift.machine_id } : undefined,
+        { hour_start: selectedHour, good_count: incGood, reject_count: incReject, machine_id: activeShift.machine_id, shift_id: activeShift.id }
+      )
       setSaved(true); setTimeout(() => setSaved(false), 3000)
       setEditingReportId(null)
       setCounterGood(''); setCounterReject('')

@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
-import { supabase } from '@/lib/supabase'
+import { supabase, logAudit } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
@@ -179,6 +179,7 @@ export default function ExecutiveDashboard() {
         machine_id: machineId, shift_type: shift, shift_date: machineDate, summary_notes: editGapValue.trim()
       }, { onConflict: 'machine_id,shift_type,shift_date' })
     }
+    await logAudit('config_change', 'shifts', existing?.id, { summary_notes: existing?.summary_notes ?? null }, { summary_notes: editGapValue.trim(), machine_id: machineId, shift_type: shift, shift_date: machineDate, source: 'executive_dashboard' })
     setSavingGap(false)
     setEditingGap(null)
   }

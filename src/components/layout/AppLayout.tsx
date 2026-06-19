@@ -9,6 +9,7 @@ import { AlertProvider } from '@/features/notifications/AlertProvider'
 import RobotAssistant from '@/components/shared/RobotAssistant'
 import type { Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
+import { usePresence } from '@/hooks/usePresence'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -92,6 +93,7 @@ export default function AppLayout() {
   const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
   const testMode = useTestMode()
   const { time, date } = useClock()
+  usePresence()
   const navigate = useNavigate()
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
