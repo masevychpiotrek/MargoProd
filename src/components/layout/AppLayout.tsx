@@ -7,7 +7,6 @@ import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import RobotAssistant from '@/components/shared/RobotAssistant'
-import MonthlyTargetPanel from '@/components/shared/MonthlyTargetPanel'
 import type { Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 
@@ -160,7 +159,6 @@ export default function AppLayout() {
   const visibleShiftOperators = visibleActiveShift
     ? [visibleActiveShift.operator_1?.full_name, visibleActiveShift.operator_2?.full_name].filter(Boolean).join(' / ')
     : ''
-  const showMonthlyTargetPanel = profile?.role === 'manager'
 
   const handleSignOut = async () => {
     if (profile?.role === 'viewer') sessionStorage.removeItem('margoline_viewer_demo_state')
@@ -376,7 +374,6 @@ export default function AppLayout() {
           </div>
         </AlertProvider>
       </main>
-      {showMonthlyTargetPanel && <MonthlyTargetPanel />}
       <RobotAssistant />
 
       {/* Modal wylogowania */}

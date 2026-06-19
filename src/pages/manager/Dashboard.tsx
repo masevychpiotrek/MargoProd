@@ -24,6 +24,8 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 const TARGET = 3200 // hourly machine performance base
 const TARGET_PER_SHIFT = 18000
 const SHIFTS = ['I', 'II', 'III'] as const
+const MONTHLY_TARGET_STORAGE_PREFIX = 'margoprod.monthly-target'
+const DEFAULT_JUNE_PLAN = 1600000
 
 const CHART_OPTS = {
   responsive: true,
@@ -52,7 +54,7 @@ const PERCENT_CHART_OPTS = {
 
 type Mode = 'day' | 'range' | 'month'
 type ShiftFilter = 'all' | ShiftType
-type ManagerTab = 'production' | 'operators' | 'forecast'
+type ManagerTab = 'production' | 'monthly' | 'operators' | 'forecast'
 
 type Recommendation = {
   title: string
@@ -224,6 +226,34 @@ function pct1(value: number, target: number) {
   return target > 0 ? Math.round(value / target * 1000) / 10 : 0
 }
 
+function monthTargetKey(year: string, month: string) {
+  return `${MONTHLY_TARGET_STORAGE_PREFIX}.${year}-${month}`
+}
+
+function defaultMonthlyTarget(month: string) {
+  return month === '06' ? String(DEFAULT_JUNE_PLAN) : ''
+}
+
+function readStoredMonthlyTarget(year: string, month: string) {
+  if (typeof window === 'undefined') return defaultMonthlyTarget(month)
+  return window.localStorage.getItem(monthTargetKey(year, month)) ?? defaultMonthlyTarget(month)
+}
+
+function isWorkday(date: Date) {
+  const day = date.getDay()
+  return day >= 1 && day <= 5
+}
+
+function workdaysOfMonth(year: string, month: string) {
+  const days: string[] = []
+  const totalDays = new Date(Number(year), Number(month), 0).getDate()
+  for (let day = 1; day <= totalDays; day += 1) {
+    const date = new Date(Number(year), Number(month) - 1, day, 12)
+    if (isWorkday(date)) days.push(iso(date))
+  }
+  return days
+}
+
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : null
 }
@@ -285,6 +315,10 @@ export default function ManagerDashboard() {
   const [toDate, setToDate] = useState(productionDate)
   const [month, setMonth] = useState(productionDate.slice(5, 7))
   const [year, setYear] = useState(productionDate.slice(0, 4))
+  const [monthlyTargetInput, setMonthlyTargetInput] = useState(() =>
+    readStoredMonthlyTarget(productionDate.slice(0, 4), productionDate.slice(5, 7))
+  )
+  const [monthlySaveMessage, setMonthlySaveMessage] = useState('')
   const [shiftFilter, setShiftFilter] = useState<ShiftFilter>('all')
   const [machineFilter, setMachineFilter] = useState('all')
   const [editing, setEditing] = useState<ReportWithContext | null>(null)
@@ -299,10 +333,16 @@ export default function ManagerDashboard() {
   const dayTimelineRef = useRef<HTMLDivElement>(null)
 
   const queryRange = useMemo(() => {
+    if (activeTab === 'monthly') return { from: startOfMonth(year, month), to: endOfMonth(year, month) }
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
     if (mode === 'month') return { from: startOfMonth(year, month), to: endOfMonth(year, month) }
     return { from: fromDate <= toDate ? fromDate : toDate, to: fromDate <= toDate ? toDate : fromDate }
-  }, [fromDate, mode, month, selectedDate, toDate, year])
+  }, [activeTab, fromDate, mode, month, selectedDate, toDate, year])
+
+  useEffect(() => {
+    setMonthlyTargetInput(readStoredMonthlyTarget(year, month))
+    setMonthlySaveMessage('')
+  }, [month, year])
 
   const machineNameById = useMemo(
     () => Object.fromEntries(machines.map(machine => [machine.id, machine.name])),
@@ -1036,6 +1076,85 @@ export default function ManagerDashboard() {
     }
   }, [dayReports, machineFilter, machines])
 
+  const monthlyTarget = Math.max(0, Number.parseInt(monthlyTargetInput || '0', 10) || 0)
+  const monthlyPlan = useMemo(() => {
+    const workdays = workdaysOfMonth(year, month)
+    const workdaySet = new Set(workdays)
+    const dailyPlan = workdays.length && monthlyTarget > 0 ? monthlyTarget / workdays.length : 0
+    const productionByDate = filteredReports.reduce<Record<string, number>>((acc, report) => {
+      if (!workdaySet.has(report.report_date)) return acc
+      acc[report.report_date] = (acc[report.report_date] ?? 0) + report.good_count
+      return acc
+    }, {})
+
+    let cumulativeActual = 0
+    const today = getProductionDate()
+    const points = workdays.map((date, index) => {
+      cumulativeActual += productionByDate[date] ?? 0
+      const isFuture = date > today
+      return {
+        date,
+        label: date.slice(8, 10),
+        plan: Math.round(dailyPlan * (index + 1)),
+        actual: isFuture ? null : cumulativeActual
+      }
+    })
+
+    const actual = Object.values(productionByDate).reduce((sum, value) => sum + value, 0)
+    const elapsedWorkdays = workdays.filter(date => date <= today).length || 1
+    const expectedToday = monthlyTarget > 0 ? Math.round(dailyPlan * Math.min(elapsedWorkdays, workdays.length || elapsedWorkdays)) : 0
+    const gapToToday = expectedToday - actual
+
+    return {
+      workdays,
+      points,
+      actual,
+      dailyPlan: Math.round(dailyPlan),
+      expectedToday,
+      gapToToday,
+      remaining: Math.max(0, monthlyTarget - actual),
+      realization: pct(actual, monthlyTarget),
+      elapsedWorkdays: Math.min(elapsedWorkdays, workdays.length || elapsedWorkdays)
+    }
+  }, [filteredReports, month, monthlyTarget, year])
+
+  const monthlyLineChart = useMemo(() => ({
+    labels: monthlyPlan.points.map(point => point.label),
+    datasets: [
+      {
+        label: 'Plan narastajaco',
+        data: monthlyPlan.points.map(point => point.plan),
+        borderColor: '#C9A84C',
+        backgroundColor: 'rgba(201,168,76,0.14)',
+        tension: 0.25,
+        pointRadius: 2
+      },
+      {
+        label: 'Wykonanie narastajaco',
+        data: monthlyPlan.points.map(point => point.actual),
+        borderColor: '#22C55E',
+        backgroundColor: 'rgba(34,197,94,0.14)',
+        tension: 0.25,
+        pointRadius: 3,
+        spanGaps: false
+      }
+    ]
+  }), [monthlyPlan.points])
+
+  const saveMonthlyTarget = () => {
+    const cleanValue = String(monthlyTarget)
+    if (monthlyTarget > 0) {
+      window.localStorage.setItem(monthTargetKey(year, month), cleanValue)
+      setMonthlyTargetInput(cleanValue)
+      setMonthlySaveMessage(`Plan na ${month}.${year} zapisany: ${monthlyTarget.toLocaleString('pl-PL')} szt.`)
+    } else {
+      window.localStorage.removeItem(monthTargetKey(year, month))
+      setMonthlyTargetInput('')
+      setMonthlySaveMessage(`Plan na ${month}.${year} wyczyszczony.`)
+    }
+    window.setTimeout(() => setMonthlySaveMessage(''), 4000)
+  }
+
   const openEdit = (report: ReportWithContext) => {
     if (!canEdit) return
     setEditing(report)
@@ -1334,16 +1453,20 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1 sm:grid-cols-3">
+      <div className="grid grid-cols-1 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1 sm:grid-cols-2 xl:grid-cols-4">
         {([
           ['production', 'Produkcja'],
+          ['monthly', 'Realizacja miesiaca'],
           ['operators', 'Ranking operatorow'],
           ['forecast', 'Prognoza dnia']
         ] as const).map(([value, label]) => (
           <button
             key={value}
             type="button"
-            onClick={() => setActiveTab(value)}
+            onClick={() => {
+              setActiveTab(value)
+              if (value === 'monthly') setMode('month')
+            }}
             className={cn('rounded-xl px-3 py-2 text-sm font-bold transition-all', activeTab === value ? 'btn-primary' : 'text-navy-300 hover:bg-navy-800 hover:text-white')}
           >
             {label}
@@ -1410,6 +1533,100 @@ export default function ManagerDashboard() {
           </div>
         </div>
       </div>
+
+      {activeTab === 'monthly' && (
+        <div className="card border-brand/20">
+          <div className="card-header">
+            <div>
+              <div className="card-title">Realizacja miesiaca</div>
+              <div className="card-sub">Plan i wykonanie narastajaco po dniach roboczych od poniedzialku do piatku.</div>
+            </div>
+            <div className={cn('rounded-full px-3 py-1 text-xs font-bold', monthlyTarget > 0 && monthlyPlan.gapToToday <= 0 ? 'bg-green-500/10 text-green-300' : 'bg-red-500/10 text-red-300')}>
+              {monthlyTarget > 0
+                ? monthlyPlan.gapToToday > 0
+                  ? `Brakuje ${monthlyPlan.gapToToday.toLocaleString('pl-PL')} szt`
+                  : `Nadwyzka ${Math.abs(monthlyPlan.gapToToday).toLocaleString('pl-PL')} szt`
+                : 'Brak planu'}
+            </div>
+          </div>
+
+          <div className="grid gap-4 xl:grid-cols-[0.78fr_1.22fr]">
+            <div className="space-y-3">
+              <div className="grid grid-cols-2 gap-2">
+                <label className="block">
+                  <span className="label">Miesiac</span>
+                  <select className="input" value={month} onChange={e => { setMonth(e.target.value); setMode('month') }}>
+                    {Array.from({ length: 12 }, (_, i) => String(i + 1).padStart(2, '0')).map(value => <option key={value} value={value}>{value}</option>)}
+                  </select>
+                </label>
+                <label className="block">
+                  <span className="label">Rok</span>
+                  <input className="input" type="number" value={year} onChange={e => { setYear(e.target.value); setMode('month') }} />
+                </label>
+              </div>
+
+              <label className="block">
+                <span className="label">Plan miesieczny sztuk</span>
+                <input
+                  className="input-lg"
+                  type="number"
+                  min="0"
+                  step="1000"
+                  value={monthlyTargetInput}
+                  onChange={e => setMonthlyTargetInput(e.target.value)}
+                  placeholder="1600000"
+                />
+              </label>
+
+              <button type="button" className="btn-primary w-full" onClick={saveMonthlyTarget}>
+                Zapisz plan miesieczny
+              </button>
+
+              {monthlySaveMessage && (
+                <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm font-bold text-green-300">
+                  {monthlySaveMessage}
+                </div>
+              )}
+
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  ['Dni robocze', monthlyPlan.workdays.length],
+                  ['Plan / dzien', monthlyTarget ? `${monthlyPlan.dailyPlan.toLocaleString('pl-PL')}` : '-'],
+                  ['Robocze minelo', `${monthlyPlan.elapsedWorkdays}/${monthlyPlan.workdays.length || 0}`],
+                  ['Realizacja', monthlyTarget ? `${monthlyPlan.realization}%` : '-']
+                ].map(([label, value]) => (
+                  <div key={label} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-navy-500">{label}</div>
+                    <div className="mt-1 font-mono text-lg font-black text-white">{value}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border border-navy-700 bg-navy-900 p-4">
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                {[
+                  { label: 'Cel miesiaca', value: monthlyTarget ? `${monthlyTarget.toLocaleString('pl-PL')} szt` : '-', color: 'text-brand' },
+                  { label: 'Jest teraz', value: `${monthlyPlan.actual.toLocaleString('pl-PL')} szt`, color: efficiencyColor(monthlyPlan.realization) },
+                  { label: 'Powinno byc', value: monthlyTarget ? `${monthlyPlan.expectedToday.toLocaleString('pl-PL')} szt` : '-', color: 'text-amber-300' },
+                  { label: 'Do konca', value: monthlyTarget ? `${monthlyPlan.remaining.toLocaleString('pl-PL')} szt` : '-', color: monthlyPlan.remaining ? 'text-cyan-300' : 'text-green-400' }
+                ].map(item => (
+                  <div key={item.label} className="rounded-xl border border-navy-700 bg-navy-800 p-3">
+                    <div className="text-xs font-bold uppercase tracking-wider text-navy-500">{item.label}</div>
+                    <div className={cn('mt-1 font-mono text-lg font-black', item.color)}>{loading ? '...' : item.value}</div>
+                  </div>
+                ))}
+              </div>
+
+              <div className="mt-5 h-[360px]">
+                {monthlyTarget > 0
+                  ? <Line data={monthlyLineChart} options={CHART_OPTS as never} />
+                  : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz plan miesieczny i zapisz, zeby zobaczyc linie planu.</div>}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {activeTab === 'production' && (
         <>
