@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import type { AuditLog } from '@/types/database'
 import { usePresenceList, type PresenceUser } from '@/hooks/usePresence'
+import { useCallback } from 'react'
 
 type AuditRow = AuditLog & { profile?: { full_name: string; role?: string } | null }
 
@@ -151,9 +152,8 @@ const ROLE_LABELS_PL: Record<string, string> = {
 
 function OnlinePanel() {
   const [users, setUsers] = useState<PresenceUser[]>([])
-  const { subscribe } = usePresenceList()
-
-  useEffect(() => subscribe(setUsers), [])
+  const handleChange = useCallback((u: PresenceUser[]) => setUsers(u), [])
+  usePresenceList(handleChange)
 
   return (
     <div className="rounded-2xl border border-green-500/20 bg-green-500/5 p-4">

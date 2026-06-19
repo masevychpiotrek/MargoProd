@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import type { AuditLog, Machine, Profile, Shift } from '@/types/database'
 import { usePresenceList, type PresenceUser } from '@/hooks/usePresence'
+import { useCallback } from 'react'
 
 interface Stats {
   users: number
@@ -69,7 +70,8 @@ export default function AdminDashboard() {
   const navigate = useNavigate()
   const channel = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const [onlineUsers, setOnlineUsers] = useState<PresenceUser[]>([])
-  const { subscribe } = usePresenceList()
+  const handlePresence = useCallback((u: PresenceUser[]) => setOnlineUsers(u), [])
+  usePresenceList(handlePresence)
   const [stats, setStats] = useState<Stats>({
     users: 0, inactiveUsers: 0, operators: 0, machines: 0,
     activeShifts: 0, reportsToday: 0, auditToday: 0
@@ -122,8 +124,7 @@ export default function AdminDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'profiles' }, load)
       .subscribe()
-    const unsubPresence = subscribe(setOnlineUsers)
-    return () => { channel.current?.unsubscribe(); unsubPresence() }
+    return () => { channel.current?.unsubscribe() }
   }, [])
 
   const issues = useMemo(() => {
