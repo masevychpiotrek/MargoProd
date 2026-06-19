@@ -171,7 +171,7 @@ function buildEmailHtml(params: {
     return `style="background:${bg};border:1px solid ${br};padding:10px 14px;color:${tx};${F};vertical-align:middle;${extra}"`
   }
   function fmtCell(p: number, o: number) {
-    if (!p && !o) return `<em style="color:${K.gray4};${F};font-size:12px">Brak produkcji</em>`
+    if (!p && !o) return `<span style="color:${K.gray3};font-size:11px;${F}">Zmiana nieprodukcyjna</span><br><span style="color:${K.gray4};font-size:10px;${F}">brak wpisów w systemie</span>`
     const rj = p > 0 ? ((o / p) * 100).toFixed(1) : '0.0'
     const rjColor = parseFloat(rj) > 5 ? K.red : parseFloat(rj) > 2 ? K.amber : K.green
     return `<span style="font-size:15px;font-weight:bold;color:${K.navy};${F}">${pieces(p)} szt.</span>`
@@ -364,23 +364,23 @@ ${machineRows}
   }
 
   return `<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="${F};color:${K.navy};margin:0;padding:0;background:#F1F5F9">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#F1F5F9"><tr><td align="center" style="padding:24px 12px">
-<table width="640" cellpadding="0" cellspacing="0" border="0" style="max-width:640px;background:${K.white};border:1px solid ${K.gray2}">
+<body style="${F};color:${K.navy};margin:0;padding:0;background:#ffffff">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff"><tr><td style="padding:0">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${K.white};border-bottom:1px solid ${K.gray2}">
 
   <!-- HEADER -->
-  <tr><td style="background:${K.navy};padding:0">
+  <tr><td style="background:#1E3A5F;padding:0">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="padding:20px 24px;vertical-align:middle">
-        <p style="margin:0;font-size:10px;font-weight:bold;color:#94A3B8;text-transform:uppercase;letter-spacing:1.2px;${F}">Margomed S.A.</p>
-        <p style="margin:4px 0 0;font-size:18px;font-weight:bold;color:#fff;${F}">Wydzia&#322; Monta&#380;u Automatycznego</p>
-        <p style="margin:4px 0 0;font-size:12px;color:#93C5FD;${F}">Raport produkcyjny &bull; ${dateLong}</p>
+      <td style="padding:18px 28px;vertical-align:middle">
+        <p style="margin:0;font-size:10px;font-weight:bold;color:#93C5FD;text-transform:uppercase;letter-spacing:1.2px;${F}">Margomed S.A.</p>
+        <p style="margin:4px 0 0;font-size:17px;font-weight:bold;color:#fff;${F}">Wydzia&#322; Monta&#380;u Automatycznego</p>
+        <p style="margin:4px 0 0;font-size:12px;color:#BAD4F5;${F}">Raport produkcyjny &bull; ${dateLong}</p>
       </td>
-      <td align="right" style="padding:20px 24px;vertical-align:middle;white-space:nowrap">
+      <td align="right" style="padding:18px 28px;vertical-align:middle;white-space:nowrap">
         <table cellpadding="0" cellspacing="0" border="0"><tr>
           <td width="34" height="34" align="center" valign="middle" style="background:#0F172A;border:1px solid #C9A84C;color:#C9A84C;font-size:11px;font-weight:bold;${F}">ML</td>
           <td style="padding-left:8px;text-align:left">
-            <p style="margin:0;font-size:10px;color:#94A3B8;${F}">System</p>
+            <p style="margin:0;font-size:10px;color:#93C5FD;${F}">System</p>
             <p style="margin:2px 0 0;font-size:12px;font-weight:bold;color:#fff;${F}">MargoLine</p>
           </td>
         </tr></table>
@@ -389,7 +389,7 @@ ${machineRows}
   </td></tr>
 
   <!-- BODY -->
-  <tr><td style="padding:24px 24px 32px">
+  <tr><td style="padding:24px 28px 32px">
 
     <p style="margin:0 0 20px;font-size:14px;line-height:1.9;color:${K.navy};${F}">
       Szanowni Pa&#324;stwo,<br>
@@ -436,7 +436,7 @@ ${machineRows}
   </td></tr>
 
   <!-- FOOTER -->
-  <tr><td style="background:${K.gray1};border-top:1px solid ${K.gray2};padding:12px 24px">
+  <tr><td style="background:${K.gray1};border-top:1px solid ${K.gray2};padding:12px 28px">
     <p style="margin:0;font-size:10px;color:${K.gray4};${F}">Wygenerowano automatycznie przez system MargoLine &bull; ${generatedAt} &bull; Dane za dzie&#324; ${dateFormatted}</p>
   </td></tr>
 
@@ -444,6 +444,7 @@ ${machineRows}
 </td></tr></table>
 </body></html>`
 }
+
 
 // ─── System report content ────────────────────────────────────────────────────
 
@@ -935,8 +936,19 @@ interface ReportModalProps {
   onClose: () => void
 }
 
+type NoProductionGap = { machineId: string; machineName: string; shift: ShiftType }
+
 function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, onClose }: ReportModalProps) {
-  const [step, setStep] = useState<'loading' | 'done' | 'error'>('loading')
+  const gaps: NoProductionGap[] = rows.flatMap(row =>
+    SHIFTS.filter(s => !row.shifts[s].good && !row.shifts[s].reports).map(s => ({
+      machineId: row.machineId, machineName: row.machineName, shift: s
+    }))
+  )
+
+  const [step, setStep] = useState<'preflight' | 'loading' | 'done' | 'error'>(
+    gaps.length > 0 ? 'preflight' : 'loading'
+  )
+  const [gapReasons, setGapReasons] = useState<Record<string, string>>({})
   const [emailHtml, setEmailHtml] = useState('')
   const [errorMsg, setErrorMsg] = useState('')
   const [apiKey, setApiKey] = useState(() => localStorage.getItem('margoline_api_key') || '')
@@ -946,12 +958,21 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
   const machineNames = rows.map(r => r.machineName)
 
   useEffect(() => {
+    if (gaps.length > 0) return
     if (generated.current) return
     generated.current = true
-    generate()
+    generate({})
   }, [])
 
-  async function generate() {
+  function gapKey(g: NoProductionGap) { return `${g.machineId}__${g.shift}` }
+
+  function startGenerate() {
+    if (generated.current) return
+    generated.current = true
+    generate(gapReasons)
+  }
+
+  async function generate(reasons: Record<string, string>) {
     setStep('loading')
     try {
       const key = apiKey.trim()
@@ -959,28 +980,37 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
       let shiftsHtml: string
       let attentionHtml = ''
 
+      // Wstrzyknij powody braków produkcji jako zdarzenia systemowe
+      const eventsWithGaps: Record<ShiftType, ShiftEvent[]> = { ...reportEvents }
+      gaps.forEach(g => {
+        const reason = reasons[gapKey(g)]?.trim()
+        if (!reason) return
+        eventsWithGaps[g.shift] = [
+          ...(eventsWithGaps[g.shift] ?? []),
+          { machine: g.machineName, hour: 'cała zmiana', text: `Zmiana nieprodukcyjna — ${reason}`, operator: 'kierownik' }
+        ]
+      })
+
       if (key) {
-        // 1. Popraw pisownię notatek operatorów
         try {
-          reportEvents = await polishEventsWithAi(key, eventsByShift)
+          reportEvents = await polishEventsWithAi(key, eventsWithGaps)
         } catch (err) {
+          reportEvents = eventsWithGaps
           console.warn('AI polish skipped', err)
         }
-        // 2. Generuj narrację zmian przez AI (zamiast szablonu)
         try {
           shiftsHtml = await generateShiftNarrativeWithAi(key, reportEvents, shiftTotals, rows)
         } catch (err) {
           console.warn('AI narrative failed, falling back to template', err)
           shiftsHtml = buildSystemReportHtml(reportEvents, shiftTotals, machineNames, rows)
         }
-        // 3. Generuj sekcję "Co wymaga uwagi"
         try {
           attentionHtml = await generateAttentionSectionWithAi(key, reportEvents, rows)
         } catch (err) {
           console.warn('AI attention section skipped', err)
         }
       } else {
-        shiftsHtml = buildSystemReportHtml(reportEvents, shiftTotals, machineNames, rows)
+        shiftsHtml = buildSystemReportHtml(eventsWithGaps, shiftTotals, machineNames, rows)
       }
 
       const html = buildEmailHtml({ date, rows, reports, totals, shiftTotals, shiftsHtml, attentionHtml })
@@ -997,7 +1027,7 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
     if (!key) return
     localStorage.setItem('margoline_api_key', key)
     generated.current = false
-    generate()
+    generate(gapReasons)
   }
 
   function clearApiKey() {
@@ -1056,6 +1086,39 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
 
         <div className="p-6">
 
+          {/* PREFLIGHT — powody braków produkcji */}
+          {step === 'preflight' && (
+            <div className="space-y-4">
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-300">
+                Wykryto {gaps.length} {gaps.length === 1 ? 'zmianę' : 'zmiany'} bez produkcji. Możesz wpisać powód — AI uwzględni go w raporcie.
+              </div>
+              <div className="space-y-3 max-h-72 overflow-y-auto">
+                {gaps.map(g => (
+                  <div key={gapKey(g)} className="rounded-xl border border-navy-600 bg-navy-900 p-4">
+                    <div className="flex items-center gap-2 mb-2">
+                      <span className="text-xs font-bold text-navy-400 uppercase tracking-wider">Zmiana {g.shift}</span>
+                      <span className="text-white font-bold text-sm">{g.machineName}</span>
+                      <span className="ml-auto text-xs text-navy-500">0 szt.</span>
+                    </div>
+                    <input
+                      type="text"
+                      className="input text-sm"
+                      placeholder="np. planowy postój techniczny, brak zlecenia, święto..."
+                      value={gapReasons[gapKey(g)] ?? ''}
+                      onChange={e => setGapReasons(prev => ({ ...prev, [gapKey(g)]: e.target.value }))}
+                    />
+                  </div>
+                ))}
+              </div>
+              <div className="flex gap-3 pt-1">
+                <button onClick={startGenerate} className="btn-primary flex-1 py-3 font-bold">
+                  Generuj raport
+                </button>
+                <button onClick={onClose} className="btn-secondary px-5 py-3">Anuluj</button>
+              </div>
+            </div>
+          )}
+
           {/* LOADING */}
           {step === 'loading' && (
             <div className="flex flex-col items-center gap-4 py-12">
@@ -1100,7 +1163,7 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
               </div>
               <div className="flex gap-3">
                 <button onClick={onClose} className="btn-secondary flex-1">Zamknij</button>
-                <button onClick={() => { generated.current = false; generate() }} className="btn-primary flex-1">
+                <button onClick={() => { generated.current = false; generate(gapReasons) }} className="btn-primary flex-1">
                   Spróbuj ponownie
                 </button>
               </div>
@@ -1474,7 +1537,10 @@ export default function ManagerDayReport() {
                             </div>
                           </div>
                         ) : (
-                          <span className="italic text-navy-500">Brak produkcji</span>
+                          <div className="text-center">
+                            <div className="text-xs text-navy-500 italic">Zmiana nieprodukcyjna</div>
+                            <div className="text-xs text-navy-600 mt-0.5">brak wpisów</div>
+                          </div>
                         )}
                       </td>
                     ))}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
@@ -10,7 +11,6 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 const TARGET_PER_HOUR = 3200
 const TARGET_PER_SHIFT = 18000
 const SHIFTS: ShiftType[] = ['I', 'II', 'III']
-const MONTHLY_TARGET_STORAGE_PREFIX = 'margoprod.monthly-target'
 
 const CHART_OPTIONS = {
   responsive: true,
@@ -75,20 +75,6 @@ function startOfMonth(year: string, month: string) {
 
 function endOfMonth(year: string, month: string) {
   return iso(new Date(Number(year), Number(month), 0))
-}
-
-function monthTargetKey(year: string, month: string) {
-  return `${MONTHLY_TARGET_STORAGE_PREFIX}.${year}-${month}`
-}
-
-function readStoredMonthlyTarget(year: string, month: string) {
-  if (typeof window === 'undefined') return ''
-  const value = window.localStorage.getItem(monthTargetKey(year, month)) ?? ''
-  return value ? String(Math.max(0, Number.parseInt(value, 10) || 0)) : ''
-}
-
-function daysInMonth(year: string, month: string) {
-  return new Date(Number(year), Number(month), 0).getDate()
 }
 
 function pct(value: number, target: number) {
@@ -166,24 +152,28 @@ function buildReasonText(params: {
 }
 
 export default function ExecutiveDashboard() {
+  const location = useLocation()
   const today = getProductionDate()
   const defaultDate = addDays(today, -1)
   const [mode, setMode] = useState<Mode>('day')
-  const [activeTab, setActiveTab] = useState<ExecutiveTab>('summary')
   const [selectedDate, setSelectedDate] = useState(defaultDate)
   const [fromDate, setFromDate] = useState(addDays(defaultDate, -6))
   const [toDate, setToDate] = useState(defaultDate)
   const [month, setMonth] = useState(defaultDate.slice(5, 7))
   const [year, setYear] = useState(defaultDate.slice(0, 4))
-  const [monthlyTargetInput, setMonthlyTargetInput] = useState(() =>
-    readStoredMonthlyTarget(defaultDate.slice(0, 4), defaultDate.slice(5, 7))
-  )
   const [machines, setMachines] = useState<Machine[]>([])
   const [reports, setReports] = useState<ReportWithShift[]>([])
   const [shifts, setShifts] = useState<ShiftSummary[]>([])
   const [failures, setFailures] = useState<FailureReport[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const activeTab: ExecutiveTab = location.pathname.endsWith('/charts')
+    ? 'charts'
+    : location.pathname.endsWith('/machines')
+      ? 'machines'
+      : location.pathname.endsWith('/details')
+        ? 'details'
+        : 'summary'
 
   const range = useMemo(() => {
     if (mode === 'day') return { from: selectedDate, to: selectedDate }
@@ -239,10 +229,6 @@ export default function ExecutiveDashboard() {
       supabase.removeChannel(channel)
     }
   }, [range.from, range.to])
-
-  useEffect(() => {
-    setMonthlyTargetInput(readStoredMonthlyTarget(year, month))
-  }, [month, year])
 
   const machineById = useMemo(
     () => Object.fromEntries(machines.map(machine => [machine.id, machine])),
@@ -713,38 +699,6 @@ export default function ExecutiveDashboard() {
     }))
   }
 
-  const monthlyTarget = Math.max(0, Number.parseInt(monthlyTargetInput || '0', 10) || 0)
-  const monthProgress = useMemo(() => {
-    const today = getProductionDate()
-    const selectedMonthStart = startOfMonth(year, month)
-    const selectedMonthEnd = endOfMonth(year, month)
-    const referenceDate = today < selectedMonthStart ? selectedMonthStart : today > selectedMonthEnd ? selectedMonthEnd : today
-    const elapsedDays = Math.max(1, Number(referenceDate.slice(8, 10)))
-    const totalDays = daysInMonth(year, month)
-    const expectedToday = monthlyTarget > 0 ? Math.round(monthlyTarget * elapsedDays / totalDays) : 0
-    const remaining = Math.max(0, monthlyTarget - kpi.good)
-    const gapToToday = expectedToday - kpi.good
-    return {
-      expectedToday,
-      elapsedDays,
-      totalDays,
-      remaining,
-      gapToToday,
-      realization: pct(kpi.good, monthlyTarget),
-      expectedPct: pct(expectedToday, monthlyTarget)
-    }
-  }, [kpi.good, month, monthlyTarget, year])
-
-  const monthlyProgressChart = {
-    labels: ['Powinno byc dzis', 'Jest teraz', 'Cel miesiaca'],
-    datasets: [{
-      label: 'szt',
-      data: [monthProgress.expectedToday, kpi.good, monthlyTarget],
-      backgroundColor: ['rgba(245,158,11,0.72)', 'rgba(34,197,94,0.78)', 'rgba(59,130,246,0.72)'],
-      borderRadius: 4
-    }]
-  }
-
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
@@ -796,72 +750,10 @@ export default function ExecutiveDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1 lg:grid-cols-4">
-        {([
-          ['summary', 'Podsumowanie'],
-          ['charts', 'Wykresy'],
-          ['machines', 'Automaty'],
-          ['details', 'Szczegoly']
-        ] as const).map(([value, label]) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setActiveTab(value)}
-            className={cn('rounded-xl px-3 py-2 text-sm font-bold transition-all', activeTab === value ? 'btn-primary' : 'text-navy-300 hover:bg-navy-800 hover:text-white')}
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
       {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
 
       {activeTab === 'summary' && (
         <div className="space-y-5">
-      <div className="space-y-3">
-        <div>
-          <div className="text-xs font-bold uppercase tracking-widest text-brand">Realizacja miesiaca</div>
-          <h2 className="text-xl font-black text-white">Plan, punkt kontrolny i aktualny wynik</h2>
-        </div>
-        <div className="grid gap-4 xl:grid-cols-[1.15fr_0.85fr]">
-          <div className="card border-brand/20">
-            <div className="card-header">
-              <div>
-                <div className="card-title">Wykres realizacji</div>
-                <div className="card-sub">Cel wpisany w panelu kierownika dla miesiaca {month}.{year}.</div>
-              </div>
-              <div className={cn('rounded-full px-3 py-1 text-xs font-bold', monthProgress.gapToToday >= 0 ? 'bg-red-500/10 text-red-300' : 'bg-green-500/10 text-green-300')}>
-                {monthlyTarget > 0
-                  ? monthProgress.gapToToday >= 0
-                    ? `Brakuje ${pieces(monthProgress.gapToToday)}`
-                    : `Nadwyzka ${pieces(Math.abs(monthProgress.gapToToday))}`
-                  : 'Brak celu'}
-              </div>
-            </div>
-            <div className="h-[320px]">
-              {monthlyTarget > 0
-                ? <Bar data={monthlyProgressChart} options={CHART_OPTIONS as never} />
-                : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz cel miesieczny w panelu kierownika.</div>}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-2 gap-3">
-            {[
-              { label: 'Cel miesiaca', value: monthlyTarget ? `${pieces(monthlyTarget)} szt` : '-', sub: `${month}.${year}`, color: 'text-brand' },
-              { label: 'Jest teraz', value: `${pieces(kpi.good)} szt`, sub: `${monthProgress.realization}% celu`, color: efficiencyColor(monthProgress.realization) },
-              { label: 'Powinno byc dzis', value: monthlyTarget ? `${pieces(monthProgress.expectedToday)} szt` : '-', sub: `${monthProgress.elapsedDays}/${monthProgress.totalDays} dni`, color: 'text-amber-300' },
-              { label: 'Do konca planu', value: monthlyTarget ? `${pieces(monthProgress.remaining)} szt` : '-', sub: `oczekiwane ${monthProgress.expectedPct}%`, color: monthProgress.remaining ? 'text-cyan-300' : 'text-green-400' }
-            ].map(item => (
-              <div key={item.label} className="kpi-card">
-                <div className="kpi-label">{item.label}</div>
-                <div className={cn('kpi-value text-xl', item.color)}>{loading ? '...' : item.value}</div>
-                <div className="kpi-sub">{item.sub}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
-
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-3">
         {executiveSignals.map(item => (
           <div key={item.label} className="rounded-2xl border border-navy-600 bg-navy-800 p-4">

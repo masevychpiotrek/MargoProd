@@ -7,6 +7,7 @@ import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import RobotAssistant from '@/components/shared/RobotAssistant'
+import MonthlyTargetPanel from '@/components/shared/MonthlyTargetPanel'
 import type { Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 
@@ -57,7 +58,10 @@ const NAV_VIEWER = [
 
 
 const NAV_EXECUTIVE = [
-  { to: '/executive',            label: 'Panel zarzadu',    icon: Icons.live, end: true },
+  { to: '/executive',            label: 'Podsumowanie',     icon: Icons.dashboard, end: true },
+  { to: '/executive/charts',     label: 'Wykresy',          icon: Icons.live },
+  { to: '/executive/machines',   label: 'Automaty',         icon: Icons.machines },
+  { to: '/executive/details',    label: 'Szczegoly',        icon: Icons.report },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 const NAV_SPECIALIST = [
@@ -156,6 +160,7 @@ export default function AppLayout() {
   const visibleShiftOperators = visibleActiveShift
     ? [visibleActiveShift.operator_1?.full_name, visibleActiveShift.operator_2?.full_name].filter(Boolean).join(' / ')
     : ''
+  const showMonthlyTargetPanel = profile?.role === 'manager'
 
   const handleSignOut = async () => {
     if (profile?.role === 'viewer') sessionStorage.removeItem('margoline_viewer_demo_state')
@@ -261,7 +266,7 @@ export default function AppLayout() {
         <nav className="flex-1 py-3 px-2 overflow-y-auto min-h-0">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
-              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : 'Operator'}
+              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'executive' ? 'Zarzad' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : 'Operator'}
             </div>
           )}
           {navItems.map(item => (
@@ -371,6 +376,7 @@ export default function AppLayout() {
           </div>
         </AlertProvider>
       </main>
+      {showMonthlyTargetPanel && <MonthlyTargetPanel />}
       <RobotAssistant />
 
       {/* Modal wylogowania */}

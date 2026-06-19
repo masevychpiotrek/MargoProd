@@ -86,61 +86,79 @@ export default function OperatorPassword() {
   }
 
   return (
-    <div className="mx-auto max-w-xl space-y-4">
+    <div className="mx-auto max-w-5xl space-y-4">
       <div>
         <h1 className="text-2xl font-bold text-white">Zmien haslo</h1>
         <p className="mt-1 text-navy-400">
           {profile?.must_change_password
             ? 'System wymaga ustawienia nowego hasla przed dalsza praca.'
-            : 'Aktualizacja hasla do konta.'}
+          : 'Aktualizacja hasla do konta.'}
         </p>
       </div>
 
-      <form onSubmit={handleSubmit} className="card space-y-4" autoComplete="off">
-        <div>
-          <label className="label">Nowe haslo</label>
-          <input
-            type="password"
-            name="ml_access_code_new"
-            value={newPassword}
-            onChange={e => setNewPassword(e.target.value)}
-            autoComplete="one-time-code"
-            data-lpignore="true"
-            data-1p-ignore="true"
-            className="input"
-          />
-          <div className="mt-1 text-xs text-navy-500">Minimum 8 znakow.</div>
+      <div className="grid gap-4 lg:grid-cols-[0.8fr_1.2fr]">
+        <div className="card">
+          <div className="card-title">Konto</div>
+          <div className="mt-4 space-y-3">
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-navy-500">Uzytkownik</div>
+              <div className="mt-1 text-sm font-bold text-white">{profile?.full_name ?? '-'}</div>
+            </div>
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-navy-500">Rola</div>
+              <div className="mt-1 text-sm font-bold capitalize text-brand">{profile?.role ?? '-'}</div>
+            </div>
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 text-sm leading-relaxed text-amber-100">
+              Haslo musi miec minimum 8 znakow. Po zapisie system przeniesie Cie do Twojego glownego panelu.
+            </div>
+          </div>
         </div>
 
-        <div>
-          <label className="label">Powtorz nowe haslo</label>
-          <input
-            type="password"
-            name="ml_access_code_confirm"
-            value={confirmPassword}
-            onChange={e => setConfirmPassword(e.target.value)}
-            autoComplete="one-time-code"
-            data-lpignore="true"
-            data-1p-ignore="true"
-            className="input"
-          />
-        </div>
-
-        {error && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-            {error}
+        <form onSubmit={handleSubmit} className="card space-y-4" autoComplete="off">
+          <div>
+            <label className="label">Nowe haslo</label>
+            <input
+              type="password"
+              name="ml_access_code_new"
+              value={newPassword}
+              onChange={e => setNewPassword(e.target.value)}
+              autoComplete="one-time-code"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="input"
+            />
           </div>
-        )}
-        {success && (
-          <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
-            {success}
-          </div>
-        )}
 
-        <button type="submit" disabled={saving} className="btn-primary w-full py-3 disabled:opacity-50">
-          {saving ? 'Zapisywanie...' : 'Zmien haslo'}
-        </button>
-      </form>
+          <div>
+            <label className="label">Powtorz nowe haslo</label>
+            <input
+              type="password"
+              name="ml_access_code_confirm"
+              value={confirmPassword}
+              onChange={e => setConfirmPassword(e.target.value)}
+              autoComplete="one-time-code"
+              data-lpignore="true"
+              data-1p-ignore="true"
+              className="input"
+            />
+          </div>
+
+          {error && (
+            <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
+              {error}
+            </div>
+          )}
+          {success && (
+            <div className="rounded-xl border border-green-500/30 bg-green-500/10 px-4 py-3 text-sm text-green-300">
+              {success}
+            </div>
+          )}
+
+          <button type="submit" disabled={saving} className="btn-primary w-full py-3 disabled:opacity-50">
+            {saving ? 'Zapisywanie...' : 'Zmien haslo'}
+          </button>
+        </form>
+      </div>
     </div>
   )
 }

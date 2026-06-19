@@ -138,6 +138,9 @@ const router = createBrowserRouter([
       { path: 'password', element: <RequireAuth><Wrap><OperatorPassword /></Wrap></RequireAuth> },
       { path: 'demo', element: <RequireAuth roles={['viewer', 'admin']}><Wrap><ViewerDemo /></Wrap></RequireAuth> },
       { path: 'executive', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },
+      { path: 'executive/charts', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },
+      { path: 'executive/machines', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },
+      { path: 'executive/details', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },
 
       // ── OPERATOR ──
       {
