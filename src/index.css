@@ -21,13 +21,13 @@
     @apply bg-navy-800 border border-navy-700 rounded-2xl p-5;
   }
   .card-header {
-    @apply flex items-center justify-between mb-4 pb-4 border-b border-navy-700;
+    @apply flex flex-wrap items-start justify-between gap-3 mb-4 pb-4 border-b border-navy-700;
   }
   .card-title {
-    @apply font-semibold text-white text-sm;
+    @apply font-semibold text-white text-sm break-words;
   }
   .card-sub {
-    @apply text-xs text-navy-400 mt-0.5;
+    @apply text-xs text-navy-400 mt-0.5 leading-relaxed break-words;
   }
   .label {
     @apply block text-xs font-bold text-navy-300 uppercase tracking-wider mb-1.5;
@@ -62,16 +62,16 @@
   .status-alarm  { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-red-500/15 text-red-400 border border-red-500/20; }
   .status-info   { @apply inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-brand/15 text-brand border border-brand/20; }
   .kpi-card {
-    @apply card relative overflow-hidden;
+    @apply card relative overflow-hidden min-w-0;
   }
   .kpi-value {
-    @apply text-3xl font-bold font-mono text-white tracking-tight mt-1;
+    @apply text-3xl font-bold font-mono text-white tracking-tight mt-1 break-words;
   }
   .kpi-label {
-    @apply text-xs font-bold text-navy-400 uppercase tracking-wider;
+    @apply text-xs font-bold text-navy-400 uppercase tracking-wider break-words;
   }
   .kpi-sub {
-    @apply text-xs text-navy-400 mt-1;
+    @apply text-xs text-navy-400 mt-1 leading-relaxed break-words;
   }
 }
 

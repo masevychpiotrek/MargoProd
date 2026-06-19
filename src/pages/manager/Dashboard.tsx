@@ -24,6 +24,7 @@ ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointEleme
 const TARGET = 3200 // hourly machine performance base
 const TARGET_PER_SHIFT = 18000
 const SHIFTS = ['I', 'II', 'III'] as const
+const MONTHLY_TARGET_STORAGE_PREFIX = 'margoprod.monthly-target'
 
 const CHART_OPTS = {
   responsive: true,
@@ -52,7 +53,7 @@ const PERCENT_CHART_OPTS = {
 
 type Mode = 'day' | 'range' | 'month'
 type ShiftFilter = 'all' | ShiftType
-type ManagerTab = 'production' | 'operators' | 'forecast'
+type ManagerTab = 'production' | 'monthly' | 'operators' | 'forecast'
 
 type Recommendation = {
   title: string
@@ -224,6 +225,20 @@ function pct1(value: number, target: number) {
   return target > 0 ? Math.round(value / target * 1000) / 10 : 0
 }
 
+function monthTargetKey(year: string, month: string) {
+  return `${MONTHLY_TARGET_STORAGE_PREFIX}.${year}-${month}`
+}
+
+function readStoredMonthlyTarget(year: string, month: string) {
+  if (typeof window === 'undefined') return ''
+  const value = window.localStorage.getItem(monthTargetKey(year, month)) ?? ''
+  return value ? String(Math.max(0, Number.parseInt(value, 10) || 0)) : ''
+}
+
+function daysInMonth(year: string, month: string) {
+  return new Date(Number(year), Number(month), 0).getDate()
+}
+
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : null
 }
@@ -285,6 +300,9 @@ export default function ManagerDashboard() {
   const [toDate, setToDate] = useState(productionDate)
   const [month, setMonth] = useState(productionDate.slice(5, 7))
   const [year, setYear] = useState(productionDate.slice(0, 4))
+  const [monthlyTargetInput, setMonthlyTargetInput] = useState(() =>
+    readStoredMonthlyTarget(productionDate.slice(0, 4), productionDate.slice(5, 7))
+  )
   const [shiftFilter, setShiftFilter] = useState<ShiftFilter>('all')
   const [machineFilter, setMachineFilter] = useState('all')
   const [editing, setEditing] = useState<ReportWithContext | null>(null)
@@ -303,6 +321,10 @@ export default function ManagerDashboard() {
     if (mode === 'month') return { from: startOfMonth(year, month), to: endOfMonth(year, month) }
     return { from: fromDate <= toDate ? fromDate : toDate, to: fromDate <= toDate ? toDate : fromDate }
   }, [fromDate, mode, month, selectedDate, toDate, year])
+
+  useEffect(() => {
+    setMonthlyTargetInput(readStoredMonthlyTarget(year, month))
+  }, [month, year])
 
   const machineNameById = useMemo(
     () => Object.fromEntries(machines.map(machine => [machine.id, machine.name])),
@@ -1036,6 +1058,52 @@ export default function ManagerDashboard() {
     }
   }, [dayReports, machineFilter, machines])
 
+  const monthlyTarget = Math.max(0, Number.parseInt(monthlyTargetInput || '0', 10) || 0)
+  const monthProgress = useMemo(() => {
+    const actual = groups.reduce((sum, row) => sum + row.good, 0)
+    const today = getProductionDate()
+    const selectedMonthStart = startOfMonth(year, month)
+    const selectedMonthEnd = endOfMonth(year, month)
+    const referenceDate = today < selectedMonthStart ? selectedMonthStart : today > selectedMonthEnd ? selectedMonthEnd : today
+    const elapsedDays = Math.max(1, Number(referenceDate.slice(8, 10)))
+    const totalDays = daysInMonth(year, month)
+    const expectedToday = monthlyTarget > 0 ? Math.round(monthlyTarget * elapsedDays / totalDays) : 0
+    const remaining = Math.max(0, monthlyTarget - actual)
+    const gapToToday = expectedToday - actual
+    return {
+      actual,
+      elapsedDays,
+      totalDays,
+      expectedToday,
+      remaining,
+      gapToToday,
+      realization: pct(actual, monthlyTarget),
+      expectedPct: pct(expectedToday, monthlyTarget)
+    }
+  }, [groups, month, monthlyTarget, year])
+
+  const monthlyProgressChart = useMemo(() => ({
+    labels: ['Powinno byc dzis', 'Jest teraz', 'Cel miesiaca'],
+    datasets: [{
+      label: 'szt',
+      data: [monthProgress.expectedToday, monthProgress.actual, monthlyTarget],
+      backgroundColor: ['rgba(245,158,11,0.72)', 'rgba(34,197,94,0.78)', 'rgba(59,130,246,0.72)'],
+      borderRadius: 4
+    }]
+  }), [monthProgress.actual, monthProgress.expectedToday, monthlyTarget])
+
+  const saveMonthlyTarget = () => {
+    if (typeof window === 'undefined') return
+    const cleanValue = String(monthlyTarget)
+    if (monthlyTarget > 0) {
+      window.localStorage.setItem(monthTargetKey(year, month), cleanValue)
+      setMonthlyTargetInput(cleanValue)
+    } else {
+      window.localStorage.removeItem(monthTargetKey(year, month))
+      setMonthlyTargetInput('')
+    }
+  }
+
   const openEdit = (report: ReportWithContext) => {
     if (!canEdit) return
     setEditing(report)
@@ -1334,9 +1402,10 @@ export default function ManagerDashboard() {
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1">
+      <div className="grid grid-cols-2 gap-2 rounded-2xl border border-navy-700 bg-navy-900 p-1 lg:grid-cols-4">
         {([
           ['production', 'Produkcja'],
+          ['monthly', 'Realizacja miesiaca'],
           ['operators', 'Ranking operatorow'],
           ['forecast', 'Prognoza dnia']
         ] as const).map(([value, label]) => (
@@ -1410,6 +1479,79 @@ export default function ManagerDashboard() {
           </div>
         </div>
       </div>
+
+      {activeTab === 'monthly' && (
+        <div className="space-y-4">
+          <div className="grid grid-cols-1 gap-4 xl:grid-cols-[0.8fr_1.2fr]">
+            <div className="card">
+              <div className="card-header">
+                <div>
+                  <div className="card-title">Cel miesieczny</div>
+                  <div className="card-sub">Wpisz plan dla wybranego miesiaca i zapisz.</div>
+                </div>
+              </div>
+              <div className="space-y-3">
+                <label className="block">
+                  <span className="label">Planowana ilosc sztuk</span>
+                  <input
+                    className="input-lg"
+                    type="number"
+                    min="0"
+                    step="1000"
+                    value={monthlyTargetInput}
+                    onChange={e => setMonthlyTargetInput(e.target.value)}
+                    placeholder="np. 1600000"
+                  />
+                </label>
+                <button type="button" className="btn-primary w-full" onClick={saveMonthlyTarget}>
+                  Zapisz cel
+                </button>
+                {mode !== 'month' && (
+                  <button type="button" className="btn-secondary w-full" onClick={() => setMode('month')}>
+                    Pokaz caly miesiac
+                  </button>
+                )}
+              </div>
+            </div>
+
+            <div className="card border-brand/20">
+              <div className="card-header">
+                <div>
+                  <div className="card-title">Realizacja planu miesiecznego</div>
+                  <div className="card-sub">Gdzie powinnismy byc dzisiaj, gdzie jestesmy i jaki jest cel miesiaca.</div>
+                </div>
+                <div className={cn('rounded-full px-3 py-1 text-xs font-bold', monthProgress.gapToToday >= 0 ? 'bg-red-500/10 text-red-300' : 'bg-green-500/10 text-green-300')}>
+                  {monthlyTarget > 0
+                    ? monthProgress.gapToToday >= 0
+                      ? `Brakuje ${monthProgress.gapToToday.toLocaleString('pl-PL')}`
+                      : `Nadwyzka ${Math.abs(monthProgress.gapToToday).toLocaleString('pl-PL')}`
+                    : 'Brak celu'}
+                </div>
+              </div>
+              <div className="h-[300px]">
+                {monthlyTarget > 0
+                  ? <Bar data={monthlyProgressChart} options={CHART_OPTS as never} />
+                  : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz cel miesieczny, zeby zobaczyc wykres.</div>}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              { label: 'Cel miesiaca', value: monthlyTarget ? `${monthlyTarget.toLocaleString('pl-PL')} szt` : '-', sub: `${month}.${year}`, color: 'text-brand' },
+              { label: 'Jest teraz', value: `${monthProgress.actual.toLocaleString('pl-PL')} szt`, sub: `${monthProgress.realization}% celu`, color: efficiencyColor(monthProgress.realization) },
+              { label: 'Powinno byc dzis', value: monthlyTarget ? `${monthProgress.expectedToday.toLocaleString('pl-PL')} szt` : '-', sub: `${monthProgress.elapsedDays}/${monthProgress.totalDays} dni`, color: 'text-amber-300' },
+              { label: 'Do konca planu', value: monthlyTarget ? `${monthProgress.remaining.toLocaleString('pl-PL')} szt` : '-', sub: `oczekiwane ${monthProgress.expectedPct}%`, color: monthProgress.remaining ? 'text-cyan-300' : 'text-green-400' }
+            ].map(item => (
+              <div key={item.label} className="kpi-card">
+                <div className="kpi-label">{item.label}</div>
+                <div className={cn('kpi-value text-xl', item.color)}>{loading ? '...' : item.value}</div>
+                <div className="kpi-sub">{item.sub}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {activeTab === 'production' && (
         <>
