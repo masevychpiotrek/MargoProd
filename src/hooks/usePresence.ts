@@ -113,20 +113,32 @@ export function usePresenceList() {
 
   const subscribe = (onChange: (users: PresenceUser[]) => void) => {
     channelRef.current?.unsubscribe()
-    const ch = supabase.channel(CHANNEL_NAME, {
-      config: { presence: { key: 'observer' } }
-    })
+
+    // Presence handlers MUST be registered before .subscribe()
+    const ch = supabase
+      .channel(CHANNEL_NAME, { config: { presence: { key: 'observer' } } })
+      .on('presence', { event: 'sync' }, () => {
+        const state = ch.presenceState<PresenceUser>()
+        const users = Object.values(state)
+          .flat()
+          .filter(u => u.user_id && u.full_name)
+          .sort((a, b) => a.full_name.localeCompare(b.full_name))
+        onChange(users)
+      })
+      .on('presence', { event: 'join' }, () => {
+        const state = ch.presenceState<PresenceUser>()
+        const users = Object.values(state).flat().filter(u => u.user_id && u.full_name)
+          .sort((a, b) => a.full_name.localeCompare(b.full_name))
+        onChange(users)
+      })
+      .on('presence', { event: 'leave' }, () => {
+        const state = ch.presenceState<PresenceUser>()
+        const users = Object.values(state).flat().filter(u => u.user_id && u.full_name)
+          .sort((a, b) => a.full_name.localeCompare(b.full_name))
+        onChange(users)
+      })
+
     channelRef.current = ch
-
-    ch.on('presence', { event: 'sync' }, () => {
-      const state = ch.presenceState<PresenceUser>()
-      const users = Object.values(state)
-        .flat()
-        .filter(u => u.user_id && u.full_name)
-        .sort((a, b) => a.full_name.localeCompare(b.full_name))
-      onChange(users)
-    })
-
     ch.subscribe()
     return () => { ch.unsubscribe(); channelRef.current = null }
   }
