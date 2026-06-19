@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
@@ -42,10 +42,7 @@ function getPageLabel(pathname: string): string {
   return match ? PAGE_LABELS[match] : pathname
 }
 
-// ── Singleton channel ─────────────────────────────────────────────────────────
-// One channel instance for the entire app. Both usePresence (broadcaster)
-// and usePresenceList (consumer) share it to avoid the
-// "cannot add presence callbacks after subscribe()" error.
+// ── Types ─────────────────────────────────────────────────────────────────────
 
 export type PresenceUser = {
   user_id:   string
@@ -58,30 +55,57 @@ export type PresenceUser = {
 
 type PresenceListener = (users: PresenceUser[]) => void
 
-const CHANNEL_NAME = 'margoline-presence-v1'
-const HEARTBEAT_MS = 25_000
+// ── Module-level singleton ────────────────────────────────────────────────────
+// ONE channel per app. key = logged-in user's ID so Supabase deduplicates
+// correctly. Multiple tabs of the same user appear as an array under their key;
+// we always show the most recent one.
 
-let _ch: ReturnType<typeof supabase.channel> | null = null
-let _ready = false
-let _listeners: Set<PresenceListener> = new Set()
+const CHANNEL_NAME = 'margoline-presence-v2'
+const HEARTBEAT_MS = 30_000
 
-function getUsers(): PresenceUser[] {
+let _ch:       ReturnType<typeof supabase.channel> | null = null
+let _userId:   string | null = null
+let _ready     = false
+const _listeners = new Set<PresenceListener>()
+
+function getDeduplicatedUsers(): PresenceUser[] {
   if (!_ch) return []
-  return Object.values(_ch.presenceState<PresenceUser>())
-    .flat()
-    .filter(u => u.user_id && u.full_name)
-    .sort((a, b) => a.full_name.localeCompare(b.full_name))
+  const state = _ch.presenceState<PresenceUser>()
+  // Each key = one user_id. The value is an array (multiple tabs).
+  // Pick the entry with the latest online_at per user.
+  const byUser: Record<string, PresenceUser> = {}
+  for (const entries of Object.values(state)) {
+    for (const entry of entries) {
+      if (!entry.user_id || !entry.full_name) continue
+      const existing = byUser[entry.user_id]
+      if (!existing || entry.online_at > existing.online_at) {
+        byUser[entry.user_id] = entry
+      }
+    }
+  }
+  return Object.values(byUser).sort((a, b) => a.full_name.localeCompare(b.full_name))
 }
 
 function notifyListeners() {
-  const users = getUsers()
+  const users = getDeduplicatedUsers()
   _listeners.forEach(fn => fn(users))
 }
 
-function ensureChannel() {
-  if (_ch) return _ch
+function initChannel(userId: string) {
+  // Already set up for this user — nothing to do
+  if (_ch && _userId === userId) return
+
+  // Different user (re-login) or first call — tear down old channel
+  if (_ch) {
+    _ch.untrack().catch(() => undefined)
+    _ch.unsubscribe()
+    _ch = null
+    _ready = false
+  }
+
+  _userId = userId
   _ch = supabase
-    .channel(CHANNEL_NAME, { config: { presence: { key: 'shared' } } })
+    .channel(CHANNEL_NAME, { config: { presence: { key: userId } } })
     .on('presence', { event: 'sync'  }, notifyListeners)
     .on('presence', { event: 'join'  }, notifyListeners)
     .on('presence', { event: 'leave' }, notifyListeners)
@@ -92,29 +116,31 @@ function ensureChannel() {
       notifyListeners()
     }
   })
-  return _ch
 }
 
-function trackState(state: PresenceUser) {
-  const ch = ensureChannel()
+function track(state: PresenceUser) {
+  if (!_ch) return
   if (_ready) {
-    ch.track(state).catch(() => undefined)
+    _ch.track(state).catch(() => undefined)
   } else {
-    // Wait until subscribed
-    const poll = setInterval(() => {
-      if (_ready) { clearInterval(poll); ch.track(state).catch(() => undefined) }
-    }, 200)
+    // Retry until subscribed
+    const t = setInterval(() => {
+      if (_ready && _ch) { clearInterval(t); _ch.track(state).catch(() => undefined) }
+    }, 300)
   }
 }
 
-// ── usePresence — call once in AppLayout ─────────────────────────────────────
+// ── usePresence — mounted once in AppLayout ───────────────────────────────────
 
 export function usePresence() {
   const { profile } = useAuthStore()
-  const location = useLocation()
+  const location    = useLocation()
+  const heartbeat   = useRef<ReturnType<typeof setInterval> | null>(null)
 
   useEffect(() => {
     if (!profile) return
+
+    initChannel(profile.id)
 
     const state: PresenceUser = {
       user_id:   profile.id,
@@ -125,24 +151,35 @@ export function usePresence() {
       online_at: new Date().toISOString(),
     }
 
-    trackState(state)
+    track(state)
 
-    const interval = setInterval(() => {
-      trackState({ ...state, online_at: new Date().toISOString() })
+    if (heartbeat.current) clearInterval(heartbeat.current)
+    heartbeat.current = setInterval(() => {
+      track({ ...state, online_at: new Date().toISOString() })
     }, HEARTBEAT_MS)
 
-    return () => clearInterval(interval)
+    return () => {
+      if (heartbeat.current) clearInterval(heartbeat.current)
+    }
   }, [profile?.id, location.pathname]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Untrack on logout / unmount
+  useEffect(() => {
+    return () => {
+      if (heartbeat.current) clearInterval(heartbeat.current)
+      _ch?.untrack().catch(() => undefined)
+    }
+  }, [])
 }
 
-// ── usePresenceList — call in admin/manager panels ───────────────────────────
+// ── usePresenceList — admin/manager panels ────────────────────────────────────
+// Just registers a listener on the shared singleton; no new channel created.
 
 export function usePresenceList(onChange: PresenceListener) {
   useEffect(() => {
-    ensureChannel()
     _listeners.add(onChange)
-    // Deliver current state immediately if already synced
-    if (_ready) onChange(getUsers())
+    // If channel already ready, push current state immediately
+    if (_ready) onChange(getDeduplicatedUsers())
     return () => { _listeners.delete(onChange) }
   }, [onChange])
 }
