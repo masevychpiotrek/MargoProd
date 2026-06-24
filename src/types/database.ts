@@ -1,7 +1,7 @@
 // Auto-generated types — odzwierciedlają schemat bazy
 // Można aktualizować przez: npx supabase gen types typescript --project-id TWOJ_ID
 
-export type UserRole = 'operator' | 'manager' | 'admin' | 'specialist' | 'viewer' | 'executive'
+export type UserRole = 'operator' | 'manager' | 'admin' | 'specialist' | 'viewer' | 'executive' | 'syringe_operator'
 export type ShiftType = 'I' | 'II' | 'III'
 export type ReportStatus = 'pending' | 'submitted' | 'approved' | 'rejected'
 export type DowntimeCategory =
@@ -241,4 +241,318 @@ export interface HourlyChartPoint {
   reject_count: number
   target: number
   efficiency_pct: number
+}
+
+// ─────────────────────────────────────────────────────────────
+// MODUŁ OPERATOR AUTOMATÓW STRZYKAWKOWYCH (SA)
+// ─────────────────────────────────────────────────────────────
+
+export type SaMachineStatus =
+  | 'production' | 'changeover' | 'failure' | 'adjustment'
+  | 'no_components' | 'quality_control' | 'planned_stop'
+  | 'waiting' | 'cleaning' | 'end_of_production'
+
+export type SaOrderStatus = 'planned' | 'in_progress' | 'completed' | 'cancelled' | 'on_hold'
+export type SaFailurePriority = 'low' | 'medium' | 'high' | 'critical'
+export type SaFailureStatus = 'new' | 'acknowledged' | 'in_progress' | 'waiting_for_part' | 'resolved' | 'closed'
+export type SaQualityIssueStatus = 'open' | 'under_review' | 'resolved' | 'closed'
+export type SaDefectType = 'quality' | 'tech' | 'other'
+export type SaDowntimeCategoryType = 'planned' | 'unplanned' | 'quality' | 'logistics'
+
+export interface SaAssortment {
+  id: string
+  name: string
+  code: string
+  volume_ml: number | null
+  nominal_per_hour: number
+  description: string | null
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export interface SaMachine {
+  id: string
+  name: string
+  code: string
+  description: string | null
+  location: string | null
+  nominal_per_hour: number
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+  deleted_at: string | null
+}
+
+export interface SaOrder {
+  id: string
+  order_number: string
+  machine_id: string | null
+  assortment_id: string
+  target_qty: number
+  produced_qty: number
+  good_qty: number
+  reject_qty: number
+  planned_date: string | null
+  status: SaOrderStatus
+  notes: string | null
+  created_by: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  assortment?: SaAssortment
+  machine?: SaMachine
+}
+
+export interface SaSession {
+  id: string
+  machine_id: string
+  operator_id: string
+  assortment_id: string
+  order_id: string | null
+  shift_type: 'I' | 'II' | 'III'
+  session_date: string
+  started_at: string
+  ended_at: string | null
+  plan_qty: number | null
+  machine_status: SaMachineStatus
+  total_produced: number | null
+  total_good: number | null
+  total_reject: number | null
+  total_tech_reject: number | null
+  total_qual_reject: number | null
+  total_runtime_min: number | null
+  total_downtime_min: number | null
+  plan_pct: number | null
+  avg_per_hour: number | null
+  summary_notes: string | null
+  handover_confirmed_by: string | null
+  handover_confirmed_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  machine?: SaMachine
+  operator?: { id: string; full_name: string }
+  assortment?: SaAssortment
+  order?: SaOrder | null
+}
+
+export interface SaDefectCategory {
+  id: string
+  name: string
+  code: string
+  defect_type: SaDefectType
+  requires_comment: boolean
+  is_active: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface SaDowntimeCategory {
+  id: string
+  name: string
+  code: string
+  category_type: SaDowntimeCategoryType
+  is_active: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface SaProductionEntry {
+  id: string
+  session_id: string
+  machine_id: string
+  operator_id: string
+  recorded_at: string
+  counter_value: number
+  counter_reset: boolean
+  counter_reset_reason: string | null
+  produced_qty: number
+  good_qty: number
+  reject_qty: number
+  tech_reject_qty: number
+  qual_reject_qty: number
+  qty_since_last: number | null
+  per_hour: number | null
+  reject_pct: number | null
+  plan_pct: number | null
+  remaining_qty: number | null
+  eta_minutes: number | null
+  notes: string | null
+  is_cancelled: boolean
+  cancel_reason: string | null
+  cancelled_by: string | null
+  cancelled_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  defect_entries?: SaDefectEntry[]
+}
+
+export interface SaDefectEntry {
+  id: string
+  entry_id: string
+  session_id: string
+  category_id: string
+  qty: number
+  notes: string | null
+  created_at: string
+  // joined
+  category?: SaDefectCategory
+}
+
+export interface SaDowntimeEvent {
+  id: string
+  session_id: string
+  machine_id: string
+  operator_id: string
+  category_id: string
+  started_at: string
+  ended_at: string | null
+  duration_min: number | null
+  description: string | null
+  actions_taken: string | null
+  maintenance_needed: boolean
+  fully_resolved: boolean | null
+  created_at: string
+  updated_at: string
+  // joined
+  category?: SaDowntimeCategory
+}
+
+export interface SaFailureReport {
+  id: string
+  session_id: string | null
+  machine_id: string
+  reporter_id: string
+  reported_at: string
+  component_name: string | null
+  symptoms: string
+  error_code: string | null
+  photo_urls: string[]
+  priority: SaFailurePriority
+  production_stopped: boolean
+  can_continue: boolean
+  status: SaFailureStatus
+  assigned_to: string | null
+  resolution_notes: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  machine?: SaMachine
+  reporter?: { id: string; full_name: string }
+  assignee?: { id: string; full_name: string } | null
+}
+
+export interface SaQualityIssue {
+  id: string
+  session_id: string | null
+  machine_id: string
+  assortment_id: string | null
+  order_id: string | null
+  reporter_id: string
+  detected_at: string
+  batch_number: string | null
+  description: string
+  affected_qty: number | null
+  photo_urls: string[]
+  operator_actions: string | null
+  production_stopped: boolean
+  product_separated: boolean
+  separation_location: string | null
+  status: SaQualityIssueStatus
+  resolution_notes: string | null
+  resolved_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  machine?: SaMachine
+  assortment?: SaAssortment | null
+}
+
+export interface SaComponentUsage {
+  id: string
+  session_id: string
+  operator_id: string
+  component_type: string
+  component_name: string
+  batch_number: string | null
+  qty_used: number | null
+  unit: string
+  used_from: string
+  used_to: string | null
+  notes: string | null
+  created_at: string
+}
+
+export interface SaChangeover {
+  id: string
+  session_id: string
+  machine_id: string
+  operator_id: string
+  from_assortment_id: string | null
+  to_assortment_id: string
+  counter_before: number | null
+  reason: string | null
+  started_at: string
+  ended_at: string | null
+  duration_min: number | null
+  approved_by: string | null
+  approved_at: string | null
+  notes: string | null
+  created_at: string
+  // joined
+  from_assortment?: SaAssortment | null
+  to_assortment?: SaAssortment
+  checklist_completions?: SaChecklistCompletion[]
+}
+
+export interface SaChecklistItem {
+  id: string
+  name: string
+  description: string | null
+  is_required: boolean
+  is_active: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface SaChecklistCompletion {
+  id: string
+  changeover_id: string
+  item_id: string
+  completed: boolean
+  completed_by: string | null
+  completed_at: string | null
+  notes: string | null
+  // joined
+  item?: SaChecklistItem
+}
+
+export interface SaHandover {
+  id: string
+  session_id: string
+  from_operator_id: string
+  to_operator_id: string | null
+  machine_status: string
+  current_assortment_id: string | null
+  produced_qty: number | null
+  remaining_qty: number | null
+  active_issues: string | null
+  adjustments_made: string | null
+  unresolved_failures: string | null
+  quality_info: string | null
+  component_status: string | null
+  recommendations: string | null
+  comment: string | null
+  created_at: string
+  confirmed_by: string | null
+  confirmed_at: string | null
+  // joined
+  from_operator?: { id: string; full_name: string }
+  to_operator?: { id: string; full_name: string } | null
+  assortment?: SaAssortment | null
 }

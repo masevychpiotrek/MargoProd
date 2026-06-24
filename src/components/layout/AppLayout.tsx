@@ -49,9 +49,11 @@ const NAV_MANAGER = [
   { to: '/manager/operators',    label: 'Ranking operatorow', icon: Icons.users },
   { to: '/manager/forecast',     label: 'Prognoza dnia',    icon: Icons.dashboard },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
-  { to: '/manager/failures',      label: 'Awarie i technik', icon: Icons.failure },
+  { to: '/manager/failures',     label: 'Awarie i technik', icon: Icons.failure },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
-  { to: '/manager/export',       label: 'Eksport',          icon: Icons.export }
+  { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
+  { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
+  { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
 ]
 
 const NAV_VIEWER = [
@@ -68,6 +70,20 @@ const NAV_EXECUTIVE = [
   { to: '/executive/report',    label: 'Raport dnia',      icon: Icons.live },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
+const NAV_SYRINGE_OPERATOR = [
+  { to: '/syringe',            label: 'Pulpit',           icon: Icons.dashboard, end: true },
+  { to: '/syringe/start',      label: 'Rozpocznij zmianę',icon: Icons.shift },
+  { to: '/syringe/entry',      label: 'Wpisz produkcję',  icon: Icons.report },
+  { to: '/syringe/downtime',   label: 'Przestój',         icon: Icons.failure },
+  { to: '/syringe/failure',    label: 'Zgłoś awarię',     icon: Icons.failure },
+  { to: '/syringe/quality',    label: 'Problem jakości',  icon: Icons.targets },
+  { to: '/syringe/components', label: 'Komponenty',       icon: Icons.machines },
+  { to: '/syringe/changeover', label: 'Przezbrojenie',    icon: Icons.reset },
+  { to: '/syringe/handover',   label: 'Przekaż zmianę',   icon: Icons.tasks },
+  { to: '/syringe/history',    label: 'Historia',         icon: Icons.history },
+  { to: '/password',           label: 'Zmień hasło',      icon: Icons.password },
+]
+
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
   { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
@@ -82,10 +98,12 @@ const NAV_ADMIN = [
   { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
   { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
-  { to: '/manager',            label: '── Live produkcja',   icon: Icons.live },
-  { to: '/manager/day-report', label: '── Raport dnia',      icon: Icons.report },
-  { to: '/manager/export',     label: '── Eksport',          icon: Icons.export },
+  { to: '/manager',             label: '── Live produkcja',   icon: Icons.live },
+  { to: '/manager/day-report',  label: '── Raport dnia',      icon: Icons.report },
+  { to: '/manager/export',      label: '── Eksport',          icon: Icons.export },
   { to: '/specialist',          label: '── Awarie (spec.)',   icon: Icons.failure },
+  { to: '/syringe/supervisor',  label: '── Strzykawki SA',    icon: Icons.machines },
+  { to: '/syringe/history',     label: '── Historia SA',      icon: Icons.history },
 ]
 
 export default function AppLayout() {
@@ -148,13 +166,14 @@ export default function AppLayout() {
     }
   }, [profile?.id, profile?.role, activeShift?.id, loadActiveShift])
 
-  const navItems = profile?.role === 'admin'      ? NAV_ADMIN
-    : profile?.role === 'specialist' ? NAV_SPECIALIST
-    : profile?.role === 'manager'    ? NAV_MANAGER
-    : profile?.role === 'executive'  ? NAV_EXECUTIVE
-    : profile?.role === 'viewer'     ? NAV_VIEWER
+  const navItems = profile?.role === 'admin'            ? NAV_ADMIN
+    : profile?.role === 'specialist'      ? NAV_SPECIALIST
+    : profile?.role === 'manager'         ? NAV_MANAGER
+    : profile?.role === 'executive'       ? NAV_EXECUTIVE
+    : profile?.role === 'viewer'          ? NAV_VIEWER
+    : profile?.role === 'syringe_operator' ? NAV_SYRINGE_OPERATOR
     : NAV_OPERATOR
-  const visibleActiveShift = profile?.role === 'operator' &&
+  const visibleActiveShift = (profile?.role === 'operator' || profile?.role === 'syringe_operator') &&
     !shiftLoading &&
     activeShift &&
     !activeShift.ended_at &&
@@ -270,7 +289,7 @@ export default function AppLayout() {
         <nav className="flex-1 py-3 px-2 overflow-y-auto min-h-0">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
-              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'executive' ? 'Zarzad' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : 'Operator'}
+              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'executive' ? 'Zarząd' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : profile?.role === 'syringe_operator' ? 'Op. Strzykawek' : 'Operator'}
             </div>
           )}
           {navItems.map(item => (

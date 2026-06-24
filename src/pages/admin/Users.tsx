@@ -12,7 +12,7 @@ function isValidEmail(value: string) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim())
 }
 
-const ROLES: UserRole[] = ['operator', 'manager', 'specialist', 'viewer', 'executive', 'admin']
+const ROLES: UserRole[] = ['operator', 'syringe_operator', 'manager', 'specialist', 'viewer', 'executive', 'admin']
 const OPERATORS = [
   'Marcel Pełczyński','Miłosz Pełczyński','Patryk Grelak','Damian Wiącek',
   'Agnieszka Kowalik','Kacper Wojciechowski','Michał Broniek','Szymon Jaślikowski',
@@ -157,13 +157,14 @@ export default function AdminUsers() {
   }
 
   const roleColor = (role: UserRole) => ({
-    admin:    'bg-purple-500/15 text-purple-400 border-purple-500/20',
-    manager:  'bg-blue-500/15 text-blue-400 border-blue-500/20',
-    specialist: 'bg-amber-500/15 text-amber-400 border-amber-500/20',
-    viewer: 'bg-cyan-500/15 text-cyan-300 border-cyan-500/20',
-    executive: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/20',
-    operator: 'bg-green-500/15 text-green-400 border-green-500/20'
-  }[role])
+    admin:            'bg-purple-500/15 text-purple-400 border-purple-500/20',
+    manager:          'bg-blue-500/15 text-blue-400 border-blue-500/20',
+    specialist:       'bg-amber-500/15 text-amber-400 border-amber-500/20',
+    viewer:           'bg-cyan-500/15 text-cyan-300 border-cyan-500/20',
+    executive:        'bg-indigo-500/15 text-indigo-300 border-indigo-500/20',
+    operator:         'bg-green-500/15 text-green-400 border-green-500/20',
+    syringe_operator: 'bg-teal-500/15 text-teal-300 border-teal-500/20'
+  }[role] ?? 'bg-navy-700 text-navy-300 border-navy-600')
 
   return (
     <div className="space-y-5">

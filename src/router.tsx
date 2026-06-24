@@ -27,6 +27,19 @@ const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
 const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
 const SpecialistDashboard = lazy(() => import('@/pages/Specialist/Dashboard'))
 
+// ── SYRINGE OPERATOR MODULE ──
+const SyringeSessionStart  = lazy(() => import('@/pages/syringe/SessionStart'))
+const SyringeDashboard     = lazy(() => import('@/pages/syringe/Dashboard'))
+const SyringeEntry         = lazy(() => import('@/pages/syringe/ProductionEntry'))
+const SyringeDowntime      = lazy(() => import('@/pages/syringe/DowntimeEntry'))
+const SyringeFailure       = lazy(() => import('@/pages/syringe/FailureReport'))
+const SyringeQuality       = lazy(() => import('@/pages/syringe/QualityIssue'))
+const SyringeComponents    = lazy(() => import('@/pages/syringe/Components'))
+const SyringeChangeover    = lazy(() => import('@/pages/syringe/Changeover'))
+const SyringeHandover      = lazy(() => import('@/pages/syringe/ShiftHandover'))
+const SyringeHistory       = lazy(() => import('@/pages/syringe/History'))
+const SyringeSupervisor    = lazy(() => import('@/pages/syringe/SupervisorView'))
+
 function PageLoader() {
   return (
     <div className="flex items-center justify-center h-64">
@@ -111,11 +124,12 @@ function AppErrorBoundary() {
 
 function RoleRedirect() {
   const { profile } = useAuthStore()
-  if (profile?.role === 'admin')      return <Navigate to="/admin" replace />
-  if (profile?.role === 'manager')    return <Navigate to="/manager" replace />
-  if (profile?.role === 'viewer')     return <Navigate to="/demo" replace />
-  if (profile?.role === 'executive')  return <Navigate to="/executive" replace />
-  if (profile?.role === 'specialist') return <Navigate to="/specialist" replace />
+  if (profile?.role === 'admin')           return <Navigate to="/admin" replace />
+  if (profile?.role === 'manager')         return <Navigate to="/manager" replace />
+  if (profile?.role === 'viewer')          return <Navigate to="/demo" replace />
+  if (profile?.role === 'executive')       return <Navigate to="/executive" replace />
+  if (profile?.role === 'specialist')      return <Navigate to="/specialist" replace />
+  if (profile?.role === 'syringe_operator') return <Navigate to="/syringe" replace />
   return <Navigate to="/operator" replace />
 }
 
@@ -187,6 +201,25 @@ const router = createBrowserRouter([
         path: 'manager/export',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerExport /></Wrap></RequireAuth>
       },
+      // ── SYRINGE OPERATOR MODULE ──
+      {
+        path: 'syringe',
+        element: <RequireAuth roles={['syringe_operator', 'manager', 'admin']}><Outlet /></RequireAuth>,
+        children: [
+          { index: true,          element: <Wrap><SyringeDashboard /></Wrap> },
+          { path: 'start',        element: <Wrap><SyringeSessionStart /></Wrap> },
+          { path: 'entry',        element: <Wrap><SyringeEntry /></Wrap> },
+          { path: 'downtime',     element: <Wrap><SyringeDowntime /></Wrap> },
+          { path: 'failure',      element: <Wrap><SyringeFailure /></Wrap> },
+          { path: 'quality',      element: <Wrap><SyringeQuality /></Wrap> },
+          { path: 'components',   element: <Wrap><SyringeComponents /></Wrap> },
+          { path: 'changeover',   element: <Wrap><SyringeChangeover /></Wrap> },
+          { path: 'handover',     element: <Wrap><SyringeHandover /></Wrap> },
+          { path: 'history',      element: <Wrap><SyringeHistory /></Wrap> },
+          { path: 'supervisor',   element: <RequireAuth roles={['manager', 'admin']}><Wrap><SyringeSupervisor /></Wrap></RequireAuth> },
+        ]
+      },
+
       // ── SPECIALIST ──
       {
         path: 'specialist',
