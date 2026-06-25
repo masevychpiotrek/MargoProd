@@ -63,6 +63,9 @@ const NAV_MANAGER = [
   { to: '/tpm/pm',               label: '── TPM karty PM',   icon: Icons.tasks },
   { to: '/tpm/parameters',       label: '── TPM parametry',  icon: Icons.targets },
   { to: '/tpm/parts',            label: '── TPM części',     icon: Icons.machines },
+  { to: '/tpm/pareto',           label: '── TPM Pareto',     icon: Icons.plan },
+  { to: '/tpm/reports',          label: '── TPM raporty',    icon: Icons.report },
+  { to: '/tpm/a1tec',            label: '── TPM A1TEC',      icon: Icons.failure },
   { to: '/tpm/stations',         label: '── TPM stacje',     icon: Icons.targets },
 ]
 
@@ -79,6 +82,8 @@ const NAV_EXECUTIVE = [
   { to: '/executive/details',    label: 'Szczegoly',        icon: Icons.report },
   { to: '/executive/report',    label: 'Raport dnia',      icon: Icons.live },
   { to: '/tpm/board',           label: 'TPM/PM IS PRO',    icon: Icons.machines },
+  { to: '/tpm/pareto',          label: 'TPM Pareto',       icon: Icons.plan },
+  { to: '/tpm/reports',         label: 'TPM raporty',      icon: Icons.report },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 const NAV_SYRINGE_OPERATOR = [
@@ -118,6 +123,9 @@ const NAV_ADMIN = [
   { to: '/tpm/pm',             label: 'TPM karty PM',     icon: Icons.tasks },
   { to: '/tpm/parameters',     label: 'TPM parametry',    icon: Icons.targets },
   { to: '/tpm/parts',          label: 'TPM części',       icon: Icons.machines },
+  { to: '/tpm/pareto',         label: 'TPM Pareto',       icon: Icons.plan },
+  { to: '/tpm/reports',        label: 'TPM raporty',      icon: Icons.report },
+  { to: '/tpm/a1tec',          label: 'TPM A1TEC',        icon: Icons.failure },
   { to: '/tpm/stations',       label: 'TPM stacje/checklisty', icon: Icons.targets },
   { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager',             label: '── Live produkcja',   icon: Icons.live },

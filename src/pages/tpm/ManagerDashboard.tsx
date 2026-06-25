@@ -1,6 +1,6 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery } from '@tanstack/react-query'
+import { useQuery, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { ISSUE_STATUS_LABELS } from '@/types/tpm'
 import type { TpmIssue, AmChecklist, TpmMachine } from '@/types/tpm'
@@ -34,7 +34,18 @@ function KpiTile({ label, value, color, onClick }: { label: string; value: strin
 
 export default function TpmManagerDashboard() {
   const navigate = useNavigate()
+  const [recurMsg, setRecurMsg] = useState('')
   const { data, isLoading } = useQuery({ queryKey: ['tpm_manager_dash'], queryFn: fetchAll, refetchInterval: 60000 })
+
+  const recurMut = useMutation({
+    mutationFn: async () => {
+      const { data, error } = await supabase.rpc('tpm_mark_recurring')
+      if (error) throw error
+      return data as number
+    },
+    onSuccess: (n) => { setRecurMsg(`Oznaczono powtarzalne: ${n}`); setTimeout(() => setRecurMsg(''), 4000) },
+    onError: (e: Error) => { setRecurMsg('Błąd: ' + e.message); setTimeout(() => setRecurMsg(''), 4000) }
+  })
 
   const stats = useMemo(() => {
     if (!data) return null
@@ -107,9 +118,17 @@ export default function TpmManagerDashboard() {
           <button onClick={() => navigate('/tpm/pm')} className="btn-secondary px-4 py-2">Karty PM</button>
           <button onClick={() => navigate('/tpm/parameters')} className="btn-secondary px-4 py-2">Parametry</button>
           <button onClick={() => navigate('/tpm/parts')} className="btn-secondary px-4 py-2">Części</button>
+          <button onClick={() => navigate('/tpm/pareto')} className="btn-secondary px-4 py-2">Pareto</button>
+          <button onClick={() => navigate('/tpm/reports')} className="btn-secondary px-4 py-2">Raporty</button>
+          <button onClick={() => navigate('/tpm/a1tec')} className="btn-secondary px-4 py-2">Rejestr A1TEC</button>
           <button onClick={() => navigate('/tpm/stations')} className="btn-secondary px-4 py-2">Stacje i checklisty</button>
+          <button onClick={() => recurMut.mutate()} disabled={recurMut.isPending} className="px-4 py-2 rounded-xl border border-purple-500/40 bg-purple-500/10 text-purple-300 text-sm font-semibold">
+            {recurMut.isPending ? 'Analiza...' : 'Wykryj powtarzalne'}
+          </button>
         </div>
       </div>
+
+      {recurMsg && <div className="rounded-xl border border-purple-500/30 bg-purple-500/10 px-4 py-2 text-sm text-purple-300">{recurMsg}</div>}
 
       {/* Panel alertów */}
       <div className="rounded-2xl border border-amber-500/30 bg-amber-500/5 p-5">

@@ -352,6 +352,69 @@ export interface TpmPartUsage {
   created_at: string
 }
 
+// ── Etap 3 — A1TEC ──
+
+export type A1tecStatus =
+  | 'preparation' | 'sent' | 'awaiting_response' | 'response_received'
+  | 'awaiting_action' | 'remote_support' | 'visit_planned' | 'resolved' | 'closed'
+
+export const A1TEC_STATUS_LABELS: Record<A1tecStatus, string> = {
+  preparation: 'Przygotowanie', sent: 'Wysłane', awaiting_response: 'Oczekuje na odpowiedź',
+  response_received: 'Odpowiedź otrzymana', awaiting_action: 'Oczekuje na działanie A1TEC',
+  remote_support: 'Wsparcie zdalne', visit_planned: 'Zaplanowana wizyta',
+  resolved: 'Rozwiązane', closed: 'Zamknięte'
+}
+
+export const A1TEC_REQUIREMENTS: { code: string; label: string }[] = [
+  { code: 'setting_template', label: 'Przekazanie wzorca ustawienia' },
+  { code: 'standard_params', label: 'Przekazanie standardowych parametrów' },
+  { code: 'tolerances', label: 'Przekazanie dopuszczalnych tolerancji' },
+  { code: 'calibration', label: 'Przekazanie procedury kalibracji' },
+  { code: 'diagnostic', label: 'Przekazanie procedury diagnostycznej' },
+  { code: 'software_analysis', label: 'Analiza software' },
+  { code: 'software_fix', label: 'Poprawka software' },
+  { code: 'mechanical_analysis', label: 'Analiza mechaniczna' },
+  { code: 'design_change', label: 'Zmiana konstrukcyjna' },
+  { code: 'electrical_analysis', label: 'Analiza elektryczna' },
+  { code: 'component_replace', label: 'Wymiana podzespołu' },
+  { code: 'remote_support', label: 'Wsparcie zdalne' },
+  { code: 'service_visit', label: 'Wizyta serwisowa' },
+  { code: 'training', label: 'Szkolenie Specialist' },
+  { code: 'doc_update', label: 'Aktualizacja dokumentacji' },
+  { code: 'other', label: 'Inne' }
+]
+
+export interface TpmA1tecContact {
+  id: string
+  issue_id: string | null
+  internal_number: string | null
+  a1tec_number: string | null
+  sent_date: string | null
+  sender_id: string | null
+  recipient: string | null
+  problem_desc: string | null
+  attachments: string[]
+  requirements: string[]
+  requirement_other: string | null
+  response_date: string | null
+  response_text: string | null
+  a1tec_person: string | null
+  planned_action: string | null
+  planned_date: string | null
+  status: A1tecStatus
+  closed_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  issue?: TpmIssue
+}
+
+export interface TpmSetting {
+  key: string
+  value: string
+  updated_at: string
+}
+
 export interface TpmMedia {
   id: string
   machine_id: string | null

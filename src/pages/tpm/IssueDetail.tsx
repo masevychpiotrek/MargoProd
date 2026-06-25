@@ -383,6 +383,8 @@ export default function TpmIssueDetail() {
               </button>
               <button onClick={() => transition.mutate({ status: 'reopened', action: 'reopen', comment: actionComment || 'Ponowne otwarcie' })}
                 className="px-4 py-2 rounded-xl border border-amber-500/40 bg-amber-500/10 text-amber-300 text-sm font-semibold">Otwórz ponownie</button>
+              <button onClick={() => navigate(`/tpm/a1tec/new/${issue.id}`)}
+                className="px-4 py-2 rounded-xl border border-cyan-500/40 bg-cyan-500/10 text-cyan-300 text-sm font-semibold">Generuj pakiet dowodowy A1TEC</button>
             </div>
 
             {/* Zatwierdzenie zamknięcia */}
