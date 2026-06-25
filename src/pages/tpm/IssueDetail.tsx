@@ -128,6 +128,21 @@ export default function TpmIssueDetail() {
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
+  const deleteMediaMut = useMutation({
+    mutationFn: async (m: TpmMedia) => {
+      if (!issue || !profile) return
+      const reason = window.prompt('Podaj powód usunięcia materiału (zostanie zapisany w historii):')
+      if (reason === null) throw new Error('__cancel__')
+      if (!reason.trim()) throw new Error('Powód usunięcia jest wymagany.')
+      await supabase.from('tpm_media').update({
+        deleted_at: new Date().toISOString(), deleted_by: profile.id, deleted_reason: reason
+      }).eq('id', m.id)
+      await logIssueHistory({ issueId: issue.id, userId: profile.id, action: 'media_deleted', comment: `Usunięto materiał (${m.category}). Powód: ${reason}` })
+    },
+    onSuccess: () => { qc.invalidateQueries({ queryKey: ['tpm_issue_media', id] }); refresh(); flash('Materiał usunięty (zachowano w historii)') },
+    onError: (e: Error) => { if (e.message !== '__cancel__') flash('Błąd: ' + e.message) }
+  })
+
   if (isLoading || !issue) return <div className="text-navy-400 text-center py-16">Ładowanie...</div>
 
   const isCritical = issue.priority === 'critical'
@@ -279,12 +294,18 @@ export default function TpmIssueDetail() {
         {media.length > 0 && (
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mb-3">
             {media.map(m => (
-              <a key={m.id} href={m.url} target="_blank" rel="noreferrer" className="block rounded-lg overflow-hidden border border-navy-700">
-                {m.media_type === 'video'
-                  ? <div className="aspect-video bg-navy-900 flex items-center justify-center text-navy-400 text-xs">🎬 Film</div>
-                  : <img src={m.url} alt={m.description ?? ''} className="aspect-video object-cover w-full" />}
-                <div className="px-2 py-1 text-xs text-navy-400 bg-navy-800">{MEDIA_CATEGORIES.find(c => c.value === m.category)?.label}</div>
-              </a>
+              <div key={m.id} className="rounded-lg overflow-hidden border border-navy-700 relative group">
+                <a href={m.url} target="_blank" rel="noreferrer" className="block">
+                  {m.media_type === 'video'
+                    ? <div className="aspect-video bg-navy-900 flex items-center justify-center text-navy-400 text-xs">🎬 Film</div>
+                    : <img src={m.url} alt={m.description ?? ''} className="aspect-video object-cover w-full" />}
+                  <div className="px-2 py-1 text-xs text-navy-400 bg-navy-800">{MEDIA_CATEGORIES.find(c => c.value === m.category)?.label}</div>
+                </a>
+                {canTechnical && (
+                  <button onClick={() => deleteMediaMut.mutate(m)} title="Usuń materiał"
+                    className="absolute top-1 right-1 w-6 h-6 rounded-full bg-red-600/80 text-white text-xs opacity-0 group-hover:opacity-100 transition-opacity">×</button>
+                )}
+              </div>
             ))}
           </div>
         )}

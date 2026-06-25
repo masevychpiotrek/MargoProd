@@ -59,6 +59,7 @@ const TpmPareto          = lazy(() => import('@/pages/tpm/Pareto'))
 const TpmReports         = lazy(() => import('@/pages/tpm/Reports'))
 const TpmA1tecPackage    = lazy(() => import('@/pages/tpm/A1tecPackage'))
 const TpmA1tecRegistry   = lazy(() => import('@/pages/tpm/A1tecRegistry'))
+const TpmStationCard     = lazy(() => import('@/pages/tpm/StationCard'))
 
 function PageLoader() {
   return (
@@ -258,6 +259,7 @@ const router = createBrowserRouter([
       { path: 'tpm/reports',    element: <RequireAuth roles={['manager', 'executive', 'admin']}><Wrap><TpmReports /></Wrap></RequireAuth> },
       { path: 'tpm/a1tec',      element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmA1tecRegistry /></Wrap></RequireAuth> },
       { path: 'tpm/a1tec/new/:issueId', element: <RequireAuth roles={['manager', 'admin']}><Wrap><TpmA1tecPackage /></Wrap></RequireAuth> },
+      { path: 'tpm/station/:id', element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmStationCard /></Wrap></RequireAuth> },
 
       // ── SPECIALIST ──
       {

@@ -4,6 +4,9 @@ import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { ISSUE_STATUS_LABELS, PRIORITY_LABELS, ISSUE_CATEGORY_LABELS } from '@/types/tpm'
 import type { TpmIssue, TpmMachine, TpmStation } from '@/types/tpm'
+import { exportCsv, exportXlsx } from '@/lib/tpmExport'
+
+const SAVED_FILTERS_KEY = 'tpm_queue_saved_filters'
 
 const OPEN_STATUSES = ['new','awaiting_ack','accepted','diagnosing','immediate_done','repairing','awaiting_part','awaiting_manager','observation','testing','escalated_a1tec','resolved','awaiting_approval','reopened']
 
@@ -35,6 +38,20 @@ export default function TpmSpecialistQueue() {
   const [priority, setPriority] = useState('')
   const [machineId, setMachineId] = useState('')
   const [search, setSearch] = useState('')
+  const [savedMsg, setSavedMsg] = useState('')
+
+  const saveFilters = () => {
+    localStorage.setItem(SAVED_FILTERS_KEY, JSON.stringify({ status, priority, machineId, search }))
+    setSavedMsg('Zapisano zestaw filtrów'); setTimeout(() => setSavedMsg(''), 2500)
+  }
+  const loadFilters = () => {
+    const raw = localStorage.getItem(SAVED_FILTERS_KEY)
+    if (!raw) { setSavedMsg('Brak zapisanych filtrów'); setTimeout(() => setSavedMsg(''), 2500); return }
+    try {
+      const f = JSON.parse(raw)
+      setStatus(f.status ?? 'open'); setPriority(f.priority ?? ''); setMachineId(f.machineId ?? ''); setSearch(f.search ?? '')
+    } catch { /* ignore */ }
+  }
 
   const { data: machines = [] } = useQuery({
     queryKey: ['tpm_machines'],
@@ -61,12 +78,34 @@ export default function TpmSpecialistQueue() {
         ((i.station as TpmStation)?.station_number ?? '').toLowerCase().includes(search.toLowerCase()))
     : issues
 
+  const doExport = (kind: 'csv' | 'xlsx') => {
+    const header = ['Numer', 'Automat', 'Stacja', 'Kategoria', 'Priorytet', 'Status', 'Postój(min)', 'NOK', 'Zgłaszający', 'Data']
+    const rows = filtered.map(i => [
+      i.issue_number, (i.machine as TpmMachine)?.code, (i.station as TpmStation)?.station_number,
+      ISSUE_CATEGORY_LABELS[i.category] ?? i.category, PRIORITY_LABELS[i.priority], ISSUE_STATUS_LABELS[i.status],
+      i.downtime_min ?? 0, i.nok_count ?? 0, (i.reporter as { full_name?: string })?.full_name ?? '',
+      new Date(i.report_time).toLocaleDateString('pl')
+    ])
+    const fname = `Zgloszenia_TPM_${new Date().toISOString().split('T')[0]}`
+    if (kind === 'csv') exportCsv(fname, header, rows)
+    else exportXlsx(fname, [{ name: 'Zgłoszenia', header, rows }])
+  }
+
   return (
     <div className="space-y-4">
-      <div>
-        <h1 className="text-xl font-bold text-white">Zgłoszenia techniczne</h1>
-        <p className="text-navy-400 text-sm">{filtered.length} zgłoszeń</p>
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-xl font-bold text-white">Zgłoszenia techniczne</h1>
+          <p className="text-navy-400 text-sm">{filtered.length} zgłoszeń</p>
+        </div>
+        <div className="flex gap-2 flex-wrap">
+          <button onClick={saveFilters} className="btn-secondary px-3 py-2 text-sm">Zapisz filtry</button>
+          <button onClick={loadFilters} className="btn-secondary px-3 py-2 text-sm">Wczytaj filtry</button>
+          <button onClick={() => doExport('csv')} className="btn-secondary px-3 py-2 text-sm">CSV</button>
+          <button onClick={() => doExport('xlsx')} className="btn-secondary px-3 py-2 text-sm">XLSX</button>
+        </div>
       </div>
+      {savedMsg && <div className="rounded-xl border border-brand/30 bg-brand/10 px-4 py-2 text-sm text-brand">{savedMsg}</div>}
 
       {/* Filtry */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-4 space-y-3">

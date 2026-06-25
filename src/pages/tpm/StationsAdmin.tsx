@@ -138,7 +138,10 @@ export default function TpmStationsAdmin() {
       {/* Karta stacji + punkty */}
       {station && (
         <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
-          <div className="text-sm font-bold text-white">{station.station_number} — {station.name}</div>
+          <div className="flex items-center justify-between gap-3">
+            <div className="text-sm font-bold text-white">{station.station_number} — {station.name}</div>
+            <button onClick={() => navigate(`/tpm/station/${station.id}`)} className="btn-secondary px-3 py-1.5 text-sm">Otwórz kartę stacji →</button>
+          </div>
 
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
             <div>

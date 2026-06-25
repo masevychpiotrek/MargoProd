@@ -93,11 +93,25 @@ export default function TpmManagerDashboard() {
     const reaction = acked.length > 0
       ? Math.round(acked.reduce((s, i) => s + (new Date(i.ack_time!).getTime() - new Date(i.report_time).getTime()) / 60000, 0) / acked.length)
       : 0
+    // MTBF — średni odstęp między awariami (dni), per stacja, uśredniony
+    const perStationTimes: Record<string, number[]> = {}
+    for (const i of issues) {
+      (perStationTimes[i.station_id] ??= []).push(new Date(i.report_time).getTime())
+    }
+    const intervals: number[] = []
+    for (const arr of Object.values(perStationTimes)) {
+      if (arr.length < 2) continue
+      arr.sort((a, b) => a - b)
+      for (let k = 1; k < arr.length; k++) intervals.push(arr[k] - arr[k - 1])
+    }
+    const mtbf = intervals.length > 0
+      ? Math.round(intervals.reduce((a, b) => a + b, 0) / intervals.length / 864e5 * 10) / 10
+      : 0
 
     return {
       total: issues.length, open: open.length, critical, recurring, a1tec, awaitingApproval,
       noReaction, noDiagnosis, overdue, ineffective, amPct, doneAm, expectedAm,
-      downtimeTotal, downtimeIS3, downtimeIS4, nokTotal, topByCount, topByDowntime, mttr, reaction,
+      downtimeTotal, downtimeIS3, downtimeIS4, nokTotal, topByCount, topByDowntime, mttr, mtbf, reaction,
       stationCount: stations.length
     }
   }, [data])
@@ -154,6 +168,7 @@ export default function TpmManagerDashboard() {
         <KpiTile label="Postój IS-3 (min)" value={stats.downtimeIS3} />
         <KpiTile label="Postój IS-4 (min)" value={stats.downtimeIS4} />
         <KpiTile label="MTTR (min)" value={stats.mttr} />
+        <KpiTile label="MTBF (dni)" value={stats.mtbf || '—'} />
         <KpiTile label="Śr. czas reakcji (min)" value={stats.reaction} />
       </div>
 

@@ -4,6 +4,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { notifyUsers, getUserIdsByRole } from '@/lib/tpm'
+import { exportCsv, exportXlsx } from '@/lib/tpmExport'
 import { PART_STATUS_LABELS } from '@/types/tpm'
 import type { TpmMachine, TpmStation, TpmPart, PartStatus } from '@/types/tpm'
 
@@ -50,6 +51,18 @@ export default function TpmParts() {
 
   const flash = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3500) }
   const stOfMachine = stations.filter(s => s.machine_id === newP.machine_id)
+
+  const exportParts = (kind: 'csv' | 'xlsx') => {
+    const header = ['Nazwa', 'Nr części', 'Producent', 'Nr producenta', 'Stacja', 'Stan', 'Min', 'Jednostka', 'Lokalizacja', 'Dostawa(dni)', 'Użyto', 'Status']
+    const rows = parts.map(p => [
+      p.name, p.part_number ?? '', p.manufacturer ?? '', p.manufacturer_number ?? '',
+      (p.station as { station_number?: string })?.station_number ?? '', p.current_stock, p.min_stock, p.unit,
+      p.location ?? '', p.lead_time_days ?? '', p.used_count, PART_STATUS_LABELS[p.status]
+    ])
+    const fname = `Czesci_TPM_${new Date().toISOString().split('T')[0]}`
+    if (kind === 'csv') exportCsv(fname, header, rows)
+    else exportXlsx(fname, [{ name: 'Części', header, rows }])
+  }
 
   const addMut = useMutation({
     mutationFn: async () => {
@@ -101,7 +114,11 @@ export default function TpmParts() {
           <h1 className="text-xl font-bold text-white">Rejestr części krytycznych</h1>
           <p className="text-navy-400 text-sm">{parts.length} pozycji · {lowParts.length} z niskim stanem</p>
         </div>
-        <button onClick={() => navigate('/tpm')} className="btn-secondary px-4 py-2">← Pulpit TPM</button>
+        <div className="flex gap-2">
+          <button onClick={() => exportParts('csv')} className="btn-secondary px-3 py-2 text-sm">CSV</button>
+          <button onClick={() => exportParts('xlsx')} className="btn-secondary px-3 py-2 text-sm">XLSX</button>
+          <button onClick={() => navigate('/tpm')} className="btn-secondary px-4 py-2">← Pulpit TPM</button>
+        </div>
       </div>
 
       {msg && <div className="rounded-xl border border-brand/30 bg-brand/10 px-4 py-2 text-sm text-brand">{msg}</div>}
