@@ -7,7 +7,7 @@ import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import RobotAssistant from '@/components/shared/RobotAssistant'
-import type { Shift } from '@/types/database'
+import type { SaSession, Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 import { usePresence } from '@/hooks/usePresence'
 
@@ -40,7 +40,10 @@ const NAV_OPERATOR = [
   { to: '/operator/failure', label: 'Zgloś awarie', icon: Icons.failure },
   { to: '/operator/tasks',   label: 'Zadania',      icon: Icons.tasks },
   { to: '/operator/password', label: 'Zmien haslo',  icon: Icons.password },
-  { to: '/operator/history', label: 'Historia',     icon: Icons.history }
+  { to: '/operator/history', label: 'Historia',     icon: Icons.history },
+  { to: '/tpm',              label: '── TPM/PM IS PRO', icon: Icons.machines },
+  { to: '/tpm/checklist',    label: '── Checklista AM',  icon: Icons.tasks },
+  { to: '/tpm/report',       label: '── Zgłoś awarię TPM', icon: Icons.failure }
 ]
 
 const NAV_MANAGER = [
@@ -55,6 +58,9 @@ const NAV_MANAGER = [
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
   { to: '/admin/syringe',        label: '── Strzykawki konfig.', icon: Icons.targets },
+  { to: '/tpm/manager',          label: '── TPM/PM nadzór',  icon: Icons.machines },
+  { to: '/tpm/issues',           label: '── TPM zgłoszenia', icon: Icons.failure },
+  { to: '/tpm/stations',         label: '── TPM stacje',     icon: Icons.targets },
 ]
 
 const NAV_VIEWER = [
@@ -69,6 +75,7 @@ const NAV_EXECUTIVE = [
   { to: '/executive/machines',   label: 'Automaty',         icon: Icons.machines },
   { to: '/executive/details',    label: 'Szczegoly',        icon: Icons.report },
   { to: '/executive/report',    label: 'Raport dnia',      icon: Icons.live },
+  { to: '/tpm/board',           label: 'TPM/PM IS PRO',    icon: Icons.machines },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password }
 ]
 const NAV_SYRINGE_OPERATOR = [
@@ -87,6 +94,8 @@ const NAV_SYRINGE_OPERATOR = [
 
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
+  { to: '/tpm/issues', label: 'TPM — Zgłoszenia',  icon: Icons.machines },
+  { to: '/tpm/checklist', label: 'TPM — Checklista AM', icon: Icons.tasks },
   { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
 ]
 
@@ -99,6 +108,8 @@ const NAV_ADMIN = [
   { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
   { to: '/admin/syringe',      label: 'Strzykawki — konfig.', icon: Icons.machines },
+  { to: '/tpm/manager',        label: 'TPM/PM nadzór',    icon: Icons.machines },
+  { to: '/tpm/stations',       label: 'TPM stacje/checklisty', icon: Icons.targets },
   { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager',             label: '── Live produkcja',   icon: Icons.live },
   { to: '/manager/day-report',  label: '── Raport dnia',      icon: Icons.report },
@@ -118,6 +129,7 @@ export default function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(() => window.innerWidth >= 768)
   const [showLogoutModal, setShowLogoutModal] = useState(false)
   const [lightTheme, setLightTheme] = useState(() => localStorage.getItem('margoline_theme') === 'light')
+  const [activeSyringeSession, setActiveSyringeSession] = useState<SaSession | null>(null)
 
   useEffect(() => {
     // Show loading animation only on first mount
@@ -168,6 +180,37 @@ export default function AppLayout() {
     }
   }, [profile?.id, profile?.role, activeShift?.id, loadActiveShift])
 
+  useEffect(() => {
+    if (profile?.role !== 'syringe_operator') {
+      setActiveSyringeSession(null)
+      return
+    }
+
+    const loadActiveSyringeSession = async () => {
+      const { data } = await supabase
+        .from('sa_sessions')
+        .select('*, machine:sa_machines(*), assortment:sa_assortments(*)')
+        .eq('operator_id', profile.id)
+        .is('ended_at', null)
+        .maybeSingle()
+      setActiveSyringeSession((data as SaSession | null) ?? null)
+    }
+
+    void loadActiveSyringeSession()
+
+    const channel = supabase
+      .channel(`syringe-session-${profile.id}`)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sa_sessions', filter: `operator_id=eq.${profile.id}` },
+        () => void loadActiveSyringeSession())
+      .subscribe()
+    const fallback = window.setInterval(loadActiveSyringeSession, 60000)
+
+    return () => {
+      window.clearInterval(fallback)
+      supabase.removeChannel(channel)
+    }
+  }, [profile?.id, profile?.role])
+
   const navItems = profile?.role === 'admin'            ? NAV_ADMIN
     : profile?.role === 'specialist'      ? NAV_SPECIALIST
     : profile?.role === 'manager'         ? NAV_MANAGER
@@ -175,21 +218,24 @@ export default function AppLayout() {
     : profile?.role === 'viewer'          ? NAV_VIEWER
     : profile?.role === 'syringe_operator' ? NAV_SYRINGE_OPERATOR
     : NAV_OPERATOR
-  const visibleActiveShift = (profile?.role === 'operator' || profile?.role === 'syringe_operator') &&
+  const visibleActiveShift = profile?.role === 'operator' &&
     !shiftLoading &&
     activeShift &&
     !activeShift.ended_at &&
     (activeShift.operator_1_id === profile.id || activeShift.operator_2_id === profile.id)
       ? activeShift
       : null
+  const visibleWorkSession = visibleActiveShift || activeSyringeSession
   const visibleActiveMachine = visibleActiveShift ? activeMachine : null
+  const visibleWorkMachineName = activeSyringeSession?.machine?.name ?? visibleActiveMachine?.name
+  const visibleWorkShiftType = activeSyringeSession?.shift_type ?? visibleActiveShift?.shift_type
   const visibleShiftOperators = visibleActiveShift
     ? [visibleActiveShift.operator_1?.full_name, visibleActiveShift.operator_2?.full_name].filter(Boolean).join(' / ')
     : ''
 
   const handleSignOut = async () => {
     if (profile?.role === 'viewer') sessionStorage.removeItem('margoline_viewer_demo_state')
-    if (visibleActiveShift && profile?.role === 'operator') {
+    if (visibleWorkSession && (profile?.role === 'operator' || profile?.role === 'syringe_operator')) {
       setShowLogoutModal(true)
       return
     }
@@ -276,10 +322,10 @@ export default function AppLayout() {
         </div>
 
         {/* Active shift */}
-        {sidebarOpen && visibleActiveShift && (
+        {sidebarOpen && visibleWorkSession && (
           <div className="px-4 py-3 border-b border-navy-700 bg-brand/5 flex-shrink-0">
-            <div className="text-xs font-bold text-brand uppercase tracking-wider mb-1">{visibleActiveMachine?.name}</div>
-            <div className="text-xs text-navy-300">Zmiana {visibleActiveShift.shift_type} · {visibleShiftOperators || profile?.full_name}</div>
+            <div className="text-xs font-bold text-brand uppercase tracking-wider mb-1">{visibleWorkMachineName}</div>
+            <div className="text-xs text-navy-300">Zmiana {visibleWorkShiftType} · {visibleShiftOperators || profile?.full_name}</div>
             <div className="mt-1.5 flex items-center gap-1.5">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
               <span className="text-xs text-green-400">Zmiana aktywna</span>
@@ -335,7 +381,7 @@ export default function AppLayout() {
             onClick={handleSignOut}
             className={cn(
               'w-full flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-semibold transition-all border',
-              visibleActiveShift
+              visibleWorkSession
                 ? 'bg-amber-500/10 border-amber-500/30 text-amber-400 hover:bg-amber-500/20'
                 : 'bg-red-500/10 border-red-500/20 text-red-400 hover:bg-red-500/20'
             )}
@@ -346,7 +392,7 @@ export default function AppLayout() {
               <line x1="21" y1="12" x2="9" y2="12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
             </svg>
             {sidebarOpen && (
-              <span>{visibleActiveShift ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}</span>
+              <span>{visibleWorkSession ? 'Wyloguj (zmiana aktywna)' : 'Wyloguj się'}</span>
             )}
           </button>
         </div>
@@ -416,7 +462,7 @@ export default function AppLayout() {
               </div>
               <div>
                 <div className="font-bold text-white">Aktywna zmiana produkcyjna</div>
-                <div className="text-xs text-amber-400">{visibleActiveMachine?.name} · Zmiana {visibleActiveShift?.shift_type}</div>
+                <div className="text-xs text-amber-400">{visibleWorkMachineName} · Zmiana {visibleWorkShiftType}</div>
               </div>
             </div>
             <p className="text-sm text-navy-300 mb-2">

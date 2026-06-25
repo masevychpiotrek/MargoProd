@@ -41,6 +41,17 @@ const SyringeHistory       = lazy(() => import('@/pages/syringe/History'))
 const SyringeSupervisor    = lazy(() => import('@/pages/syringe/SupervisorView'))
 const SyringeAdmin         = lazy(() => import('@/pages/admin/SyringeAdmin'))
 
+// ── TPM / PM — IS PRO ──
+const TpmOperatorHome    = lazy(() => import('@/pages/tpm/OperatorHome'))
+const TpmAmChecklist     = lazy(() => import('@/pages/tpm/AmChecklist'))
+const TpmReportIssue     = lazy(() => import('@/pages/tpm/ReportIssue'))
+const TpmMyIssues        = lazy(() => import('@/pages/tpm/MyIssues'))
+const TpmIssueDetail     = lazy(() => import('@/pages/tpm/IssueDetail'))
+const TpmSpecialistQueue = lazy(() => import('@/pages/tpm/SpecialistQueue'))
+const TpmManagerDashboard = lazy(() => import('@/pages/tpm/ManagerDashboard'))
+const TpmStationsAdmin   = lazy(() => import('@/pages/tpm/StationsAdmin'))
+const TpmBoardView       = lazy(() => import('@/pages/tpm/BoardView'))
+
 function PageLoader() {
   return (
     <div className="flex items-center justify-center h-64">
@@ -220,6 +231,17 @@ const router = createBrowserRouter([
           { path: 'supervisor',   element: <RequireAuth roles={['manager', 'admin']}><Wrap><SyringeSupervisor /></Wrap></RequireAuth> },
         ]
       },
+
+      // ── TPM / PM — IS PRO ──
+      { path: 'tpm',            element: <RequireAuth roles={['operator', 'specialist', 'manager', 'admin']}><Wrap><TpmOperatorHome /></Wrap></RequireAuth> },
+      { path: 'tpm/checklist',  element: <RequireAuth roles={['operator', 'specialist', 'manager', 'admin']}><Wrap><TpmAmChecklist /></Wrap></RequireAuth> },
+      { path: 'tpm/report',     element: <RequireAuth roles={['operator', 'specialist', 'manager', 'admin']}><Wrap><TpmReportIssue /></Wrap></RequireAuth> },
+      { path: 'tpm/my-issues',  element: <RequireAuth roles={['operator', 'specialist', 'manager', 'admin']}><Wrap><TpmMyIssues /></Wrap></RequireAuth> },
+      { path: 'tpm/issue/:id',  element: <RequireAuth roles={['operator', 'specialist', 'manager', 'executive', 'admin']}><Wrap><TpmIssueDetail /></Wrap></RequireAuth> },
+      { path: 'tpm/issues',     element: <RequireAuth roles={['specialist', 'manager', 'admin']}><Wrap><TpmSpecialistQueue /></Wrap></RequireAuth> },
+      { path: 'tpm/manager',    element: <RequireAuth roles={['manager', 'admin']}><Wrap><TpmManagerDashboard /></Wrap></RequireAuth> },
+      { path: 'tpm/stations',   element: <RequireAuth roles={['manager', 'admin']}><Wrap><TpmStationsAdmin /></Wrap></RequireAuth> },
+      { path: 'tpm/board',      element: <RequireAuth roles={['executive', 'manager', 'admin']}><Wrap><TpmBoardView /></Wrap></RequireAuth> },
 
       // ── SPECIALIST ──
       {
