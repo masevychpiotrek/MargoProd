@@ -69,6 +69,7 @@ export function RequireAuth({ children, roles }: Props) {
       if (profile.role === 'viewer') return <Navigate to="/demo" replace />
       if (profile.role === 'executive') return <Navigate to="/executive" replace />
       if (profile.role === 'specialist') return <Navigate to="/specialist" replace />
+      if (profile.role === 'syringe_operator') return <Navigate to="/syringe" replace />
       return <Navigate to="/operator" replace />
     }
   }
@@ -98,6 +99,7 @@ export function PublicOnly({ children }: { children: React.ReactNode }) {
     if (profile.role === 'viewer') return <Navigate to="/demo" replace />
     if (profile.role === 'executive') return <Navigate to="/executive" replace />
     if (profile.role === 'specialist') return <Navigate to="/specialist" replace />
+    if (profile.role === 'syringe_operator') return <Navigate to="/syringe" replace />
     return <Navigate to="/operator" replace />
   }
 
