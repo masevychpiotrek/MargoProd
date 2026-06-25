@@ -54,6 +54,7 @@ const NAV_MANAGER = [
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
+  { to: '/admin/syringe',        label: '── Strzykawki konfig.', icon: Icons.targets },
 ]
 
 const NAV_VIEWER = [
@@ -97,6 +98,7 @@ const NAV_ADMIN = [
   { to: '/admin/schedules',    label: 'Harmonogram',      icon: Icons.schedule },
   { to: '/admin/audit',        label: 'Audit live',       icon: Icons.audit },
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
+  { to: '/admin/syringe',      label: 'Strzykawki — konfig.', icon: Icons.machines },
   { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager',             label: '── Live produkcja',   icon: Icons.live },
   { to: '/manager/day-report',  label: '── Raport dnia',      icon: Icons.report },

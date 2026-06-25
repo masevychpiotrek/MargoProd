@@ -39,6 +39,7 @@ const SyringeChangeover    = lazy(() => import('@/pages/syringe/Changeover'))
 const SyringeHandover      = lazy(() => import('@/pages/syringe/ShiftHandover'))
 const SyringeHistory       = lazy(() => import('@/pages/syringe/History'))
 const SyringeSupervisor    = lazy(() => import('@/pages/syringe/SupervisorView'))
+const SyringeAdmin         = lazy(() => import('@/pages/admin/SyringeAdmin'))
 
 function PageLoader() {
   return (
@@ -254,6 +255,10 @@ const router = createBrowserRouter([
       {
         path: 'admin/reset',
         element: <RequireAuth roles="admin"><Wrap><AdminReset /></Wrap></RequireAuth>
+      },
+      {
+        path: 'admin/syringe',
+        element: <RequireAuth roles={['admin', 'manager']}><Wrap><SyringeAdmin /></Wrap></RequireAuth>
       },
 
       { path: 'unauthorized', element: (
