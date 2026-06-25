@@ -51,6 +51,10 @@ const TpmSpecialistQueue = lazy(() => import('@/pages/tpm/SpecialistQueue'))
 const TpmManagerDashboard = lazy(() => import('@/pages/tpm/ManagerDashboard'))
 const TpmStationsAdmin   = lazy(() => import('@/pages/tpm/StationsAdmin'))
 const TpmBoardView       = lazy(() => import('@/pages/tpm/BoardView'))
+const TpmPmCards         = lazy(() => import('@/pages/tpm/PmCards'))
+const TpmPmCardDetail    = lazy(() => import('@/pages/tpm/PmCardDetail'))
+const TpmParameters      = lazy(() => import('@/pages/tpm/Parameters'))
+const TpmParts           = lazy(() => import('@/pages/tpm/Parts'))
 
 function PageLoader() {
   return (
@@ -242,6 +246,10 @@ const router = createBrowserRouter([
       { path: 'tpm/manager',    element: <RequireAuth roles={['manager', 'admin']}><Wrap><TpmManagerDashboard /></Wrap></RequireAuth> },
       { path: 'tpm/stations',   element: <RequireAuth roles={['manager', 'admin']}><Wrap><TpmStationsAdmin /></Wrap></RequireAuth> },
       { path: 'tpm/board',      element: <RequireAuth roles={['executive', 'manager', 'admin']}><Wrap><TpmBoardView /></Wrap></RequireAuth> },
+      { path: 'tpm/pm',         element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmPmCards /></Wrap></RequireAuth> },
+      { path: 'tpm/pm/:id',     element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmPmCardDetail /></Wrap></RequireAuth> },
+      { path: 'tpm/parameters', element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmParameters /></Wrap></RequireAuth> },
+      { path: 'tpm/parts',      element: <RequireAuth roles={['specialist', 'manager', 'executive', 'admin']}><Wrap><TpmParts /></Wrap></RequireAuth> },
 
       // ── SPECIALIST ──
       {

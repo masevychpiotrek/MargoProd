@@ -212,6 +212,146 @@ export interface TpmIssueHistory {
   user?: { id: string; full_name: string }
 }
 
+// ── Etap 2 ──
+
+export type PmCardStatus =
+  | 'planned' | 'todo' | 'in_progress' | 'done' | 'done_late'
+  | 'not_done' | 'needs_action' | 'awaiting_approval' | 'approved'
+
+export const PM_STATUS_LABELS: Record<PmCardStatus, string> = {
+  planned: 'Zaplanowana', todo: 'Do wykonania', in_progress: 'W trakcie',
+  done: 'Wykonana', done_late: 'Wykonana po terminie', not_done: 'Niewykonana',
+  needs_action: 'Wymaga działania', awaiting_approval: 'Oczekuje na zatwierdzenie',
+  approved: 'Zatwierdzona'
+}
+
+export type PartStatus =
+  | 'available' | 'low' | 'minimum' | 'none' | 'ordered'
+  | 'awaiting_delivery' | 'delivered' | 'withdrawn'
+
+export const PART_STATUS_LABELS: Record<PartStatus, string> = {
+  available: 'Dostępna', low: 'Niski stan', minimum: 'Stan minimalny', none: 'Brak',
+  ordered: 'Zamówiona', awaiting_delivery: 'Oczekuje na dostawę',
+  delivered: 'Dostarczona', withdrawn: 'Wycofana'
+}
+
+export interface TpmPmTemplate {
+  id: string
+  station_id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  sort_order: number
+  created_at: string
+}
+
+export interface TpmPmCard {
+  id: string
+  card_number: string | null
+  machine_id: string
+  station_id: string
+  planned_date: string
+  actual_date: string | null
+  performer_id: string | null
+  start_time: string | null
+  end_time: string | null
+  status: PmCardStatus
+  findings: string | null
+  actions: string | null
+  parts_used: string | null
+  recommendations: string | null
+  next_due_date: string | null
+  approved_by: string | null
+  approved_at: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  machine?: TpmMachine
+  station?: TpmStation
+  performer?: { id: string; full_name: string }
+  results?: TpmPmResult[]
+}
+
+export interface TpmPmResult {
+  id: string
+  card_id: string
+  template_id: string | null
+  name: string
+  result: AmResult
+  measurement: string | null
+  notes: string | null
+  created_at: string
+}
+
+export interface TpmParameter {
+  id: string
+  machine_id: string
+  station_id: string
+  issue_id: string | null
+  user_id: string
+  param_name: string
+  value_before: string | null
+  value_after: string
+  unit: string | null
+  approved_range: string | null
+  reason: string | null
+  expected_effect: string | null
+  result_after: string | null
+  test_cycles: number | null
+  test_ok: number | null
+  test_nok: number | null
+  screen_photo_url: string | null
+  setting_photo_url: string | null
+  comment: string | null
+  out_of_range: boolean
+  requires_approval: boolean
+  approved_by: string | null
+  approved_at: string | null
+  is_last_good: boolean
+  created_at: string
+  // joined
+  station?: TpmStation
+  user?: { id: string; full_name: string }
+}
+
+export interface TpmPart {
+  id: string
+  machine_id: string | null
+  station_id: string | null
+  name: string
+  part_number: string | null
+  manufacturer_number: string | null
+  manufacturer: string | null
+  usage_desc: string | null
+  min_stock: number
+  current_stock: number
+  unit: string
+  location: string | null
+  lead_time_days: number | null
+  last_used_at: string | null
+  used_count: number
+  photo_url: string | null
+  status: PartStatus
+  is_active: boolean
+  created_at: string
+  updated_at: string
+  // joined
+  station?: TpmStation
+  machine?: TpmMachine
+}
+
+export interface TpmPartUsage {
+  id: string
+  part_id: string
+  issue_id: string | null
+  pm_card_id: string | null
+  user_id: string
+  qty: number
+  used_at: string
+  notes: string | null
+  created_at: string
+}
+
 export interface TpmMedia {
   id: string
   machine_id: string | null

@@ -102,8 +102,11 @@ export default function TpmManagerDashboard() {
           <h1 className="text-xl font-bold text-white">TPM/PM — Nadzór Kierownika</h1>
           <p className="text-navy-400 text-sm">IS PRO · IS-3 i IS-4</p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 flex-wrap">
           <button onClick={() => navigate('/tpm/issues')} className="btn-secondary px-4 py-2">Zgłoszenia</button>
+          <button onClick={() => navigate('/tpm/pm')} className="btn-secondary px-4 py-2">Karty PM</button>
+          <button onClick={() => navigate('/tpm/parameters')} className="btn-secondary px-4 py-2">Parametry</button>
+          <button onClick={() => navigate('/tpm/parts')} className="btn-secondary px-4 py-2">Części</button>
           <button onClick={() => navigate('/tpm/stations')} className="btn-secondary px-4 py-2">Stacje i checklisty</button>
         </div>
       </div>

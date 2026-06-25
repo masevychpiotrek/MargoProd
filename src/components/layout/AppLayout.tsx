@@ -60,6 +60,9 @@ const NAV_MANAGER = [
   { to: '/admin/syringe',        label: '── Strzykawki konfig.', icon: Icons.targets },
   { to: '/tpm/manager',          label: '── TPM/PM nadzór',  icon: Icons.machines },
   { to: '/tpm/issues',           label: '── TPM zgłoszenia', icon: Icons.failure },
+  { to: '/tpm/pm',               label: '── TPM karty PM',   icon: Icons.tasks },
+  { to: '/tpm/parameters',       label: '── TPM parametry',  icon: Icons.targets },
+  { to: '/tpm/parts',            label: '── TPM części',     icon: Icons.machines },
   { to: '/tpm/stations',         label: '── TPM stacje',     icon: Icons.targets },
 ]
 
@@ -95,6 +98,9 @@ const NAV_SYRINGE_OPERATOR = [
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
   { to: '/tpm/issues', label: 'TPM — Zgłoszenia',  icon: Icons.machines },
+  { to: '/tpm/pm',     label: 'TPM — Karty PM',     icon: Icons.tasks },
+  { to: '/tpm/parameters', label: 'TPM — Parametry', icon: Icons.targets },
+  { to: '/tpm/parts',  label: 'TPM — Części',       icon: Icons.machines },
   { to: '/tpm/checklist', label: 'TPM — Checklista AM', icon: Icons.tasks },
   { to: '/password',   label: 'Zmien haslo',        icon: Icons.password },
 ]
@@ -109,6 +115,9 @@ const NAV_ADMIN = [
   { to: '/admin/reset',        label: 'Reset danych',     icon: Icons.reset },
   { to: '/admin/syringe',      label: 'Strzykawki — konfig.', icon: Icons.machines },
   { to: '/tpm/manager',        label: 'TPM/PM nadzór',    icon: Icons.machines },
+  { to: '/tpm/pm',             label: 'TPM karty PM',     icon: Icons.tasks },
+  { to: '/tpm/parameters',     label: 'TPM parametry',    icon: Icons.targets },
+  { to: '/tpm/parts',          label: 'TPM części',       icon: Icons.machines },
   { to: '/tpm/stations',       label: 'TPM stacje/checklisty', icon: Icons.targets },
   { to: '/password',           label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager',             label: '── Live produkcja',   icon: Icons.live },
