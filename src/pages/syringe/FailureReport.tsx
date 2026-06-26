@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import Toggle from '@/components/shared/Toggle'
 import type { SaSession, SaFailurePriority } from '@/types/database'
 
 async function fetchMySession(operatorId: string) {
@@ -168,29 +169,8 @@ export default function SyringeFailureReport() {
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Wpływ na produkcję</div>
 
-        <label className="flex items-center justify-between gap-4 cursor-pointer">
-          <span className="text-sm text-navy-300">Produkcja została zatrzymana</span>
-          <div
-            onClick={() => setProductionStopped(v => !v)}
-            className={`w-12 h-6 rounded-full border-2 transition-all flex items-center px-0.5 cursor-pointer ${
-              productionStopped ? 'border-red-500 bg-red-500/20' : 'border-navy-600 bg-navy-700'
-            }`}
-          >
-            <div className={`w-4 h-4 rounded-full transition-all ${productionStopped ? 'translate-x-6 bg-red-400' : 'translate-x-0 bg-navy-400'}`} />
-          </div>
-        </label>
-
-        <label className="flex items-center justify-between gap-4 cursor-pointer">
-          <span className="text-sm text-navy-300">Automat może kontynuować produkcję</span>
-          <div
-            onClick={() => setCanContinue(v => !v)}
-            className={`w-12 h-6 rounded-full border-2 transition-all flex items-center px-0.5 cursor-pointer ${
-              canContinue ? 'border-green-500 bg-green-500/20' : 'border-navy-600 bg-navy-700'
-            }`}
-          >
-            <div className={`w-4 h-4 rounded-full transition-all ${canContinue ? 'translate-x-6 bg-green-400' : 'translate-x-0 bg-navy-400'}`} />
-          </div>
-        </label>
+        <Toggle label="Produkcja została zatrzymana" checked={productionStopped} onChange={setProductionStopped} color="red" />
+        <Toggle label="Automat może kontynuować produkcję" checked={canContinue} onChange={setCanContinue} color="green" />
       </div>
 
       <div className="grid grid-cols-2 gap-3">

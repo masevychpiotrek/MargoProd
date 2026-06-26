@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { ISSUE_STATUS_LABELS, PRIORITY_LABELS, ISSUE_CATEGORY_LABELS } from '@/types/tpm'
@@ -34,7 +34,8 @@ const PRIORITY_COLOR: Record<string, string> = {
 export default function TpmSpecialistQueue() {
   const navigate = useNavigate()
   const qc = useQueryClient()
-  const [status, setStatus] = useState('open')
+  const [searchParams] = useSearchParams()
+  const [status, setStatus] = useState(searchParams.get('status') || 'open')
   const [priority, setPriority] = useState('')
   const [machineId, setMachineId] = useState('')
   const [search, setSearch] = useState('')
@@ -62,6 +63,11 @@ export default function TpmSpecialistQueue() {
     queryFn: () => fetchIssues({ status, priority, machineId }),
     refetchInterval: 30000
   })
+
+  useEffect(() => {
+    const s = searchParams.get('status')
+    if (s) setStatus(s)
+  }, [searchParams])
 
   useEffect(() => {
     const ch = supabase.channel('tpm_queue_rt')
