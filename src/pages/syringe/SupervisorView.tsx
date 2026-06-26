@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import type { SaSession, SaMachine, SaMachineStatus } from '@/types/database'
@@ -62,6 +63,7 @@ function formatDuration(startedAt: string) {
 
 export default function SyringeSupervisorView() {
   const qc = useQueryClient()
+  const navigate = useNavigate()
   const [filterStatus, setFilterStatus] = useState<string>('')
 
 
@@ -138,6 +140,7 @@ export default function SyringeSupervisorView() {
             Odświeżono: {new Date(dataUpdatedAt).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
         </div>
+        <button onClick={() => navigate('/syringe/reports')} className="btn-primary px-4 py-2">Raporty i eksport</button>
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilterStatus('')}

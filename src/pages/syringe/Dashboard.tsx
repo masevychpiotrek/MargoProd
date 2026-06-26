@@ -159,6 +159,14 @@ export default function SyringeDashboard() {
   const elapsedH = elapsedMs / 3600000
   const avgPerHour = elapsedH > 0 ? Math.round(totalGood / elapsedH) : 0
 
+  // Czas pracy vs przestojów i wydajność do nominalnej
+  const elapsedMin = Math.floor(elapsedMs / 60000)
+  const downtimeMin = session.total_downtime_min ?? 0
+  const activeMin = Math.max(0, elapsedMin - downtimeMin)
+  const fmtMin = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`
+  const nominal = session.assortment?.nominal_per_hour ?? 0
+  const effPct = nominal > 0 ? Math.round(avgPerHour / nominal * 100) : null
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       {/* Nagłówek */}
@@ -212,12 +220,17 @@ export default function SyringeDashboard() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard label="Wydajność" value={`${avgPerHour.toLocaleString('pl')}`} sub="szt/h średnia" />
+        <KpiCard label="Wydajność" value={`${avgPerHour.toLocaleString('pl')}`} sub={effPct !== null ? `${effPct}% nominalnej` : 'szt/h średnia'} highlight={effPct !== null && effPct >= 95} />
         <KpiCard
           label="Wydajność nominalna"
-          value={session.assortment?.nominal_per_hour.toLocaleString('pl') ?? '—'}
+          value={nominal ? nominal.toLocaleString('pl') : '—'}
           sub="szt/h"
         />
+        <KpiCard label="Czas aktywnej pracy" value={fmtMin(activeMin)} sub={`z ${fmtMin(elapsedMin)} zmiany`} />
+        <KpiCard label="Czas przestojów" value={fmtMin(downtimeMin)} sub={elapsedMin > 0 ? `${Math.round(downtimeMin / elapsedMin * 100)}% zmiany` : ''} />
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard
           label="Pozostało"
           value={planQty > 0 ? Math.max(0, planQty - totalGood).toLocaleString('pl') : '—'}
@@ -228,7 +241,26 @@ export default function SyringeDashboard() {
           value={session.order ? session.order.order_number : '—'}
           sub={session.order ? `Cel: ${session.order.target_qty.toLocaleString('pl')} szt` : 'Brak zlecenia'}
         />
+        <KpiCard label="Braki techn." value={(session.total_tech_reject ?? 0).toLocaleString('pl')} sub="sztuk" />
+        <KpiCard label="Braki jakość" value={(session.total_qual_reject ?? 0).toLocaleString('pl')} sub="sztuk" />
       </div>
+
+      {/* Pasek wydajności do nominalnej */}
+      {effPct !== null && (
+        <div className="rounded-xl border border-navy-700 bg-navy-800 p-4 space-y-2">
+          <div className="flex justify-between text-sm">
+            <span className="text-navy-400">Wydajność względem nominalnej</span>
+            <span className={`font-bold ${effPct >= 95 ? 'text-green-400' : effPct >= 75 ? 'text-yellow-400' : 'text-red-400'}`}>{effPct}%</span>
+          </div>
+          <div className="h-3 bg-navy-700 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${effPct >= 95 ? 'bg-green-500' : effPct >= 75 ? 'bg-yellow-500' : 'bg-red-500'}`}
+              style={{ width: `${Math.min(100, effPct)}%` }}
+            />
+          </div>
+          <div className="text-xs text-navy-500">{avgPerHour.toLocaleString('pl')} / {nominal.toLocaleString('pl')} szt/h</div>
+        </div>
+      )}
 
       {/* Pasek planu */}
       {planPct !== null && (
@@ -333,6 +365,15 @@ export default function SyringeDashboard() {
           <div className="text-yellow-300 text-2xl mb-2">⇄</div>
           <div className="font-bold text-white">Przezbrojenie</div>
           <div className="text-xs text-navy-400 mt-1">Zmiana asortymentu</div>
+        </button>
+
+        <button
+          onClick={() => navigate('/syringe/my-reports')}
+          className="rounded-2xl border-2 border-navy-600 bg-navy-800 p-5 text-left transition-all hover:border-navy-500"
+        >
+          <div className="text-navy-400 text-2xl mb-2">☰</div>
+          <div className="font-bold text-white">Moje zgłoszenia</div>
+          <div className="text-xs text-navy-400 mt-1">Status awarii i jakości</div>
         </button>
       </div>
 

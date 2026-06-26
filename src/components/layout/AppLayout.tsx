@@ -56,6 +56,7 @@ const NAV_MANAGER = [
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
+  { to: '/syringe/reports',      label: '── Raporty SA',     icon: Icons.export },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
   { to: '/admin/syringe',        label: '── Strzykawki konfig.', icon: Icons.targets },
   { to: '/tpm/manager',          label: '── TPM/PM nadzór',  icon: Icons.machines },
@@ -96,6 +97,7 @@ const NAV_SYRINGE_OPERATOR = [
   { to: '/syringe/components', label: 'Komponenty',       icon: Icons.machines },
   { to: '/syringe/changeover', label: 'Przezbrojenie',    icon: Icons.reset },
   { to: '/syringe/handover',   label: 'Przekaż zmianę',   icon: Icons.tasks },
+  { to: '/syringe/my-reports', label: 'Moje zgłoszenia',  icon: Icons.failure },
   { to: '/syringe/history',    label: 'Historia',         icon: Icons.history },
   { to: '/password',           label: 'Zmień hasło',      icon: Icons.password },
 ]
