@@ -75,7 +75,7 @@ export default function SyringeShiftHandover() {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
     if (!finalCounter) errs.push('Nie wpisano końcowego stanu licznika.')
-    if (lastCounter !== null && parseInt(finalCounter || '0') < lastCounter)
+    if (lastCounter != null && parseInt(finalCounter || '0') < lastCounter)
       errs.push(`Końcowy stan licznika (${finalCounter}) jest mniejszy niż poprzedni wpis (${lastCounter}).`)
     return errs
   }
@@ -226,7 +226,7 @@ export default function SyringeShiftHandover() {
       {/* Końcowy stan licznika */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Końcowy stan licznika *</div>
-        {lastCounter !== null && (
+        {lastCounter != null && (
           <p className="text-xs text-navy-500">Poprzedni wpis: {lastCounter.toLocaleString('pl')}</p>
         )}
         <input
