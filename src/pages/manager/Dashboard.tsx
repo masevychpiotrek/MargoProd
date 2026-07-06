@@ -16,8 +16,12 @@ import {
   isShiftPastAutoClose,
   productionHourOrder
 } from '@/lib/utils'
-import { stationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
-import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
+import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
+import type { HourlyReport, Machine, Profile, Shift, ShiftType, IssueStationAllocation } from '@/types/database'
+
+function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
+  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
+}
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
@@ -2183,7 +2187,7 @@ export default function ManagerDashboard() {
                       <div>
                         <span className="text-navy-500">Przebieg:</span> {report.downtime_reason}
                         {(report.downtime_station || report.downtime_category) && (
-                          <span className="text-navy-500"> ({stationLabel(report.downtime_station)} · {problemCategoryLabel('downtime', report.downtime_category)}{report.downtime_status ? ` · ${issueStatusLabel(report.downtime_status)}` : ''})</span>
+                          <span className="text-navy-500"> ({reportStationLabel(report.downtime_stations, report.downtime_station)} · {problemCategoryLabel('downtime', report.downtime_category)}{report.downtime_status ? ` · ${issueStatusLabel(report.downtime_status)}` : ''})</span>
                         )}
                       </div>
                     )}
@@ -2191,7 +2195,7 @@ export default function ManagerDashboard() {
                       <div>
                         <span className="text-navy-500">Uzasadnienie odrzutu:</span> {report.reject_reason}
                         {(report.reject_station || report.reject_category) && (
-                          <span className="text-navy-500"> ({stationLabel(report.reject_station)} · {problemCategoryLabel('reject', report.reject_category)}{report.reject_status ? ` · ${issueStatusLabel(report.reject_status)}` : ''})</span>
+                          <span className="text-navy-500"> ({reportStationLabel(report.reject_stations, report.reject_station)} · {problemCategoryLabel('reject', report.reject_category)}{report.reject_status ? ` · ${issueStatusLabel(report.reject_status)}` : ''})</span>
                         )}
                       </div>
                     )}
@@ -2246,13 +2250,13 @@ export default function ManagerDashboard() {
                     <td className="py-2 px-3 text-xs text-navy-300 max-w-[220px]">
                       <div className="truncate">{report.downtime_reason || '-'}</div>
                       {(report.downtime_station || report.downtime_category) && (
-                        <div className="text-[10px] text-navy-500 truncate">{stationLabel(report.downtime_station)} · {problemCategoryLabel('downtime', report.downtime_category)}</div>
+                        <div className="text-[10px] text-navy-500 truncate">{reportStationLabel(report.downtime_stations, report.downtime_station)} · {problemCategoryLabel('downtime', report.downtime_category)}</div>
                       )}
                     </td>
                     <td className="py-2 px-3 text-xs text-navy-300 max-w-[220px]">
                       <div className="truncate">{report.reject_reason || '-'}</div>
                       {(report.reject_station || report.reject_category) && (
-                        <div className="text-[10px] text-navy-500 truncate">{stationLabel(report.reject_station)} · {problemCategoryLabel('reject', report.reject_category)}</div>
+                        <div className="text-[10px] text-navy-500 truncate">{reportStationLabel(report.reject_stations, report.reject_station)} · {problemCategoryLabel('reject', report.reject_category)}</div>
                       )}
                     </td>
                       {canEdit && (
@@ -2590,7 +2594,7 @@ export default function ManagerDashboard() {
                 <input className="input mt-1" value={editState.downtime_reason} onChange={e => setEditState({ ...editState, downtime_reason: e.target.value })} />
                 {(editing?.downtime_station || editing?.downtime_category) && (
                   <div className="text-[11px] text-navy-500 mt-1">
-                    {stationLabel(editing?.downtime_station)} · {problemCategoryLabel('downtime', editing?.downtime_category)}
+                    {reportStationLabel(editing?.downtime_stations, editing?.downtime_station)} · {problemCategoryLabel('downtime', editing?.downtime_category)}
                   </div>
                 )}
                 <select className="input mt-1 text-xs" value={editState.downtime_status} onChange={e => setEditState({ ...editState, downtime_status: e.target.value })}>
@@ -2603,7 +2607,7 @@ export default function ManagerDashboard() {
                 <input className="input mt-1" value={editState.reject_reason} onChange={e => setEditState({ ...editState, reject_reason: e.target.value })} />
                 {(editing?.reject_station || editing?.reject_category) && (
                   <div className="text-[11px] text-navy-500 mt-1">
-                    {stationLabel(editing?.reject_station)} · {problemCategoryLabel('reject', editing?.reject_category)}
+                    {reportStationLabel(editing?.reject_stations, editing?.reject_station)} · {problemCategoryLabel('reject', editing?.reject_category)}
                   </div>
                 )}
                 <select className="input mt-1 text-xs" value={editState.reject_status} onChange={e => setEditState({ ...editState, reject_status: e.target.value })}>

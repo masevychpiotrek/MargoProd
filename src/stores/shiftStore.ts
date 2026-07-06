@@ -37,6 +37,8 @@ export interface ShiftEndSummary {
   summary_alarm_min: number
   summary_downtime_min: number
   summary_notes: string | null
+  ended_early?: boolean
+  early_end_reason?: string | null
 }
 
 async function autoCloseShiftIfExpired(shift: Shift): Promise<boolean> {

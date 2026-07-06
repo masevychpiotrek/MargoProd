@@ -79,6 +79,9 @@ export default function OperatorShift() {
   const [endConfirmText, setEndConfirmText] = useState('')
   const [missingHours,   setMissingHours]   = useState<number[]>([])
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
+  const [earlyEndRequested, setEarlyEndRequested] = useState(false)
+  const [earlyEndReason,    setEarlyEndReason]    = useState('')
+  const EARLY_END_MIN_REASON_LENGTH = 15
   const [endForm, setEndForm] = useState<ShiftEndForm>({
     good: '0',
     reject: '0',
@@ -288,13 +291,21 @@ export default function OperatorShift() {
       notes: activeShift.notes ?? ''
     })
     setEndConfirmText('')
+    setEarlyEndRequested(false)
+    setEarlyEndReason('')
     setShowEndWarning(true)
   }
 
   const handleEndConfirm = async () => {
     if (missingHours.length > 0) {
-      setError('Nie mozna zakonczyc zmiany, dopoki brakuje otwartych raportow godzinowych.')
-      return
+      if (!earlyEndRequested) {
+        setError('Nie mozna zakonczyc zmiany, dopoki brakuje raportow godzinowych. Jesli to zamierzone (np. awaria na reszte zmiany), zaznacz opcje zakonczenia przedwczesnego i podaj powod.')
+        return
+      }
+      if (earlyEndReason.trim().length < EARLY_END_MIN_REASON_LENGTH) {
+        setError(`Podaj konkretny powod zakonczenia przedwczesnego (min. ${EARLY_END_MIN_REASON_LENGTH} znakow) - to trafi do raportow kierownika.`)
+        return
+      }
     }
     if (endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ') {
       setError('Aby zakończyć zmianę, wpisz ZAMKNIJ w oknie potwierdzenia.')
@@ -324,6 +335,12 @@ export default function OperatorShift() {
     }
     setShowEndWarning(false)
     setEndConfirmText('')
+    const isEarlyEnd = missingHours.length > 0 && earlyEndRequested
+    const missingHoursLabel = missingHours.map(formatHourBlock).join(', ')
+    const earlyEndNote = isEarlyEnd
+      ? `[ZAKONCZENIE PRZEDWCZESNE] Powod: ${earlyEndReason.trim()}. Brakujace bloki: ${missingHoursLabel}.`
+      : null
+    const combinedNotes = [earlyEndNote, endForm.notes.trim() || null].filter(Boolean).join('\n') || null
     const { error: endError } = await endShift({
       summary_good_count: good,
       summary_reject_count: reject,
@@ -331,7 +348,9 @@ export default function OperatorShift() {
       summary_ready_min: ready ?? 0,
       summary_alarm_min: alarm ?? 0,
       summary_downtime_min: downtime ?? 0,
-      summary_notes: endForm.notes.trim() || null
+      summary_notes: combinedNotes,
+      ended_early: isEarlyEnd,
+      early_end_reason: isEarlyEnd ? earlyEndReason.trim() : null
     })
     if (endError) setError('Nie udało się zakończyć zmiany: ' + endError)
   }
@@ -386,7 +405,14 @@ export default function OperatorShift() {
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
             <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border-2 border-amber-500/50 bg-navy-800 p-6">
-              <h2 className="text-xl font-bold text-amber-400 mb-2">Potwierdz zakonczenie zmiany</h2>
+              <div className="flex items-center gap-2 mb-2">
+                <h2 className="text-xl font-bold text-amber-400">Potwierdz zakonczenie zmiany</h2>
+                {missingHours.length > 0 && earlyEndRequested && (
+                  <span className="rounded-full border border-amber-500/50 bg-amber-500/15 px-2.5 py-0.5 text-[11px] font-bold uppercase tracking-wider text-amber-300">
+                    Zakonczenie przedwczesne
+                  </span>
+                )}
+              </div>
               <p className="text-navy-300 text-sm mb-4">
                 Zamkniesz aktywna zmiane na maszynie {activeMachine.name}. Po zamknieciu operator nie bedzie juz wpisywal wynikow w tej zmianie.
               </p>
@@ -415,6 +441,50 @@ export default function OperatorShift() {
                   Wszystkie raporty godzinowe sa uzupelnione.
                 </div>
               )}
+
+              {missingHours.length > 0 && (
+                <div className={cn(
+                  'mb-4 rounded-xl border-2 p-4',
+                  earlyEndRequested ? 'border-amber-500/60 bg-amber-500/10' : 'border-navy-700 bg-navy-900'
+                )}>
+                  <label className="flex items-start gap-3 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={earlyEndRequested}
+                      onChange={e => { setEarlyEndRequested(e.target.checked); setError('') }}
+                      className="mt-0.5 w-5 h-5 rounded accent-amber-500"
+                    />
+                    <span>
+                      <span className="block text-sm font-bold text-amber-300">Zakoncz zmiane przedwczesnie</span>
+                      <span className="block text-xs text-navy-400 mt-0.5">
+                        Uzyj tylko gdy dalsza produkcja w tej zmianie jest niemozliwa (np. trwala awaria, koniec zlecenia).
+                        Zmiana zostanie oznaczona jako <span className="font-semibold text-amber-300">zakonczona przedwczesnie</span> wraz z podanym powodem
+                        i brakujacymi blokami - bedzie to widoczne dla kierownika w raportach.
+                      </span>
+                    </span>
+                  </label>
+
+                  {earlyEndRequested && (
+                    <div className="mt-3">
+                      <label className="label">Powod zakonczenia przedwczesnego *</label>
+                      <textarea
+                        value={earlyEndReason}
+                        onChange={e => { setEarlyEndReason(e.target.value); setError('') }}
+                        rows={3}
+                        placeholder="Np. Awaria napedu glownego, brak mozliwosci naprawy do konca zmiany, UR przejmuje maszyne."
+                        className="input mt-1 text-sm resize-none"
+                      />
+                      <div className={cn(
+                        'text-xs mt-1',
+                        earlyEndReason.trim().length < EARLY_END_MIN_REASON_LENGTH ? 'text-red-300' : 'text-green-400'
+                      )}>
+                        {earlyEndReason.trim().length}/{EARLY_END_MIN_REASON_LENGTH} znakow minimum
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="mb-5 rounded-xl border border-navy-700 bg-navy-900 p-4">
                 <div className="mb-3">
                   <div className="text-sm font-bold text-white">Rozliczenie koncowe zmiany</div>
@@ -514,15 +584,28 @@ export default function OperatorShift() {
                 />
               </label>
               <div className="flex flex-col gap-3 sm:flex-row">
-                <button onClick={() => { setShowEndWarning(false); setEndConfirmText('') }} className="btn-primary flex-1 py-3">
+                <button
+                  onClick={() => { setShowEndWarning(false); setEndConfirmText(''); setEarlyEndRequested(false); setEarlyEndReason('') }}
+                  className="btn-primary flex-1 py-3"
+                >
                   Wroc do zmiany
                 </button>
                 <button
                   onClick={handleEndConfirm}
-                  disabled={missingHours.length > 0 || endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ' || endFormTotalTime <= 0 || (endNeedsNotes && !endForm.notes.trim()) || isLoading}
+                  disabled={
+                    (missingHours.length > 0 && (!earlyEndRequested || earlyEndReason.trim().length < EARLY_END_MIN_REASON_LENGTH)) ||
+                    endConfirmText.trim().toUpperCase() !== 'ZAMKNIJ' ||
+                    endFormTotalTime <= 0 ||
+                    (endNeedsNotes && !endForm.notes.trim()) ||
+                    isLoading
+                  }
                   className="btn-danger px-5 py-3 text-sm disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  {isLoading ? 'Zamykanie...' : 'Zakoncz zmiane'}
+                  {isLoading
+                    ? 'Zamykanie...'
+                    : missingHours.length > 0 && earlyEndRequested
+                      ? 'Zakoncz zmiane przedwczesnie'
+                      : 'Zakoncz zmiane'}
                 </button>
               </div>
             </div>

@@ -1,8 +1,12 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
-import { stationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
-import type { HourlyReport, Machine } from '@/types/database'
+import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
+import type { HourlyReport, Machine, IssueStationAllocation } from '@/types/database'
+
+function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
+  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
+}
 
 // ─── Stałe brand ────────────────────────────────────────────────────────────
 const NAVY  = 'FF1A2744'
@@ -174,11 +178,11 @@ const buildMachineSheet = (
       r.changeover_min,
       r.failure_min,
       r.downtime_reason ?? '',
-      stationLabel(r.downtime_station),
+      reportStationLabel(r.downtime_stations, r.downtime_station),
       problemCategoryLabel('downtime', r.downtime_category),
       issueStatusLabel(r.downtime_status),
       r.reject_reason ?? '',
-      stationLabel(r.reject_station),
+      reportStationLabel(r.reject_stations, r.reject_station),
       problemCategoryLabel('reject', r.reject_category),
       issueStatusLabel(r.reject_status),
       r.notes ?? '',

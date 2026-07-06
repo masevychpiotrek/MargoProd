@@ -32,6 +32,20 @@ const BANNED_GENERIC_PHRASES = [
   'niska wydajnosc', 'cos nie dziala', 'cos nie podaje', 'blad', 'stop', 'przestoj'
 ]
 
+const VALID_STATION_NUMBERS = new Set([
+  ...Array.from({ length: 57 }, (_, i) => i + 1),
+  76, 77
+])
+
+function normalizeStationValue(raw: unknown): string | null {
+  const text = String(raw ?? '')
+  const match = text.match(/\d+/)
+  if (!match) return null
+  const n = Number(match[0])
+  if (!VALID_STATION_NUMBERS.has(n)) return null
+  return `st_${n}`
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -72,15 +86,22 @@ Deno.serve(async (req) => {
 
     const body = await req.json().catch(() => ({}))
     const reportType = body.reportType === 'reject' ? 'reject' : 'downtime'
-    const station = String(body.station ?? '')
-    const stationLabel = String(body.stationLabel ?? station)
+    const rawStations = Array.isArray(body.stations) ? body.stations : []
+    const stations = rawStations
+      .map((s: Record<string, unknown>) => ({
+        value: String(s?.value ?? ''),
+        label: String(s?.label ?? ''),
+        pct: Number(s?.pct ?? 0)
+      }))
+      .filter((s: { value: string }) => s.value)
+    const stationsLabel = stations.map(s => `${s.label} (${s.pct}%)`).join(', ')
     const machineName = String(body.machineName ?? '')
     const text = String(body.text ?? '').trim()
     const priorOccurrencesThisShift = Number.isFinite(Number(body.priorOccurrencesThisShift))
       ? Number(body.priorOccurrencesThisShift) : 0
 
     if (!text) return json({ error: 'Brak opisu do sprawdzenia.' })
-    if (!stationLabel) return json({ error: 'Brak wybranej stacji.' })
+    if (stations.length === 0) return json({ error: 'Brak wybranej stacji.' })
 
     // Prosty rate-limit: max RATE_LIMIT_PER_HOUR wywolan / operator / godzine
     const oneHourAgo = new Date(Date.now() - 60 * 60 * 1000).toISOString()
@@ -98,8 +119,10 @@ Deno.serve(async (req) => {
     const categories = reportType === 'downtime' ? DOWNTIME_CATEGORIES : REJECT_CATEGORIES
 
     const prompt = `Jestes kontrolerem jakosci zgloszen na hali produkcyjnej (branza medyczna, produkcja strzykawek/automatow).
-Operator zglasza przyczyne ${reportType === 'downtime' ? 'niskiej wydajnosci' : 'nadmiernego odrzutu'} na maszynie "${machineName}", stacja/obszar: "${stationLabel}".
-${priorOccurrencesThisShift > 0 ? `Uwaga: to ${priorOccurrencesThisShift + 1}. zgloszenie z tej stacji/obszaru w biezacej zmianie.` : ''}
+Operator zglasza przyczyne ${reportType === 'downtime' ? 'niskiej wydajnosci' : 'nadmiernego odrzutu'} na maszynie "${machineName}".
+Wybrane stacje/obszary wraz z orientacyjnym procentowym udzialem w problemie: ${stationsLabel}.
+${stations.length > 1 ? 'Operator wskazal WIECEJ NIZ JEDNA stacje - problem moze dotyczyc kilku obszarow jednoczesnie.' : ''}
+${priorOccurrencesThisShift > 0 ? `Uwaga: to ${priorOccurrencesThisShift + 1}. zgloszenie z tych stacji/obszarow w biezacej zmianie.` : ''}
 
 OPIS OPERATORA:
 "${text}"
@@ -110,14 +133,15 @@ ZASADY OCENY:
 3. Jesli opis jest zbyt ogolny lub nie pozwala okreslic co sie wydarzylo - ustaw ok=false i w "message" zwroc DOKLADNIE ten tekst (po polsku, bez zmian):
 "Opis jest zbyt ogolny. Wskaz konkretnie, co sie wydarzylo, na jakiej stacji, jaki element nie zadzialal prawidlowo oraz jaki byl skutek. Przyklad: 'Stacja 52 - nieprawidlowe podanie filtra odpowietrznika, automat zatrzymywal sie okresowo, konieczna byla regulacja podajnika.'"
 4. Jesli opis jest wystarczajaco konkretny, ustaw ok=true, message=null.
-5. Sprawdz zgodnosc stacji z opisem: czy tresc opisu (np. wspomniane podzespoly: kamera, robot, zgrzew, filtr, dren, luer-lock, igla, komora) pasuje do wybranej stacji/obszaru "${stationLabel}". Jesli wyraznie NIE pasuje, ustaw stationMismatch=true i napisz krotkie ostrzezenie po polsku w "mismatchMessage" (np. "Opis moze nie pasowac do wybranej stacji. Sprawdz, czy wybrana stacja jest prawidlowa."). Jesli pasuje lub nie da sie jednoznacznie ocenic, stationMismatch=false, mismatchMessage=null.
+5. Sprawdz zgodnosc stacji z opisem: czy tresc opisu (np. wspomniane podzespoly: kamera, robot, zgrzew, filtr, dren, luer-lock, igla, komora) pasuje do CO NAJMNIEJ JEDNEJ z wybranych stacji/obszarow (${stationsLabel}). Jesli opis WYRAZNIE nie pasuje do zadnej z wybranych stacji, ustaw stationMismatch=true i napisz krotkie ostrzezenie po polsku w "mismatchMessage" (np. "Opis moze nie pasowac do wybranych stacji. Sprawdz, czy wybor jest prawidlowy."). Jesli pasuje do co najmniej jednej lub nie da sie jednoznacznie ocenic, stationMismatch=false, mismatchMessage=null.
 6. Wybierz najbardziej pasujaca kategorie problemu z tej listy (zwroc DOKLADNIE jedna z wartosci, bez zmian): ${categories.join(', ')}.
 7. Zaproponuj krotka standaryzowana nazwe problemu (problemName, kilka slow, po polsku, bez ogolnikow).
 8. Zaproponuj uporzadkowany, zwiezly opis zdarzenia (standardizedDescription, 1-2 zdania, oparty TYLKO na faktach z opisu operatora - nie dodawaj informacji ktorych operator nie podal).
 9. Okresl skutek (effect) jednym krotkim zdaniem/fraza po polsku (np. "zatrzymanie automatu", "spadek wydajnosci", "nadmierny odrzut").
+10. WAZNE - przeszukaj tresc opisu pod katem KONKRETNYCH numerow stacji wspomnianych wprost (np. "stacja 11", "st.53", "st 8", "stacji 48", "na 21"). Uwzglednij TYLKO numery z zakresu 1-57, 76 lub 77 (to jedyne istniejace stacje). Zwroc te numery w polu "detectedStations" jako liste stringow w formacie "st_N" (np. ["st_11","st_53","st_8"]) - dla KAZDEGO numeru stacji wspomnianego w opisie, niezaleznie od tego czy zostal juz wybrany przez operatora czy nie. Jesli opis nie wspomina zadnego numeru stacji wprost, zwroc pusta liste [].
 
 Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
-{"ok": boolean, "message": string|null, "stationMismatch": boolean, "mismatchMessage": string|null, "category": string, "problemName": string, "standardizedDescription": string, "effect": string}`
+{"ok": boolean, "message": string|null, "stationMismatch": boolean, "mismatchMessage": string|null, "category": string, "problemName": string, "standardizedDescription": string, "effect": string, "detectedStations": string[]}`
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -149,11 +173,20 @@ Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
     const result = parsed as Record<string, unknown>
     if (typeof result.ok !== 'boolean') return json({ error: 'AI zwrocilo nieprawidlowa odpowiedz.' })
 
+    const selectedValues = new Set(stations.map(s => s.value))
+    const detectedRaw = Array.isArray(result.detectedStations) ? result.detectedStations : []
+    const detectedValues = [...new Set(
+      detectedRaw.map(normalizeStationValue).filter((v): v is string => v !== null)
+    )]
+    const additionalStationsFound = detectedValues
+      .filter(v => !selectedValues.has(v))
+      .map(v => ({ value: v, label: `Stacja ${v.replace('st_', '')}` }))
+
     void admin.from('audit_logs').insert({
       user_id: callerId,
       action: 'ai_issue_validation',
       table_name: 'hourly_reports',
-      new_values: { reportType, station, ok: result.ok }
+      new_values: { reportType, stations: stations.map(s => s.value), ok: result.ok }
     })
 
     return json({
@@ -164,7 +197,8 @@ Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
       category: typeof result.category === 'string' ? result.category : categories[categories.length - 1],
       problemName: typeof result.problemName === 'string' ? result.problemName : '',
       standardizedDescription: typeof result.standardizedDescription === 'string' ? result.standardizedDescription : text,
-      effect: typeof result.effect === 'string' ? result.effect : ''
+      effect: typeof result.effect === 'string' ? result.effect : '',
+      additionalStationsFound
     })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udalo sie sprawdzic opisu.'

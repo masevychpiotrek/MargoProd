@@ -1,6 +1,11 @@
 import { supabase } from './supabase'
 import { localHeuristicCheck, type ReportIssueType, type HeuristicCheckResult } from './issueReports'
 
+export interface DetectedStation {
+  value: string
+  label: string
+}
+
 export interface IssueCheckResult extends HeuristicCheckResult {
   stationMismatch: boolean
   mismatchMessage: string | null
@@ -8,13 +13,19 @@ export interface IssueCheckResult extends HeuristicCheckResult {
   problemName: string | null
   standardizedDescription: string | null
   effect: string | null
+  additionalStationsFound: DetectedStation[]
   validatedBy: 'ai' | 'heuristic'
+}
+
+export interface CheckIssueStation {
+  value: string
+  label: string
+  pct: number
 }
 
 interface CheckIssueParams {
   reportType: ReportIssueType
-  station: string
-  stationLabel: string
+  stations: CheckIssueStation[]
   machineName: string
   text: string
   priorOccurrencesThisShift: number
@@ -30,6 +41,7 @@ function toHeuristicResult(text: string): IssueCheckResult {
     problemName: null,
     standardizedDescription: null,
     effect: null,
+    additionalStationsFound: [],
     validatedBy: 'heuristic'
   }
 }
@@ -55,6 +67,7 @@ export async function checkIssueDescription(params: CheckIssueParams): Promise<I
       problemName: data.problemName ?? null,
       standardizedDescription: data.standardizedDescription ?? null,
       effect: data.effect ?? null,
+      additionalStationsFound: Array.isArray(data.additionalStationsFound) ? data.additionalStationsFound : [],
       validatedBy: 'ai'
     }
   } catch {

@@ -41,6 +41,25 @@ export function stationLabel(value: string | null | undefined): string {
   return STATION_OPTIONS.find(o => o.value === value)?.label ?? value
 }
 
+export interface StationAllocation {
+  station: string
+  pct: number
+}
+
+// Stacja "glowna" zgloszenia - ta o najwyzszym udziale % (remis: pierwsza dodana).
+// Uzywana do wypelnienia istniejacych kolumn downtime_station / reject_station
+// (proste filtrowanie/eksporty bez rozbijania na wiele stacji).
+export function primaryStation(allocations: StationAllocation[] | null | undefined): string | null {
+  if (!allocations || allocations.length === 0) return null
+  return allocations.reduce((best, cur) => (cur.pct > best.pct ? cur : best), allocations[0]).station
+}
+
+export function stationsSummaryLabel(allocations: StationAllocation[] | null | undefined): string {
+  if (!allocations || allocations.length === 0) return '—'
+  if (allocations.length === 1) return stationLabel(allocations[0].station)
+  return allocations.map(a => `${stationLabel(a.station)} (${a.pct}%)`).join(' + ')
+}
+
 // ─── Kategorie problemu (klasyfikacja AI) ───────────────────────────────────
 
 export const DOWNTIME_PROBLEM_CATEGORIES: IssueOption[] = [

@@ -7,7 +7,7 @@ import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
 import { syncProductionAlert } from '@/lib/productionAlerts'
-import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, type ReportIssueType } from '@/lib/issueReports'
+import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, primaryStation, type ReportIssueType } from '@/lib/issueReports'
 import { checkIssueDescription, type IssueCheckResult } from '@/lib/aiIssueValidation'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
@@ -142,13 +142,20 @@ function CounterInput({ label, sublabel, value, onChange, prevValue, color = 'te
 }
 
 // ── IssueStationAndCheck ────────────────────────────────────────────────────
+interface StationAllocation { value: string; pct: number }
+
+const ALL_STATION_OPTIONS = [
+  { group: 'Stacje', items: STATIONS },
+  { group: 'Kategorie ogólne', items: GENERAL_CATEGORIES }
+]
+
 function IssueStationAndCheck({
-  reportType, station, onStationChange, text, checking, check, isStale,
+  reportType, stations, onStationsChange, text, checking, check, isStale,
   mismatchConfirmed, onMismatchConfirmedChange, onCheck
 }: {
   reportType: ReportIssueType
-  station: string
-  onStationChange: (v: string) => void
+  stations: StationAllocation[]
+  onStationsChange: (next: StationAllocation[]) => void
   text: string
   checking: boolean
   check: IssueCheckResult | null
@@ -157,13 +164,30 @@ function IssueStationAndCheck({
   onMismatchConfirmedChange: (v: boolean) => void
   onCheck: () => void
 }) {
-  const step1Done = !!station
-  const step2Done = !!check && !isStale && check.ok && (!check.stationMismatch || mismatchConfirmed)
+  const [pendingStation, setPendingStation] = useState('')
+  const usedValues = new Set(stations.map(s => s.value))
+  const stillMissingStations = (check?.additionalStationsFound ?? []).filter(a => !usedValues.has(a.value))
+  const step1Done = stations.length > 0
+  const step2Done = !!check && !isStale && check.ok && (!check.stationMismatch || mismatchConfirmed) && stillMissingStations.length === 0
   const steps = [
-    { label: 'Wybierz stację', done: step1Done },
+    { label: 'Wybierz stacje', done: step1Done },
     { label: 'Sprawdź opis z AI', done: step2Done },
     { label: 'Zapisz raport', done: false }
   ]
+  const pctSum = stations.reduce((s, a) => s + (Number.isFinite(a.pct) ? a.pct : 0), 0)
+
+  const addStation = () => {
+    if (!pendingStation || usedValues.has(pendingStation)) return
+    const defaultPct = stations.length === 0 ? 100 : 0
+    onStationsChange([...stations, { value: pendingStation, pct: defaultPct }])
+    setPendingStation('')
+  }
+  const removeStation = (value: string) => onStationsChange(stations.filter(s => s.value !== value))
+  const updatePct = (value: string, pct: number) => onStationsChange(stations.map(s => s.value === value ? { ...s, pct } : s))
+  const addAllMissingStations = () => {
+    if (stillMissingStations.length === 0) return
+    onStationsChange([...stations, ...stillMissingStations.map(a => ({ value: a.value, pct: 0 }))])
+  }
 
   return (
     <div className="space-y-3 mt-3 pt-3 border-t border-navy-700">
@@ -181,23 +205,54 @@ function IssueStationAndCheck({
           </div>
         ))}
       </div>
+
       <div>
-        <label className="text-xs text-navy-400 mb-1.5 block">Stacja / obszar problemu *</label>
-        <select value={station} onChange={e => onStationChange(e.target.value)} className="input text-sm">
-          <option value="">Wybierz stację lub kategorię...</option>
-          <optgroup label="Stacje">
-            {STATIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-          </optgroup>
-          <optgroup label="Kategorie ogólne">
-            {GENERAL_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
-          </optgroup>
-        </select>
+        <label className="text-xs text-navy-400 mb-1.5 block">Stacja / obszar problemu * <span className="text-navy-500 normal-case font-normal">(można dodać kilka)</span></label>
+
+        {stations.length > 0 && (
+          <div className="space-y-2 mb-2">
+            {stations.map(s => (
+              <div key={s.value} className="flex items-center gap-2 rounded-lg bg-navy-900 border border-navy-600 px-3 py-2">
+                <span className="flex-1 text-sm text-white truncate">{stationLabel(s.value)}</span>
+                <input
+                  type="number"
+                  min={0}
+                  max={100}
+                  value={s.pct}
+                  onChange={e => updatePct(s.value, Math.max(0, Math.min(100, parseInt(e.target.value) || 0)))}
+                  className="w-16 bg-navy-800 border border-navy-600 rounded-lg px-2 py-1 text-sm text-white text-right font-mono"
+                />
+                <span className="text-navy-400 text-xs">%</span>
+                <button type="button" onClick={() => removeStation(s.value)} className="text-navy-400 hover:text-red-400 text-sm px-1">✕</button>
+              </div>
+            ))}
+            <div className={cn('text-xs', pctSum === 100 ? 'text-green-400' : 'text-navy-500')}>
+              Suma udziałów: {pctSum}% {pctSum !== 100 && '(orientacyjnie, nie musi dać dokładnie 100%)'}
+            </div>
+          </div>
+        )}
+
+        <div className="flex gap-2">
+          <select value={pendingStation} onChange={e => setPendingStation(e.target.value)} className="input text-sm flex-1">
+            <option value="">Dodaj stację lub kategorię...</option>
+            {ALL_STATION_OPTIONS.map(group => (
+              <optgroup key={group.group} label={group.group}>
+                {group.items.filter(o => !usedValues.has(o.value)).map(o => (
+                  <option key={o.value} value={o.value}>{o.label}</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+          <button type="button" onClick={addStation} disabled={!pendingStation} className="btn-secondary text-xs px-3 disabled:opacity-40">
+            Dodaj
+          </button>
+        </div>
       </div>
 
       <button
         type="button"
         onClick={onCheck}
-        disabled={checking || !station || !text.trim()}
+        disabled={checking || stations.length === 0 || !text.trim()}
         className="btn-secondary text-xs py-2 px-3 disabled:opacity-40"
       >
         {checking ? 'Sprawdzanie...' : 'Sprawdź opis z AI'}
@@ -205,27 +260,43 @@ function IssueStationAndCheck({
 
       {check && !isStale && (
         check.ok ? (
-          <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 space-y-1.5 text-sm">
+          <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 space-y-2 text-sm">
             <div className="text-green-300 font-bold text-xs uppercase tracking-wider">
               {check.validatedBy === 'ai' ? 'Sprawdzone przez AI' : 'Sprawdzone lokalnie (AI niedostępne)'}
             </div>
             {check.category && <div className="text-white"><span className="text-navy-400">Kategoria: </span>{problemCategoryLabel(reportType, check.category)}</div>}
             {check.problemName && <div className="text-white"><span className="text-navy-400">Problem: </span>{check.problemName}</div>}
-            {check.standardizedDescription && <div className="text-navy-200 italic">„{check.standardizedDescription}”</div>}
+            {check.standardizedDescription && (
+              <div className="rounded-lg bg-navy-900/60 border border-green-500/20 p-2.5">
+                <div className="text-[11px] font-bold uppercase tracking-wider text-green-400 mb-1">Sugestia AI — opis</div>
+                <div className="text-white font-medium">„{check.standardizedDescription}”</div>
+              </div>
+            )}
             {check.effect && <div className="text-white"><span className="text-navy-400">Skutek: </span>{check.effect}</div>}
             {check.stationMismatch && (
               <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
                 <div className="text-amber-300 text-xs">{check.mismatchMessage}</div>
                 <label className="flex items-center gap-2 mt-2 cursor-pointer">
                   <input type="checkbox" checked={mismatchConfirmed} onChange={e => onMismatchConfirmedChange(e.target.checked)} className="w-4 h-4 rounded accent-brand" />
-                  <span className="text-xs text-amber-200">Potwierdzam, że stacja jest prawidłowa</span>
+                  <span className="text-xs text-amber-200">Potwierdzam, że stacje są prawidłowe</span>
                 </label>
+              </div>
+            )}
+            {stillMissingStations.length > 0 && (
+              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+                <div className="text-amber-300 text-xs">
+                  AI wykryło w opisie wzmiankę o dodatkowych stacjach, które nie zostały dodane: {stillMissingStations.map(s => s.label).join(', ')}.
+                </div>
+                <button type="button" onClick={addAllMissingStations} className="mt-2 rounded-lg border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-bold text-amber-200 hover:bg-amber-500/25">
+                  + Dodaj wszystkie ({stillMissingStations.length})
+                </button>
               </div>
             )}
           </div>
         ) : (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
-            {check.message}
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 space-y-1 text-sm text-red-300">
+            <div className="text-red-300 font-bold text-xs uppercase tracking-wider">Odpowiedź AI</div>
+            <div>{check.message}</div>
           </div>
         )
       )}
@@ -254,8 +325,8 @@ export default function OperatorReport() {
   const [rejectReason,   setRejectReason]   = useState('')
   const [notes,          setNotes]          = useState('')
 
-  const [downtimeStation, setDowntimeStation] = useState('')
-  const [rejectStation,   setRejectStation]   = useState('')
+  const [downtimeStations, setDowntimeStations] = useState<StationAllocation[]>([])
+  const [rejectStations,   setRejectStations]   = useState<StationAllocation[]>([])
   const [downtimeCheck,       setDowntimeCheck]       = useState<IssueCheckResult | null>(null)
   const [rejectCheck,         setRejectCheck]         = useState<IssueCheckResult | null>(null)
   const [downtimeCheckedText, setDowntimeCheckedText] = useState<string | null>(null)
@@ -438,10 +509,22 @@ export default function OperatorReport() {
   const rejectNeedsCheck = (rejectAboveLimit || rejectReason.trim().length > 0)
   const downtimeCheckStale = downtimeCheckedText !== downtimeReason
   const rejectCheckStale = rejectCheckedText !== rejectReason
-  const downtimePriorCount = downtimeStation
-    ? existingReports.filter(r => r.downtime_station === downtimeStation).length : 0
-  const rejectPriorCount = rejectStation
-    ? existingReports.filter(r => r.reject_station === rejectStation).length : 0
+  const downtimeStationValues = new Set(downtimeStations.map(s => s.value))
+  const rejectStationValues = new Set(rejectStations.map(s => s.value))
+  const downtimeStillMissingStations = (downtimeCheck?.additionalStationsFound ?? []).filter(a => !downtimeStationValues.has(a.value))
+  const rejectStillMissingStations = (rejectCheck?.additionalStationsFound ?? []).filter(a => !rejectStationValues.has(a.value))
+  const countPriorStationOverlap = (stations: StationAllocation[], field: 'downtime' | 'reject') => {
+    if (stations.length === 0) return 0
+    const values = new Set(stations.map(s => s.value))
+    return existingReports.filter(r => {
+      const arr = field === 'downtime' ? r.downtime_stations : r.reject_stations
+      if (arr && arr.length) return arr.some(a => values.has(a.station))
+      const single = field === 'downtime' ? r.downtime_station : r.reject_station
+      return single ? values.has(single) : false
+    }).length
+  }
+  const downtimePriorCount = countPriorStationOverlap(downtimeStations, 'downtime')
+  const rejectPriorCount = countPriorStationOverlap(rejectStations, 'reject')
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour && r.id !== editingReportId)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
@@ -472,8 +555,16 @@ export default function OperatorReport() {
     setDowntimeReason(lastReport.downtime_reason ?? '')
     setRejectReason(lastReport.reject_reason ?? '')
     setNotes(lastReport.notes ?? '')
-    setDowntimeStation(lastReport.downtime_station ?? '')
-    setRejectStation(lastReport.reject_station ?? '')
+    setDowntimeStations(
+      lastReport.downtime_stations?.length
+        ? lastReport.downtime_stations.map(a => ({ value: a.station, pct: a.pct }))
+        : (lastReport.downtime_station ? [{ value: lastReport.downtime_station, pct: 100 }] : [])
+    )
+    setRejectStations(
+      lastReport.reject_stations?.length
+        ? lastReport.reject_stations.map(a => ({ value: a.station, pct: a.pct }))
+        : (lastReport.reject_station ? [{ value: lastReport.reject_station, pct: 100 }] : [])
+    )
     resetIssueChecks()
     setErrors([])
   }
@@ -485,13 +576,12 @@ export default function OperatorReport() {
   }
 
   const runDowntimeCheck = async () => {
-    if (!downtimeStation || !downtimeReason.trim()) return
+    if (downtimeStations.length === 0 || !downtimeReason.trim()) return
     setDowntimeChecking(true)
     try {
       const result = await checkIssueDescription({
         reportType: 'downtime',
-        station: downtimeStation,
-        stationLabel: stationLabel(downtimeStation),
+        stations: downtimeStations.map(s => ({ value: s.value, label: stationLabel(s.value), pct: s.pct })),
         machineName: activeMachine?.name ?? '',
         text: downtimeReason,
         priorOccurrencesThisShift: downtimePriorCount
@@ -505,13 +595,12 @@ export default function OperatorReport() {
   }
 
   const runRejectCheck = async () => {
-    if (!rejectStation || !rejectReason.trim()) return
+    if (rejectStations.length === 0 || !rejectReason.trim()) return
     setRejectChecking(true)
     try {
       const result = await checkIssueDescription({
         reportType: 'reject',
-        station: rejectStation,
-        stationLabel: stationLabel(rejectStation),
+        stations: rejectStations.map(s => ({ value: s.value, label: stationLabel(s.value), pct: s.pct })),
         machineName: activeMachine?.name ?? '',
         text: rejectReason,
         priorOccurrencesThisShift: rejectPriorCount
@@ -532,8 +621,8 @@ export default function OperatorReport() {
     setRejectReason('')
     setNotes('')
     setOrderQty('')
-    setDowntimeStation('')
-    setRejectStation('')
+    setDowntimeStations([])
+    setRejectStations([])
     resetIssueChecks()
     setErrors([])
   }
@@ -580,16 +669,18 @@ export default function OperatorReport() {
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej progu wyjasnienia: przyrost ${incGood} szt przy progu ${explanationTarget} szt`)
     if (rejectAboveLimit && !rejectReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
     if (downtimeNeedsCheck) {
-      if (!downtimeStation) errs.push('Wybierz stacje lub kategorie ogolna dla komentarza do wyniku')
+      if (downtimeStations.length === 0) errs.push('Wybierz przynajmniej jedna stacje lub kategorie ogolna dla komentarza do wyniku')
       else if (!downtimeCheck || downtimeCheckStale) errs.push('Sprawdz opis komentarza do wyniku z AI przed zapisem')
       else if (!downtimeCheck.ok) errs.push(downtimeCheck.message || 'Opis komentarza do wyniku jest zbyt ogolny')
       else if (downtimeCheck.stationMismatch && !downtimeMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do wyniku')
+      else if (downtimeStillMissingStations.length > 0) errs.push(`AI wykrylo w opisie wyniku dodatkowe stacje (${downtimeStillMissingStations.map(s => s.label).join(', ')}) - dodaj je albo usun wzmianke z opisu`)
     }
     if (rejectNeedsCheck) {
-      if (!rejectStation) errs.push('Wybierz stacje lub kategorie ogolna dla komentarza do odrzutu')
+      if (rejectStations.length === 0) errs.push('Wybierz przynajmniej jedna stacje lub kategorie ogolna dla komentarza do odrzutu')
       else if (!rejectCheck || rejectCheckStale) errs.push('Sprawdz opis komentarza do odrzutu z AI przed zapisem')
       else if (!rejectCheck.ok) errs.push(rejectCheck.message || 'Opis komentarza do odrzutu jest zbyt ogolny')
       else if (rejectCheck.stationMismatch && !rejectMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do odrzutu')
+      else if (rejectStillMissingStations.length > 0) errs.push(`AI wykrylo w opisie odrzutu dodatkowe stacje (${rejectStillMissingStations.map(s => s.label).join(', ')}) - dodaj je albo usun wzmianke z opisu`)
     }
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
@@ -636,11 +727,13 @@ export default function OperatorReport() {
         downtime_reason: downtimeReason || (testMode && explanationTarget > 0 && incGood < explanationTarget ? 'Tryb testowy' : null),
         reject_reason: rejectReason || null,
         notes: notes || null,
-        downtime_station: downtimeReason.trim() ? (downtimeStation || null) : null,
+        downtime_station: downtimeReason.trim() ? primaryStation(downtimeStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
+        downtime_stations: downtimeReason.trim() && downtimeStations.length ? downtimeStations.map(s => ({ station: s.value, pct: s.pct })) : null,
         downtime_category: downtimeReason.trim() ? (downtimeCheck?.category ?? null) : null,
         downtime_problem_name: downtimeReason.trim() ? (downtimeCheck?.problemName ?? null) : null,
         downtime_validated_by: downtimeReason.trim() ? (downtimeCheck?.validatedBy ?? null) : null,
-        reject_station: rejectReason.trim() ? (rejectStation || null) : null,
+        reject_station: rejectReason.trim() ? primaryStation(rejectStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
+        reject_stations: rejectReason.trim() && rejectStations.length ? rejectStations.map(s => ({ station: s.value, pct: s.pct })) : null,
         reject_category: rejectReason.trim() ? (rejectCheck?.category ?? null) : null,
         reject_problem_name: rejectReason.trim() ? (rejectCheck?.problemName ?? null) : null,
         reject_validated_by: rejectReason.trim() ? (rejectCheck?.validatedBy ?? null) : null,
@@ -676,10 +769,10 @@ export default function OperatorReport() {
           resultReason: downtimeReason || null,
           rejectReason: rejectReason || null,
           notes: notes || null,
-          downtimeStation: downtimeReason.trim() ? (downtimeStation || null) : null,
+          downtimeStation: downtimeReason.trim() ? primaryStation(downtimeStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
           downtimeCategory: downtimeReason.trim() ? (downtimeCheck?.category ?? null) : null,
           downtimeProblemName: downtimeReason.trim() ? (downtimeCheck?.problemName ?? null) : null,
-          rejectStation: rejectReason.trim() ? (rejectStation || null) : null,
+          rejectStation: rejectReason.trim() ? primaryStation(rejectStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
           rejectCategory: rejectReason.trim() ? (rejectCheck?.category ?? null) : null,
           rejectProblemName: rejectReason.trim() ? (rejectCheck?.problemName ?? null) : null
         }).catch(() => undefined)
@@ -695,7 +788,7 @@ export default function OperatorReport() {
       setEditingReportId(null)
       setCounterGood(''); setCounterReject('')
       setDowntimeReason(''); setRejectReason(''); setNotes(''); setOrderQty('')
-      setDowntimeStation(''); setRejectStation('')
+      setDowntimeStations([]); setRejectStations([])
       resetIssueChecks()
       if (!editingReportId) {
         const nextReported = [...reportedHours, selectedHour]
@@ -966,8 +1059,8 @@ export default function OperatorReport() {
             {downtimeNeedsCheck && (
               <IssueStationAndCheck
                 reportType="downtime"
-                station={downtimeStation}
-                onStationChange={v => { setDowntimeStation(v); setErrors([]) }}
+                stations={downtimeStations}
+                onStationsChange={next => { setDowntimeStations(next); setErrors([]) }}
                 text={downtimeReason}
                 checking={downtimeChecking}
                 check={downtimeCheck}
@@ -1019,8 +1112,8 @@ export default function OperatorReport() {
             {rejectNeedsCheck && (
               <IssueStationAndCheck
                 reportType="reject"
-                station={rejectStation}
-                onStationChange={v => { setRejectStation(v); setErrors([]) }}
+                stations={rejectStations}
+                onStationsChange={next => { setRejectStations(next); setErrors([]) }}
                 text={rejectReason}
                 checking={rejectChecking}
                 check={rejectCheck}

@@ -2,8 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { cn, efficiencyColor, formatLocalDateISO } from '@/lib/utils'
-import { stationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
-import type { FailureReport, FailureSeverity, FailureStatus, HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
+import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
+import type { FailureReport, FailureSeverity, FailureStatus, HourlyReport, Machine, Profile, ShiftType, IssueStationAllocation } from '@/types/database'
+
+function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
+  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
+}
 
 const SEV_CFG: Record<FailureSeverity, { label: string; cls: string; dot: string; rank: number }> = {
   low: { label: 'Niska', cls: 'bg-green-500/15 text-green-400 border-green-500/30', dot: 'bg-green-400', rank: 1 },
@@ -670,7 +674,7 @@ function ProductionIssueCard({ issue }: { issue: ProductionIssue }) {
               <span className="text-navy-500">Wynik:</span> {issue.downtime_reason}
               {(issue.downtime_station || issue.downtime_category) && (
                 <div className="text-xs text-navy-500">
-                  {stationLabel(issue.downtime_station)} · {problemCategoryLabel('downtime', issue.downtime_category)}
+                  {reportStationLabel(issue.downtime_stations, issue.downtime_station)} · {problemCategoryLabel('downtime', issue.downtime_category)}
                   {issue.downtime_status ? ` · ${issueStatusLabel(issue.downtime_status)}` : ''}
                 </div>
               )}
@@ -681,7 +685,7 @@ function ProductionIssueCard({ issue }: { issue: ProductionIssue }) {
               <span className="text-navy-500">Odrzut:</span> {issue.reject_reason}
               {(issue.reject_station || issue.reject_category) && (
                 <div className="text-xs text-navy-500">
-                  {stationLabel(issue.reject_station)} · {problemCategoryLabel('reject', issue.reject_category)}
+                  {reportStationLabel(issue.reject_stations, issue.reject_station)} · {problemCategoryLabel('reject', issue.reject_category)}
                   {issue.reject_status ? ` · ${issueStatusLabel(issue.reject_status)}` : ''}
                 </div>
               )}

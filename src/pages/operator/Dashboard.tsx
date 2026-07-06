@@ -394,10 +394,22 @@ export default function OperatorDashboard() {
                     return (
                       <div key={shift.id} className="rounded-lg bg-navy-800 px-3 py-2">
                         <div className="flex items-center justify-between gap-2">
-                          <div className="text-xs font-bold text-white">Zmiana {shift.shift_type}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="text-xs font-bold text-white">Zmiana {shift.shift_type}</div>
+                            {shift.ended_early && (
+                              <span className="rounded-full border border-amber-500/50 bg-amber-500/15 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-amber-300">
+                                Zakonczona przedwczesnie
+                              </span>
+                            )}
+                          </div>
                           <div className="font-mono text-xs text-navy-300">{shift.shift_date}</div>
                         </div>
                         <div className="mt-1 text-xs text-navy-400">{operators}</div>
+                        {shift.ended_early && shift.early_end_reason && (
+                          <div className="mt-2 rounded-lg border border-amber-500/20 bg-amber-500/5 px-2 py-1.5 text-xs text-amber-200">
+                            <span className="text-amber-400 font-semibold">Powod: </span>{shift.early_end_reason}
+                          </div>
+                        )}
                         <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
                           <div><span className="text-navy-500">produkcja:</span> <span className="font-mono font-bold text-white">{(shift.summary_good_count ?? 0).toLocaleString('pl-PL')}</span></div>
                           <div><span className="text-navy-500">odrzut:</span> <span className="font-mono font-bold text-red-400">{(shift.summary_reject_count ?? 0).toLocaleString('pl-PL')}</span></div>
