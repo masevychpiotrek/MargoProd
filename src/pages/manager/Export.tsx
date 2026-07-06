@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
+import { stationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
 import type { HourlyReport, Machine } from '@/types/database'
 
 // ─── Stałe brand ────────────────────────────────────────────────────────────
@@ -99,6 +100,13 @@ const MACHINE_COLS = [
   { label: 'Przezbr. (min)',  key: 'changeover', width: 14 },
   { label: 'Awaria (min)',    key: 'failure',    width: 13 },
   { label: 'Przyczyna',       key: 'reason',     width: 24 },
+  { label: 'Stacja wyniku',   key: 'd_station',  width: 16 },
+  { label: 'Kategoria wyniku', key: 'd_category', width: 22 },
+  { label: 'Status wyniku',   key: 'd_status',   width: 20 },
+  { label: 'Przyczyna odrzutu', key: 'r_reason', width: 24 },
+  { label: 'Stacja odrzutu',  key: 'r_station',  width: 16 },
+  { label: 'Kategoria odrzutu', key: 'r_category', width: 22 },
+  { label: 'Status odrzutu',  key: 'r_status',   width: 20 },
   { label: 'Uwagi',           key: 'notes',      width: 30 },
 ]
 
@@ -166,6 +174,13 @@ const buildMachineSheet = (
       r.changeover_min,
       r.failure_min,
       r.downtime_reason ?? '',
+      stationLabel(r.downtime_station),
+      problemCategoryLabel('downtime', r.downtime_category),
+      issueStatusLabel(r.downtime_status),
+      r.reject_reason ?? '',
+      stationLabel(r.reject_station),
+      problemCategoryLabel('reject', r.reject_category),
+      issueStatusLabel(r.reject_status),
       r.notes ?? '',
     ]
 
@@ -183,7 +198,7 @@ const buildMachineSheet = (
       if (ci === 5 && r.reject_count > 0) { cell.numFmt = '#,##0'; cell.font = { name: 'Arial', size: 9, color: { argb: RED } } }
       if (ci === 8)  { cell.numFmt = '0%'; cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: effArgb(eff) } } }
       if (ci >= 9 && ci <= 13) { cell.numFmt = '#,##0'; cell.alignment = { horizontal: 'center', vertical: 'middle' } }
-      if (ci === 15) { cell.alignment = { wrapText: true, vertical: 'top' } }
+      if (ci === 22) { cell.alignment = { wrapText: true, vertical: 'top' } }
     })
     row.height = r.notes && r.notes.length > 40 ? 28 : 16
   })

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { cn, efficiencyColor, formatLocalDateISO } from '@/lib/utils'
+import { stationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
 import type { FailureReport, FailureSeverity, FailureStatus, HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 const SEV_CFG: Record<FailureSeverity, { label: string; cls: string; dot: string; rank: number }> = {
@@ -664,8 +665,28 @@ function ProductionIssueCard({ issue }: { issue: ProductionIssue }) {
       </div>
       {(issue.downtime_reason || issue.reject_reason || issue.notes) && (
         <div className="mt-4 rounded-xl bg-navy-900 p-3 text-sm text-navy-200">
-          {issue.downtime_reason && <div><span className="text-navy-500">Wynik:</span> {issue.downtime_reason}</div>}
-          {issue.reject_reason && <div><span className="text-navy-500">Odrzut:</span> {issue.reject_reason}</div>}
+          {issue.downtime_reason && (
+            <div>
+              <span className="text-navy-500">Wynik:</span> {issue.downtime_reason}
+              {(issue.downtime_station || issue.downtime_category) && (
+                <div className="text-xs text-navy-500">
+                  {stationLabel(issue.downtime_station)} · {problemCategoryLabel('downtime', issue.downtime_category)}
+                  {issue.downtime_status ? ` · ${issueStatusLabel(issue.downtime_status)}` : ''}
+                </div>
+              )}
+            </div>
+          )}
+          {issue.reject_reason && (
+            <div>
+              <span className="text-navy-500">Odrzut:</span> {issue.reject_reason}
+              {(issue.reject_station || issue.reject_category) && (
+                <div className="text-xs text-navy-500">
+                  {stationLabel(issue.reject_station)} · {problemCategoryLabel('reject', issue.reject_category)}
+                  {issue.reject_status ? ` · ${issueStatusLabel(issue.reject_status)}` : ''}
+                </div>
+              )}
+            </div>
+          )}
           {issue.notes && <div><span className="text-navy-500">Uwagi:</span> {issue.notes}</div>}
         </div>
       )}

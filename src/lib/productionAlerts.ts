@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import { stationLabel } from './issueReports'
 import type { FailureSeverity } from '@/types/database'
 
 const REJECT_LIMIT_PCT = 5
@@ -23,6 +24,12 @@ interface SyncProductionAlertParams {
   resultReason?: string | null
   rejectReason?: string | null
   notes?: string | null
+  downtimeStation?: string | null
+  downtimeCategory?: string | null
+  downtimeProblemName?: string | null
+  rejectStation?: string | null
+  rejectCategory?: string | null
+  rejectProblemName?: string | null
 }
 
 function rejectPct(good: number, reject: number) {
@@ -57,10 +64,22 @@ function buildDescription(params: SyncProductionAlertParams, alertType: AlertTyp
     lines.push(`To ${lowCount}. wynik ponizej ${LOW_OUTPUT_THRESHOLD.toLocaleString('pl-PL')} szt w tej zmianie. Wymagana kontrola tempa pracy maszyny.`)
   }
   if (params.resultReason) lines.push(`Komentarz do wyniku: ${params.resultReason}`)
+  if (params.downtimeCategory || params.downtimeProblemName) {
+    lines.push(`Klasyfikacja niskiej wydajnosci: ${[params.downtimeProblemName, params.downtimeCategory].filter(Boolean).join(' / ')}`)
+  }
   if (params.rejectReason) lines.push(`Komentarz do odrzutu: ${params.rejectReason}`)
+  if (params.rejectCategory || params.rejectProblemName) {
+    lines.push(`Klasyfikacja odrzutu: ${[params.rejectProblemName, params.rejectCategory].filter(Boolean).join(' / ')}`)
+  }
   if (params.notes) lines.push(`Uwagi operatora: ${params.notes}`)
 
   return lines.join('\n')
+}
+
+function pickStation(params: SyncProductionAlertParams, alertType: AlertType) {
+  if (alertType === 'combined') return params.rejectStation ?? params.downtimeStation ?? 'Automatyczna kontrola wyniku'
+  if (alertType === 'high_reject') return params.rejectStation ?? 'Automatyczna kontrola wyniku'
+  return params.downtimeStation ?? 'Automatyczna kontrola wyniku'
 }
 
 async function sendTeamsAutoAlert(params: SyncProductionAlertParams, alertType: AlertType, reject: number, lowCount: number) {
@@ -173,7 +192,7 @@ export async function syncProductionAlert(params: SyncProductionAlertParams) {
     category: alertType === 'high_reject' ? 'quality_control' : 'process_issue',
     severity,
     status: 'new',
-    station: 'Automatyczna kontrola wyniku',
+    station: stationLabel(pickStation(params, alertType)),
     description,
     photo_urls: [],
     auto_generated: true,

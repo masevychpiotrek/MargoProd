@@ -7,6 +7,8 @@ import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
 import { syncProductionAlert } from '@/lib/productionAlerts'
+import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, type ReportIssueType } from '@/lib/issueReports'
+import { checkIssueDescription, type IssueCheckResult } from '@/lib/aiIssueValidation'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
 const TARGET = 3200 // manufacturer EPQ base
@@ -139,6 +141,79 @@ function CounterInput({ label, sublabel, value, onChange, prevValue, color = 'te
   )
 }
 
+// ── IssueStationAndCheck ────────────────────────────────────────────────────
+function IssueStationAndCheck({
+  reportType, station, onStationChange, text, checking, check, isStale,
+  mismatchConfirmed, onMismatchConfirmedChange, onCheck
+}: {
+  reportType: ReportIssueType
+  station: string
+  onStationChange: (v: string) => void
+  text: string
+  checking: boolean
+  check: IssueCheckResult | null
+  isStale: boolean
+  mismatchConfirmed: boolean
+  onMismatchConfirmedChange: (v: boolean) => void
+  onCheck: () => void
+}) {
+  return (
+    <div className="space-y-3 mt-3 pt-3 border-t border-navy-700">
+      <div>
+        <label className="text-xs text-navy-400 mb-1.5 block">Stacja / obszar problemu *</label>
+        <select value={station} onChange={e => onStationChange(e.target.value)} className="input text-sm">
+          <option value="">Wybierz stację lub kategorię...</option>
+          <optgroup label="Stacje">
+            {STATIONS.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
+          </optgroup>
+          <optgroup label="Kategorie ogólne">
+            {GENERAL_CATEGORIES.map(c => <option key={c.value} value={c.value}>{c.label}</option>)}
+          </optgroup>
+        </select>
+      </div>
+
+      <button
+        type="button"
+        onClick={onCheck}
+        disabled={checking || !station || !text.trim()}
+        className="btn-secondary text-xs py-2 px-3 disabled:opacity-40"
+      >
+        {checking ? 'Sprawdzanie...' : 'Sprawdź opis z AI'}
+      </button>
+
+      {check && !isStale && (
+        check.ok ? (
+          <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 space-y-1.5 text-sm">
+            <div className="text-green-300 font-bold text-xs uppercase tracking-wider">
+              {check.validatedBy === 'ai' ? 'Sprawdzone przez AI' : 'Sprawdzone lokalnie (AI niedostępne)'}
+            </div>
+            {check.category && <div className="text-white"><span className="text-navy-400">Kategoria: </span>{problemCategoryLabel(reportType, check.category)}</div>}
+            {check.problemName && <div className="text-white"><span className="text-navy-400">Problem: </span>{check.problemName}</div>}
+            {check.standardizedDescription && <div className="text-navy-200 italic">„{check.standardizedDescription}”</div>}
+            {check.effect && <div className="text-white"><span className="text-navy-400">Skutek: </span>{check.effect}</div>}
+            {check.stationMismatch && (
+              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+                <div className="text-amber-300 text-xs">{check.mismatchMessage}</div>
+                <label className="flex items-center gap-2 mt-2 cursor-pointer">
+                  <input type="checkbox" checked={mismatchConfirmed} onChange={e => onMismatchConfirmedChange(e.target.checked)} className="w-4 h-4 rounded accent-brand" />
+                  <span className="text-xs text-amber-200">Potwierdzam, że stacja jest prawidłowa</span>
+                </label>
+              </div>
+            )}
+          </div>
+        ) : (
+          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-sm text-red-300">
+            {check.message}
+          </div>
+        )
+      )}
+      {check && isStale && (
+        <div className="text-xs text-amber-400">Opis został zmieniony — sprawdź ponownie przed zapisem.</div>
+      )}
+    </div>
+  )
+}
+
 // ── MAIN COMPONENT ────────────────────────────────────────────────────────
 export default function OperatorReport() {
   const navigate = useNavigate()
@@ -156,6 +231,17 @@ export default function OperatorReport() {
   const [downtimeReason, setDowntimeReason] = useState('')
   const [rejectReason,   setRejectReason]   = useState('')
   const [notes,          setNotes]          = useState('')
+
+  const [downtimeStation, setDowntimeStation] = useState('')
+  const [rejectStation,   setRejectStation]   = useState('')
+  const [downtimeCheck,       setDowntimeCheck]       = useState<IssueCheckResult | null>(null)
+  const [rejectCheck,         setRejectCheck]         = useState<IssueCheckResult | null>(null)
+  const [downtimeCheckedText, setDowntimeCheckedText] = useState<string | null>(null)
+  const [rejectCheckedText,   setRejectCheckedText]   = useState<string | null>(null)
+  const [downtimeChecking, setDowntimeChecking] = useState(false)
+  const [rejectChecking,   setRejectChecking]   = useState(false)
+  const [downtimeMismatchConfirmed, setDowntimeMismatchConfirmed] = useState(false)
+  const [rejectMismatchConfirmed,   setRejectMismatchConfirmed]   = useState(false)
   const [existingReports, setExistingReports] = useState<ReportExt[]>([])
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [saving,  setSaving]  = useState(false)
@@ -326,6 +412,14 @@ export default function OperatorReport() {
   const explanationTarget = EXPLANATION_TARGET
   const belowTarget = !testMode && explanationTarget > 0 && incGood > 0 && incGood < explanationTarget
   const rejectAboveLimit = !testMode && rejectPct > 5
+  const downtimeNeedsCheck = (belowTarget || downtimeReason.trim().length > 0)
+  const rejectNeedsCheck = (rejectAboveLimit || rejectReason.trim().length > 0)
+  const downtimeCheckStale = downtimeCheckedText !== downtimeReason
+  const rejectCheckStale = rejectCheckedText !== rejectReason
+  const downtimePriorCount = downtimeStation
+    ? existingReports.filter(r => r.downtime_station === downtimeStation).length : 0
+  const rejectPriorCount = rejectStation
+    ? existingReports.filter(r => r.reject_station === rejectStation).length : 0
   const alreadyReported = existingReports.some(r => r.hour_start === selectedHour && r.id !== editingReportId)
   const currentSlot = testMode ? Math.floor(now.getMinutes() / 3) : hour
   const currentSlotBelongsToShift = testMode || shiftHours.includes(currentSlot)
@@ -356,7 +450,56 @@ export default function OperatorReport() {
     setDowntimeReason(lastReport.downtime_reason ?? '')
     setRejectReason(lastReport.reject_reason ?? '')
     setNotes(lastReport.notes ?? '')
+    setDowntimeStation(lastReport.downtime_station ?? '')
+    setRejectStation(lastReport.reject_station ?? '')
+    resetIssueChecks()
     setErrors([])
+  }
+
+  const resetIssueChecks = () => {
+    setDowntimeCheck(null); setRejectCheck(null)
+    setDowntimeCheckedText(null); setRejectCheckedText(null)
+    setDowntimeMismatchConfirmed(false); setRejectMismatchConfirmed(false)
+  }
+
+  const runDowntimeCheck = async () => {
+    if (!downtimeStation || !downtimeReason.trim()) return
+    setDowntimeChecking(true)
+    try {
+      const result = await checkIssueDescription({
+        reportType: 'downtime',
+        station: downtimeStation,
+        stationLabel: stationLabel(downtimeStation),
+        machineName: activeMachine?.name ?? '',
+        text: downtimeReason,
+        priorOccurrencesThisShift: downtimePriorCount
+      })
+      setDowntimeCheck(result)
+      setDowntimeCheckedText(downtimeReason)
+      setDowntimeMismatchConfirmed(false)
+    } finally {
+      setDowntimeChecking(false)
+    }
+  }
+
+  const runRejectCheck = async () => {
+    if (!rejectStation || !rejectReason.trim()) return
+    setRejectChecking(true)
+    try {
+      const result = await checkIssueDescription({
+        reportType: 'reject',
+        station: rejectStation,
+        stationLabel: stationLabel(rejectStation),
+        machineName: activeMachine?.name ?? '',
+        text: rejectReason,
+        priorOccurrencesThisShift: rejectPriorCount
+      })
+      setRejectCheck(result)
+      setRejectCheckedText(rejectReason)
+      setRejectMismatchConfirmed(false)
+    } finally {
+      setRejectChecking(false)
+    }
   }
 
   const cancelEditReport = () => {
@@ -367,6 +510,9 @@ export default function OperatorReport() {
     setRejectReason('')
     setNotes('')
     setOrderQty('')
+    setDowntimeStation('')
+    setRejectStation('')
+    resetIssueChecks()
     setErrors([])
   }
 
@@ -411,6 +557,18 @@ export default function OperatorReport() {
     if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej progu wyjasnienia: przyrost ${incGood} szt przy progu ${explanationTarget} szt`)
     if (rejectAboveLimit && !rejectReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
+    if (downtimeNeedsCheck) {
+      if (!downtimeStation) errs.push('Wybierz stacje lub kategorie ogolna dla komentarza do wyniku')
+      else if (!downtimeCheck || downtimeCheckStale) errs.push('Sprawdz opis komentarza do wyniku z AI przed zapisem')
+      else if (!downtimeCheck.ok) errs.push(downtimeCheck.message || 'Opis komentarza do wyniku jest zbyt ogolny')
+      else if (downtimeCheck.stationMismatch && !downtimeMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do wyniku')
+    }
+    if (rejectNeedsCheck) {
+      if (!rejectStation) errs.push('Wybierz stacje lub kategorie ogolna dla komentarza do odrzutu')
+      else if (!rejectCheck || rejectCheckStale) errs.push('Sprawdz opis komentarza do odrzutu z AI przed zapisem')
+      else if (!rejectCheck.ok) errs.push(rejectCheck.message || 'Opis komentarza do odrzutu jest zbyt ogolny')
+      else if (rejectCheck.stationMismatch && !rejectMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do odrzutu')
+    }
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
     if (counterGood !== '' && prevGood > 0 && curGood < prevGood) errs.push('Licznik dobrych nie moze malec')
@@ -456,6 +614,14 @@ export default function OperatorReport() {
         downtime_reason: downtimeReason || (testMode && explanationTarget > 0 && incGood < explanationTarget ? 'Tryb testowy' : null),
         reject_reason: rejectReason || null,
         notes: notes || null,
+        downtime_station: downtimeReason.trim() ? (downtimeStation || null) : null,
+        downtime_category: downtimeReason.trim() ? (downtimeCheck?.category ?? null) : null,
+        downtime_problem_name: downtimeReason.trim() ? (downtimeCheck?.problemName ?? null) : null,
+        downtime_validated_by: downtimeReason.trim() ? (downtimeCheck?.validatedBy ?? null) : null,
+        reject_station: rejectReason.trim() ? (rejectStation || null) : null,
+        reject_category: rejectReason.trim() ? (rejectCheck?.category ?? null) : null,
+        reject_problem_name: rejectReason.trim() ? (rejectCheck?.problemName ?? null) : null,
+        reject_validated_by: rejectReason.trim() ? (rejectCheck?.validatedBy ?? null) : null,
         status: 'submitted',
         order_id: ORDERS_ENABLED && activeOrderId ? activeOrderId : null,
         order_qty: ORDERS_ENABLED && activeOrderId ? orderQtyVal : null
@@ -487,7 +653,13 @@ export default function OperatorReport() {
           target: reportTarget,
           resultReason: downtimeReason || null,
           rejectReason: rejectReason || null,
-          notes: notes || null
+          notes: notes || null,
+          downtimeStation: downtimeReason.trim() ? (downtimeStation || null) : null,
+          downtimeCategory: downtimeReason.trim() ? (downtimeCheck?.category ?? null) : null,
+          downtimeProblemName: downtimeReason.trim() ? (downtimeCheck?.problemName ?? null) : null,
+          rejectStation: rejectReason.trim() ? (rejectStation || null) : null,
+          rejectCategory: rejectReason.trim() ? (rejectCheck?.category ?? null) : null,
+          rejectProblemName: rejectReason.trim() ? (rejectCheck?.problemName ?? null) : null
         }).catch(() => undefined)
       }
       void logAudit(
@@ -501,6 +673,8 @@ export default function OperatorReport() {
       setEditingReportId(null)
       setCounterGood(''); setCounterReject('')
       setDowntimeReason(''); setRejectReason(''); setNotes(''); setOrderQty('')
+      setDowntimeStation(''); setRejectStation('')
+      resetIssueChecks()
       if (!editingReportId) {
         const nextReported = [...reportedHours, selectedHour]
         const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
@@ -767,6 +941,20 @@ export default function OperatorReport() {
                 Bez komentarza do wyniku ponizej progu raport nie zostanie zapisany.
               </div>
             )}
+            {downtimeNeedsCheck && (
+              <IssueStationAndCheck
+                reportType="downtime"
+                station={downtimeStation}
+                onStationChange={v => { setDowntimeStation(v); setErrors([]) }}
+                text={downtimeReason}
+                checking={downtimeChecking}
+                check={downtimeCheck}
+                isStale={downtimeCheckStale}
+                mismatchConfirmed={downtimeMismatchConfirmed}
+                onMismatchConfirmedChange={setDowntimeMismatchConfirmed}
+                onCheck={runDowntimeCheck}
+              />
+            )}
           </div>
 
           <div
@@ -805,6 +993,20 @@ export default function OperatorReport() {
               <div className="mt-2 text-xs font-semibold text-red-300">
                 Bez komentarza do odrzutu powyzej 5% raport nie zostanie zapisany.
               </div>
+            )}
+            {rejectNeedsCheck && (
+              <IssueStationAndCheck
+                reportType="reject"
+                station={rejectStation}
+                onStationChange={v => { setRejectStation(v); setErrors([]) }}
+                text={rejectReason}
+                checking={rejectChecking}
+                check={rejectCheck}
+                isStale={rejectCheckStale}
+                mismatchConfirmed={rejectMismatchConfirmed}
+                onMismatchConfirmedChange={setRejectMismatchConfirmed}
+                onCheck={runRejectCheck}
+              />
             )}
           </div>
 

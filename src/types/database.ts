@@ -16,6 +16,13 @@ export type AuditAction =
   | 'failure_report_create' | 'failure_report_update'
   | 'shift_manager_correction' | 'manager_report_update' | 'manager_report_delete'
   | 'manager_order_update' | 'manager_order_report_update'
+  | 'ai_issue_validation'
+
+export type IssueValidatedBy = 'ai' | 'heuristic'
+export type IssueStatus =
+  | 'rozwiazane_operator' | 'rozwiazane_lider' | 'rozwiazane_ur'
+  | 'wystepuje_nadal' | 'wymaga_analizy' | 'wymaga_czesci'
+  | 'wymaga_serwisu_zewn' | 'wymaga_poprawy_danych'
 
 export type FailureSeverity = 'low' | 'medium' | 'high' | 'critical'
 export type FailureStatus   = 'new' | 'acknowledged' | 'in_progress' | 'unresolved' | 'resolved'
@@ -98,6 +105,18 @@ export interface HourlyReport {
   submitted_at: string
   updated_at: string
   deleted_at: string | null
+  downtime_station?: string | null
+  downtime_category?: string | null
+  downtime_problem_name?: string | null
+  downtime_status?: IssueStatus | null
+  downtime_action_taken?: string | null
+  downtime_validated_by?: IssueValidatedBy | null
+  reject_station?: string | null
+  reject_category?: string | null
+  reject_problem_name?: string | null
+  reject_status?: IssueStatus | null
+  reject_action_taken?: string | null
+  reject_validated_by?: IssueValidatedBy | null
   // joined
   machine?: Machine
   operator?: Profile
