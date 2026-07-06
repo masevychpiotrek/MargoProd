@@ -270,10 +270,11 @@ export default function OperatorShift() {
     const latestReports = await loadShiftReports()
     const reportedHours = latestReports.map(r => r.hour_start)
     const shiftHours = SHIFT_HOURS[activeShift.shift_type as ShiftType]
-    // Tylko godziny które już minęły
-    const missing = shiftHours.filter(h =>
-      canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h) && !reportedHours.includes(h)
-    )
+    // Wszystkie zaplanowane godziny zmiany bez wpisu - rowniez te, ktorych okno wpisu
+    // jeszcze sie nie otworzylo (np. ostatni blok otwiera sie dopiero 10 min przed koncem
+    // zmiany). Bez tego operator mogl zamknac zmiane tuz przed otwarciem ostatniego bloku
+    // i bezpowrotnie stracic ten wpis.
+    const missing = shiftHours.filter(h => !reportedHours.includes(h))
     const good = latestReports.reduce((s, r) => s + r.good_count, 0)
     const reject = latestReports.reduce((s, r) => s + r.reject_count, 0)
     setMissingHours(missing)
@@ -392,19 +393,26 @@ export default function OperatorShift() {
               {missingHours.length > 0 ? (
                 <>
                   <p className="text-red-300 text-sm font-semibold mb-4">
-                    Nie mozna zamknac zmiany, bo brakuje otwartych raportow za nastepujace godziny:
+                    Nie mozna zamknac zmiany, bo brakuje raportow za nastepujace godziny:
                   </p>
                   <div className="bg-red-500/10 border border-red-500/30 rounded-xl p-3 mb-4">
-                    {missingHours.map(h => (
-                      <div key={h} className="text-amber-400 font-mono text-sm">
-                        - {String(h).padStart(2,'0')}:00 - {String((h+1)%24).padStart(2,'0')}:00
-                      </div>
-                    ))}
+                    {missingHours.map(h => {
+                      const canEnter = activeShift && canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h)
+                      const opensAt = activeShift ? getReportEntryOpenAt(activeShift.shift_date, activeShift.shift_type, h) : null
+                      return (
+                        <div key={h} className="text-amber-400 font-mono text-sm">
+                          - {String(h).padStart(2,'0')}:00 - {String((h+1)%24).padStart(2,'0')}:00
+                          {!canEnter && opensAt && (
+                            <span className="text-navy-400"> (blok otworzy sie o {opensAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })})</span>
+                          )}
+                        </div>
+                      )
+                    })}
                   </div>
                 </>
               ) : (
                 <div className="bg-green-500/10 border border-green-500/25 rounded-xl p-3 mb-4 text-sm font-semibold text-green-300">
-                  Otwarte raporty wygladaja na uzupelnione.
+                  Wszystkie raporty godzinowe sa uzupelnione.
                 </div>
               )}
               <div className="mb-5 rounded-xl border border-navy-700 bg-navy-900 p-4">
