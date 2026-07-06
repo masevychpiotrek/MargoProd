@@ -157,8 +157,30 @@ function IssueStationAndCheck({
   onMismatchConfirmedChange: (v: boolean) => void
   onCheck: () => void
 }) {
+  const step1Done = !!station
+  const step2Done = !!check && !isStale && check.ok && (!check.stationMismatch || mismatchConfirmed)
+  const steps = [
+    { label: 'Wybierz stację', done: step1Done },
+    { label: 'Sprawdź opis z AI', done: step2Done },
+    { label: 'Zapisz raport', done: false }
+  ]
+
   return (
     <div className="space-y-3 mt-3 pt-3 border-t border-navy-700">
+      <div className="flex flex-wrap items-center gap-1.5">
+        {steps.map((s, i) => (
+          <div key={s.label} className="flex items-center gap-1.5">
+            <div className={cn(
+              'w-5 h-5 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0',
+              s.done ? 'bg-green-500 text-white' : 'bg-navy-700 text-navy-400'
+            )}>
+              {s.done ? '✓' : i + 1}
+            </div>
+            <span className={cn('text-[11px]', s.done ? 'text-green-400' : 'text-navy-400')}>{s.label}</span>
+            {i < steps.length - 1 && <span className="text-navy-600">→</span>}
+          </div>
+        ))}
+      </div>
       <div>
         <label className="text-xs text-navy-400 mb-1.5 block">Stacja / obszar problemu *</label>
         <select value={station} onChange={e => onStationChange(e.target.value)} className="input text-sm">
