@@ -793,7 +793,14 @@ export default function OperatorReport() {
       if (!editingReportId) {
         const nextReported = [...reportedHours, selectedHour]
         const nextOpenHour = shiftHours.find(h => !nextReported.includes(h))
-        if (nextOpenHour !== undefined) setSelectedHour(nextOpenHour)
+        if (nextOpenHour !== undefined) {
+          setSelectedHour(nextOpenHour)
+        } else if (!testMode) {
+          // Ostatni zaplanowany blok zmiany zostal wlasnie wpisany - przejdz od razu
+          // do rozliczenia koncowego zamiast wymagac recznego wejscia w "Moja zmiana".
+          navigate('/operator/shift?openEndSummary=1')
+          return
+        }
       }
       loadReports(); loadOrders()
     } finally { setSaving(false) }

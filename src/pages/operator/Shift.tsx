@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
@@ -54,6 +54,7 @@ function isSelectableOperator(profile: Profile | null | undefined) {
 // Godziny poszczególnych zmian
 export default function OperatorShift() {
   const navigate = useNavigate()
+  const [searchParams, setSearchParams] = useSearchParams()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, reopenShift, isLoading } = useShiftStore()
   const [machines, setMachines]     = useState<Machine[]>([])
@@ -295,6 +296,16 @@ export default function OperatorShift() {
     setEarlyEndReason('')
     setShowEndWarning(true)
   }
+
+  // Operator wpisal ostatni zaplanowany blok godzinowy w Report.tsx - od razu
+  // pokaz okno rozliczenia koncowego, zamiast wymagac recznego wejscia i klikniecia
+  // "Zakoncz zmiane".
+  useEffect(() => {
+    if (searchParams.get('openEndSummary') !== '1') return
+    if (!activeShift || activeShift.ended_at) return
+    setSearchParams(prev => { const next = new URLSearchParams(prev); next.delete('openEndSummary'); return next }, { replace: true })
+    void handleEndRequest()
+  }, [activeShift?.id, searchParams])
 
   const handleEndConfirm = async () => {
     if (missingHours.length > 0) {
