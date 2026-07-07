@@ -2,12 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import { cn, efficiencyColor, formatLocalDateISO } from '@/lib/utils'
-import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
-import type { FailureReport, FailureSeverity, FailureStatus, HourlyReport, Machine, Profile, ShiftType, IssueStationAllocation } from '@/types/database'
-
-function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
-  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
-}
+import { reportStationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
+import type { FailureReport, FailureSeverity, FailureStatus, HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 const SEV_CFG: Record<FailureSeverity, { label: string; cls: string; dot: string; rank: number }> = {
   low: { label: 'Niska', cls: 'bg-green-500/15 text-green-400 border-green-500/30', dot: 'bg-green-400', rank: 1 },

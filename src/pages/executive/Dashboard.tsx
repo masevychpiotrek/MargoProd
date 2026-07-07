@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase, logAudit } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
+import { reportStationLabel, problemCategoryLabel } from '@/lib/issueReports'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
@@ -384,7 +385,17 @@ export default function ExecutiveDashboard() {
       map[key].good += report.good_count
       map[key].reject += report.reject_count
       map[key].target = TARGET_PER_SHIFT
-      const note = [report.downtime_reason, report.reject_reason, report.notes].filter(Boolean).join(' ')
+      const downtimeNote = report.downtime_reason
+        ? `${report.downtime_reason}${report.downtime_station || report.downtime_stations?.length
+            ? ` [${reportStationLabel(report.downtime_stations, report.downtime_station)} · ${problemCategoryLabel('downtime', report.downtime_category)}]`
+            : ''}`
+        : null
+      const rejectNote = report.reject_reason
+        ? `${report.reject_reason}${report.reject_station || report.reject_stations?.length
+            ? ` [${reportStationLabel(report.reject_stations, report.reject_station)} · ${problemCategoryLabel('reject', report.reject_category)}]`
+            : ''}`
+        : null
+      const note = [downtimeNote, rejectNote, report.notes].filter(Boolean).join(' ')
       if (note) map[key].notes.push(note)
     })
 

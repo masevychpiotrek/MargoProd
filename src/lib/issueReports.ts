@@ -60,6 +60,15 @@ export function stationsSummaryLabel(allocations: StationAllocation[] | null | u
   return allocations.map(a => `${stationLabel(a.station)} (${a.pct}%)`).join(' + ')
 }
 
+// Wyswietla pelny rozklad stacji (jesli zgloszenie ma wiele), z fallbackiem do
+// pojedynczej "stacji glownej" dla starszych wpisow sprzed wprowadzenia multi-stacji.
+export function reportStationLabel(
+  stations: StationAllocation[] | null | undefined,
+  single: string | null | undefined
+): string {
+  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
+}
+
 // ─── Kategorie problemu (klasyfikacja AI) ───────────────────────────────────
 
 export const DOWNTIME_PROBLEM_CATEGORIES: IssueOption[] = [

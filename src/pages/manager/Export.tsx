@@ -1,12 +1,8 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn, compareProductionHours, efficiencyColor, getProductionDate } from '@/lib/utils'
-import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
-import type { HourlyReport, Machine, IssueStationAllocation } from '@/types/database'
-
-function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
-  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
-}
+import { reportStationLabel, problemCategoryLabel, issueStatusLabel } from '@/lib/issueReports'
+import type { HourlyReport, Machine } from '@/types/database'
 
 // ─── Stałe brand ────────────────────────────────────────────────────────────
 const NAVY  = 'FF1A2744'

@@ -16,12 +16,8 @@ import {
   isShiftPastAutoClose,
   productionHourOrder
 } from '@/lib/utils'
-import { stationLabel, stationsSummaryLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
-import type { HourlyReport, Machine, Profile, Shift, ShiftType, IssueStationAllocation } from '@/types/database'
-
-function reportStationLabel(stations: IssueStationAllocation[] | null | undefined, single: string | null | undefined) {
-  return stations && stations.length ? stationsSummaryLabel(stations) : stationLabel(single)
-}
+import { reportStationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
+import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 

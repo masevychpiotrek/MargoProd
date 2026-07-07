@@ -268,7 +268,7 @@ function IssueStationAndCheck({
             {check.problemName && <div className="text-white"><span className="text-navy-400">Problem: </span>{check.problemName}</div>}
             {check.standardizedDescription && (
               <div className="rounded-lg bg-navy-900/60 border border-green-500/20 p-2.5">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-green-400 mb-1">Sugestia AI — opis</div>
+                <div className="text-[11px] font-bold uppercase tracking-wider text-green-400 mb-1">Ten opis zostanie zapisany (uporządkowany przez AI)</div>
                 <div className="text-white font-medium">„{check.standardizedDescription}”</div>
               </div>
             )}
@@ -688,6 +688,16 @@ export default function OperatorReport() {
     if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie moze malec')
     return errs
   }
+  // Operator wpisuje wlasnymi slowami, ale gdy AI potwierdzi opis (i tekst sie nie zmienil
+  // od tamtej pory), do bazy trafia ustandaryzowana wersja AI - zeby kierownik/zarzad/technik
+  // widzieli uporzadkowany opis zamiast surowego, czesto niechlujnego tekstu operatora.
+  const downtimeFinalText = (!downtimeCheckStale && downtimeCheck?.ok && downtimeCheck.standardizedDescription)
+    ? downtimeCheck.standardizedDescription
+    : downtimeReason
+  const rejectFinalText = (!rejectCheckStale && rejectCheck?.ok && rejectCheck.standardizedDescription)
+    ? rejectCheck.standardizedDescription
+    : rejectReason
+
   const handleSave = async () => {
     const errs = validate()
     if (errs.length) { setErrors(errs); reportValidationError(errs[0]); return }
@@ -724,8 +734,8 @@ export default function OperatorReport() {
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: null, counter_ready: null, counter_alarm: null,
         target: reportTarget,
-        downtime_reason: downtimeReason || (testMode && explanationTarget > 0 && incGood < explanationTarget ? 'Tryb testowy' : null),
-        reject_reason: rejectReason || null,
+        downtime_reason: downtimeFinalText || (testMode && explanationTarget > 0 && incGood < explanationTarget ? 'Tryb testowy' : null),
+        reject_reason: rejectFinalText || null,
         notes: notes || null,
         downtime_station: downtimeReason.trim() ? primaryStation(downtimeStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
         downtime_stations: downtimeReason.trim() && downtimeStations.length ? downtimeStations.map(s => ({ station: s.value, pct: s.pct })) : null,
@@ -766,8 +776,8 @@ export default function OperatorReport() {
           goodCount: incGood,
           rejectCount: incReject,
           target: reportTarget,
-          resultReason: downtimeReason || null,
-          rejectReason: rejectReason || null,
+          resultReason: downtimeFinalText || null,
+          rejectReason: rejectFinalText || null,
           notes: notes || null,
           downtimeStation: downtimeReason.trim() ? primaryStation(downtimeStations.map(s => ({ station: s.value, pct: s.pct }))) : null,
           downtimeCategory: downtimeReason.trim() ? (downtimeCheck?.category ?? null) : null,
