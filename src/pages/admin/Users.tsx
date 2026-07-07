@@ -27,6 +27,9 @@ export default function AdminUsers() {
   const [showAdd, setShowAdd] = useState(false)
   const [resetUser, setResetUser] = useState<UserRow | null>(null)
   const [rfidUser, setRfidUser] = useState<UserRow | null>(null)
+  const [editUser, setEditUser] = useState<UserRow | null>(null)
+  const [editForm, setEditForm] = useState({ full_name: '', phone: '', department: '' })
+  const [editError, setEditError] = useState('')
   const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
@@ -131,6 +134,40 @@ export default function AdminUsers() {
     await loadUsers()
     setSaving(false)
     setTimeout(() => setMsg(''), 4000)
+  }
+
+  const openEditUser = (user: UserRow) => {
+    setEditUser(user)
+    setEditForm({ full_name: user.full_name ?? '', phone: user.phone ?? '', department: user.department ?? '' })
+    setEditError('')
+  }
+
+  const handleSaveEditUser = async () => {
+    if (!editUser) return
+    const fullName = editForm.full_name.trim()
+    if (!fullName) {
+      setEditError('Wpisz imię i nazwisko.')
+      return
+    }
+    setSaving(true)
+    const payload = { full_name: fullName, phone: editForm.phone.trim() || null, department: editForm.department.trim() }
+    const { error } = await supabase.from('profiles').update(payload).eq('id', editUser.id)
+    setSaving(false)
+    if (error) {
+      setEditError(error.message || 'Nie udało się zapisać zmian.')
+      return
+    }
+    await logAudit(
+      'user_update',
+      'profiles',
+      editUser.id,
+      { full_name: editUser.full_name, phone: editUser.phone, department: editUser.department },
+      payload
+    )
+    setMsg(`Dane użytkownika ${fullName} zostały zaktualizowane.`)
+    setEditUser(null)
+    await loadUsers()
+    setTimeout(() => setMsg(''), 3000)
   }
 
   const handleDeleteUser = async (user: UserRow) => {
@@ -265,6 +302,10 @@ export default function AdminUsers() {
                   </td>
                   <td className="py-3 px-4">
                     <div className="flex items-center gap-2">
+                      <button onClick={() => openEditUser(u)}
+                        className="btn-secondary text-xs py-1.5 px-3">
+                        ✏️ Edytuj
+                      </button>
                       <button onClick={() => { setResetUser(u); setNewPassword('') }}
                         className="btn-secondary text-xs py-1.5 px-3">
                         🔑 Resetuj hasło
@@ -326,6 +367,49 @@ export default function AdminUsers() {
                 {saving ? 'Tworzenie...' : 'Utwórz konto'}
               </button>
               <button onClick={() => setShowAdd(false)} className="btn-secondary px-5 py-3">
+                Anuluj
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit user modal */}
+      {editUser && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.85)', backdropFilter: 'blur(8px)' }}>
+          <div className="bg-navy-800 border border-navy-600 rounded-2xl p-6 w-full max-w-md">
+            <h2 className="text-xl font-bold text-white mb-5">Edytuj pracownika</h2>
+            <div className="space-y-4">
+              <div>
+                <label className="label">Imię i nazwisko</label>
+                <input value={editForm.full_name} onChange={e => setEditForm(prev => ({ ...prev, full_name: e.target.value }))}
+                  placeholder="Imię i nazwisko..."
+                  className="input" />
+              </div>
+              <div>
+                <label className="label">Telefon</label>
+                <input value={editForm.phone} onChange={e => setEditForm(prev => ({ ...prev, phone: e.target.value }))}
+                  placeholder="np. 500 100 200"
+                  className="input" />
+              </div>
+              <div>
+                <label className="label">Dział</label>
+                <input value={editForm.department} onChange={e => setEditForm(prev => ({ ...prev, department: e.target.value }))}
+                  placeholder="np. Produkcja"
+                  className="input" />
+              </div>
+            </div>
+            {editError && (
+              <div className="mt-4 rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm font-semibold text-red-300">
+                {editError}
+              </div>
+            )}
+            <div className="flex gap-3 mt-6">
+              <button onClick={handleSaveEditUser} disabled={saving || !editForm.full_name.trim()}
+                className="btn-primary flex-1 py-3">
+                {saving ? 'Zapisywanie...' : 'Zapisz zmiany'}
+              </button>
+              <button onClick={() => setEditUser(null)} className="btn-secondary px-5 py-3">
                 Anuluj
               </button>
             </div>
