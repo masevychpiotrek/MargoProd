@@ -17,6 +17,7 @@ export type AuditAction =
   | 'shift_manager_correction' | 'manager_report_update' | 'manager_report_delete'
   | 'manager_order_update' | 'manager_order_report_update'
   | 'ai_issue_validation'
+  | 'production_job_start' | 'production_job_component_update'
 
 export interface IssueStationAllocation {
   station: string
@@ -583,4 +584,64 @@ export interface SaHandover {
   from_operator?: { id: string; full_name: string }
   to_operator?: { id: string; full_name: string } | null
   assortment?: SaAssortment | null
+}
+
+// ─────────────────────────────────────────────────────────────
+// ZLECENIE PRODUKCYJNE — identyfikowalność półfabrykatów (moduł operator IS PRO)
+// ─────────────────────────────────────────────────────────────
+
+export type ProductionJobStatus = 'active' | 'confirmed'
+export type ProductionJobComponentStatus = 'oczekuje' | 'aktywny'
+
+export interface ProductionJob {
+  id: string
+  order_number: string
+  series_number: string | null
+  assortment_name: string
+  assortment_length_cm: number
+  label_count: number
+  multiplier: number
+  calculated_qty: number
+  machine_id: string
+  shift_id: string | null
+  operator_id: string
+  shift_type: string | null
+  started_at: string
+  status: ProductionJobStatus
+  confirmed_at: string | null
+  confirmed_by: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  machine?: Machine
+  operator?: { id: string; full_name: string }
+}
+
+export interface ProductionJobComponent {
+  id: string
+  job_id: string
+  component_key: string
+  component_label: string
+  is_dren: boolean
+  batch_number: string | null
+  status: ProductionJobComponentStatus
+  entered_at: string | null
+  entered_by: string | null
+  sort_order: number
+  created_at: string
+  updated_at: string
+  // joined
+  entered_by_profile?: { id: string; full_name: string }
+}
+
+export interface ProductionJobComponentHistory {
+  id: string
+  component_id: string
+  job_id: string
+  previous_batch_number: string | null
+  new_batch_number: string
+  changed_by: string | null
+  changed_at: string
+  // joined
+  changed_by_profile?: { id: string; full_name: string }
 }

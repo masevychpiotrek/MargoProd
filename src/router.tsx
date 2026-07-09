@@ -13,9 +13,11 @@ const OperatorHistory    = lazy(() => import('@/pages/operator/History'))
 const OperatorFailure    = lazy(() => import('@/pages/operator/Failure'))
 const OperatorTasks      = lazy(() => import('@/pages/operator/Tasks'))
 const OperatorPassword   = lazy(() => import('@/pages/operator/Password'))
+const OperatorProductionOrders = lazy(() => import('@/pages/operator/ProductionOrders'))
 const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
+const ManagerProductionJobs = lazy(() => import('@/pages/manager/ProductionJobs'))
 const ViewerDemo         = lazy(() => import('@/pages/viewer/Demo'))
 const ExecutiveDashboard = lazy(() => import('@/pages/executive/Dashboard'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
@@ -191,7 +193,8 @@ const router = createBrowserRouter([
           { path: 'failure',  element: <Wrap><OperatorFailure /></Wrap> },
           { path: 'tasks',    element: <Wrap><OperatorTasks /></Wrap> },
           { path: 'password', element: <Wrap><OperatorPassword /></Wrap> },
-          { path: 'history',  element: <Wrap><OperatorHistory /></Wrap> }
+          { path: 'history',  element: <Wrap><OperatorHistory /></Wrap> },
+          { path: 'production-jobs', element: <Wrap><OperatorProductionOrders /></Wrap> }
         ]
       },
 
@@ -223,6 +226,10 @@ const router = createBrowserRouter([
       {
         path: 'manager/export',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerExport /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/production-jobs',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerProductionJobs /></Wrap></RequireAuth>
       },
       // ── SYRINGE OPERATOR MODULE ──
       {
