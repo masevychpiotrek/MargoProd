@@ -58,6 +58,7 @@ export default function OperatorProductionOrders() {
   const [loading, setLoading] = useState(true)
 
   // Start formularza
+  const [orderNumber, setOrderNumber] = useState('')
   const [selectedAssortment, setSelectedAssortment] = useState('')
   const [labelCount, setLabelCount] = useState('')
   const [startErrors, setStartErrors] = useState<string[]>([])
@@ -96,6 +97,7 @@ export default function OperatorProductionOrders() {
   const handleStart = async () => {
     const errs: string[] = []
     if (!activeShift || !activeMachine || !profile) { errs.push('Brak aktywnej zmiany.'); setStartErrors(errs); return }
+    if (!orderNumber.trim()) errs.push('Wpisz numer zlecenia (np. Z/01/07/26).')
     if (!assortment) errs.push('Wybierz asortyment.')
     const count = parseInt(labelCount)
     if (!labelCount || isNaN(count) || count <= 0) errs.push('Wpisz liczbę etykiet większą od zera.')
@@ -105,6 +107,7 @@ export default function OperatorProductionOrders() {
     setStartErrors([])
     const qty = calculateQty(count, assortment!.multiplier)
     const { data, error } = await supabase.from('production_jobs').insert({
+      order_number: orderNumber.trim(),
       assortment_name: assortment!.name,
       assortment_length_cm: assortment!.length_cm,
       label_count: count,
@@ -117,16 +120,20 @@ export default function OperatorProductionOrders() {
     }).select('id').single()
 
     if (error) {
-      setStartErrors([error.message.includes('idx_production_jobs_one_active_per_machine')
+      const message = error.message.includes('idx_production_jobs_one_active_per_machine')
         ? 'Na tym automacie jest już aktywne zlecenie. Odśwież stronę.'
-        : `Nie udało się rozpocząć zlecenia: ${error.message}`])
+        : error.message.includes('production_jobs_order_number_key')
+          ? 'Zlecenie o takim numerze już istnieje. Wpisz inny numer.'
+          : `Nie udało się rozpocząć zlecenia: ${error.message}`
+      setStartErrors([message])
       setStarting(false)
       return
     }
 
     await logAudit('production_job_start', 'production_jobs', data.id, undefined, {
-      assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
+      order_number: orderNumber.trim(), assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
     })
+    setOrderNumber('')
     setSelectedAssortment('')
     setLabelCount('')
     setStarting(false)
@@ -340,6 +347,16 @@ export default function OperatorProductionOrders() {
               {startErrors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
             </div>
           )}
+          <div>
+            <label className="label">Numer zlecenia</label>
+            <input
+              value={orderNumber}
+              onChange={e => setOrderNumber(e.target.value)}
+              placeholder="np. Z/01/07/26"
+              className="input mt-1 font-mono"
+            />
+            <div className="text-xs text-navy-500 mt-1">Format: Z/numer/miesiąc/rok</div>
+          </div>
           <div>
             <label className="label">Asortyment</label>
             <select value={selectedAssortment} onChange={e => setSelectedAssortment(e.target.value)} className="input mt-1">
