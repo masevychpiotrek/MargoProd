@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
+import ProductionJobNotifications from '@/features/notifications/ProductionJobNotifications'
 import RobotAssistant from '@/components/shared/RobotAssistant'
 import type { SaSession, Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
@@ -467,6 +468,7 @@ export default function AppLayout() {
             <Outlet />
           </div>
         </AlertProvider>
+        <ProductionJobNotifications />
       </main>
       <RobotAssistant />
 

@@ -8,7 +8,7 @@ export type DowntimeCategory =
   | 'mechanical_failure' | 'electrical_failure' | 'material_shortage'
   | 'quality_control' | 'changeover' | 'no_operator' | 'cleaning'
   | 'process_issue' | 'logistics_issue' | 'other'
-export type NotificationType = 'report_due' | 'alarm' | 'system' | 'info' | 'failure_report'
+export type NotificationType = 'report_due' | 'alarm' | 'system' | 'info' | 'failure_report' | 'production_job_update'
 export type AuditAction =
   | 'login' | 'logout' | 'report_create' | 'report_update' | 'report_delete'
   | 'user_create' | 'user_update' | 'user_delete' | 'password_change'
