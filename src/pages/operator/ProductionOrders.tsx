@@ -57,8 +57,12 @@ export default function OperatorProductionOrders() {
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(true)
 
-  // Start formularza
-  const [orderNumber, setOrderNumber] = useState('')
+  // Start formularza — numer zlecenia w formacie Z/NN/MM/RR, "Z/" jest stalym prefiksem,
+  // operator wpisuje tylko czesc zmienna (numer/miesiac/rok) - eliminuje literowki w prefiksie.
+  const [orderNumberPart, setOrderNumberPart] = useState('')
+  const [orderMonthPart, setOrderMonthPart] = useState('')
+  const [orderYearPart, setOrderYearPart] = useState('')
+  const orderNumber = `Z/${orderNumberPart}/${orderMonthPart}/${orderYearPart}`
   const [selectedAssortment, setSelectedAssortment] = useState('')
   const [labelCount, setLabelCount] = useState('')
   const [startErrors, setStartErrors] = useState<string[]>([])
@@ -97,7 +101,9 @@ export default function OperatorProductionOrders() {
   const handleStart = async () => {
     const errs: string[] = []
     if (!activeShift || !activeMachine || !profile) { errs.push('Brak aktywnej zmiany.'); setStartErrors(errs); return }
-    if (!orderNumber.trim()) errs.push('Wpisz numer zlecenia (np. Z/01/07/26).')
+    if (!orderNumberPart.trim() || !orderMonthPart.trim() || !orderYearPart.trim()) {
+      errs.push('Wpisz pełny numer zlecenia (numer / miesiąc / rok), np. Z/01/07/26.')
+    }
     if (!assortment) errs.push('Wybierz asortyment.')
     const count = parseInt(labelCount)
     if (!labelCount || isNaN(count) || count <= 0) errs.push('Wpisz liczbę etykiet większą od zera.')
@@ -133,7 +139,9 @@ export default function OperatorProductionOrders() {
     await logAudit('production_job_start', 'production_jobs', data.id, undefined, {
       order_number: orderNumber.trim(), assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
     })
-    setOrderNumber('')
+    setOrderNumberPart('')
+    setOrderMonthPart('')
+    setOrderYearPart('')
     setSelectedAssortment('')
     setLabelCount('')
     setStarting(false)
@@ -349,13 +357,32 @@ export default function OperatorProductionOrders() {
           )}
           <div>
             <label className="label">Numer zlecenia</label>
-            <input
-              value={orderNumber}
-              onChange={e => setOrderNumber(e.target.value)}
-              placeholder="np. Z/01/07/26"
-              className="input mt-1 font-mono"
-            />
-            <div className="text-xs text-navy-500 mt-1">Format: Z/numer/miesiąc/rok</div>
+            <div className="flex items-center gap-1.5 mt-1">
+              <span className="font-mono text-navy-400 text-sm">Z /</span>
+              <input
+                value={orderNumberPart}
+                onChange={e => setOrderNumberPart(e.target.value)}
+                placeholder="numer"
+                className="input font-mono w-16 text-center"
+              />
+              <span className="font-mono text-navy-400">/</span>
+              <input
+                value={orderMonthPart}
+                onChange={e => setOrderMonthPart(e.target.value)}
+                placeholder="MM"
+                className="input font-mono w-14 text-center"
+              />
+              <span className="font-mono text-navy-400">/</span>
+              <input
+                value={orderYearPart}
+                onChange={e => setOrderYearPart(e.target.value)}
+                placeholder="RR"
+                className="input font-mono w-14 text-center"
+              />
+            </div>
+            <div className="text-xs text-navy-500 mt-1">
+              Format: Z / numer / miesiąc / rok — „Z/" jest stałe, wpisz tylko numer, miesiąc i rok
+            </div>
           </div>
           <div>
             <label className="label">Asortyment</label>
