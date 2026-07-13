@@ -18,6 +18,93 @@ function historyOperatorName(row: HistoryRow) {
   return Array.isArray(p) ? (p[0]?.full_name ?? '—') : p.full_name
 }
 
+// Zdefiniowane poza komponentem nadrzednym (nie w renderze) - inaczej React tworzylby
+// nowy typ komponentu przy kazdym renderze rodzica i pole input traciloby fokus po
+// kazdym wpisanym znaku (trzeba by bylo klikac ponownie przed kazdym kolejnym znakiem).
+function ComponentRow({
+  component, isLocked, isEditing, value, saving,
+  onValueChange, onSaveEntry, onStartWymiana, onCancelWymiana, onConfirmWymiana
+}: {
+  component: ProductionJobComponent
+  isLocked: boolean
+  isEditing: boolean
+  value: string
+  saving: boolean
+  onValueChange: (v: string) => void
+  onSaveEntry: () => void
+  onStartWymiana: () => void
+  onCancelWymiana: () => void
+  onConfirmWymiana: () => void
+}) {
+  const hasValue = !!component.batch_number
+
+  return (
+    <div className="rounded-xl bg-navy-900 border border-navy-700 px-4 py-3">
+      <div className="flex items-center justify-between gap-3 flex-wrap">
+        <div className="min-w-0">
+          <div className="text-sm font-semibold text-white">{component.component_label}</div>
+          <div className="text-xs text-navy-500 mt-0.5">
+            {hasValue
+              ? <>Nr serii: <span className="font-mono text-navy-200">{component.batch_number}</span></>
+              : 'Brak wpisu'}
+            {component.entered_at && <span> · {new Date(component.entered_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}</span>}
+          </div>
+        </div>
+        <span className={cn(
+          'text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border',
+          component.status === 'aktywny' ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-navy-600 text-navy-400'
+        )}>
+          {component.status}
+        </span>
+      </div>
+
+      {!isLocked && !hasValue && (
+        <div className="flex gap-2 mt-3">
+          <input
+            value={value}
+            onChange={e => onValueChange(e.target.value)}
+            placeholder="Numer serii / partii..."
+            className="input text-sm flex-1"
+          />
+          <button
+            onClick={onSaveEntry}
+            disabled={saving}
+            className="btn-primary text-xs px-4 disabled:opacity-40"
+          >
+            Zapisz
+          </button>
+        </div>
+      )}
+
+      {!isLocked && hasValue && !isEditing && (
+        <button onClick={onStartWymiana} className="btn-secondary text-xs px-3 py-1.5 mt-3">
+          Wymiana
+        </button>
+      )}
+
+      {!isLocked && hasValue && isEditing && (
+        <div className="flex gap-2 mt-3">
+          <input
+            value={value}
+            onChange={e => onValueChange(e.target.value)}
+            placeholder="Nowy numer serii / partii..."
+            className="input text-sm flex-1"
+            autoFocus
+          />
+          <button
+            onClick={onConfirmWymiana}
+            disabled={saving}
+            className="btn-primary text-xs px-4 disabled:opacity-40"
+          >
+            Zatwierdź wymianę
+          </button>
+          <button onClick={onCancelWymiana} className="btn-secondary text-xs px-3">Anuluj</button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 async function fetchCurrentJob(machineId: string) {
   const { data } = await supabase
     .from('production_jobs')
@@ -72,6 +159,12 @@ export default function OperatorProductionOrders() {
   const [entryValues, setEntryValues] = useState<Record<string, string>>({})
   const [editingKey, setEditingKey] = useState<string | null>(null)
   const [savingKey, setSavingKey] = useState<string | null>(null)
+
+  // Korekta numeru zlecenia (dopoki zlecenie nie zostalo zatwierdzone)
+  const [editingOrderNumber, setEditingOrderNumber] = useState(false)
+  const [orderNumberEdit, setOrderNumberEdit] = useState('')
+  const [orderNumberEditError, setOrderNumberEditError] = useState('')
+  const [savingOrderNumber, setSavingOrderNumber] = useState(false)
 
   const [confirmErrors, setConfirmErrors] = useState<string[]>([])
   const [confirming, setConfirming] = useState(false)
@@ -198,6 +291,34 @@ export default function OperatorProductionOrders() {
     setSavingKey(null)
   }
 
+  const startEditOrderNumber = () => {
+    if (!job) return
+    setOrderNumberEdit(job.order_number)
+    setOrderNumberEditError('')
+    setEditingOrderNumber(true)
+  }
+
+  const handleSaveOrderNumber = async () => {
+    if (!job) return
+    const value = orderNumberEdit.trim()
+    if (!value) {
+      setOrderNumberEditError('Numer zlecenia nie może być pusty.')
+      return
+    }
+    setSavingOrderNumber(true)
+    const { error } = await supabase.from('production_jobs').update({ order_number: value }).eq('id', job.id)
+    setSavingOrderNumber(false)
+    if (error) {
+      setOrderNumberEditError(error.message.includes('production_jobs_order_number_key')
+        ? 'Zlecenie o takim numerze już istnieje.'
+        : `Nie udało się zapisać: ${error.message}`)
+      return
+    }
+    await logAudit('production_job_start', 'production_jobs', job.id, { order_number: job.order_number }, { order_number: value })
+    setEditingOrderNumber(false)
+    await load()
+  }
+
   const handleConfirmJob = async () => {
     const errs: string[] = []
     if (!job) return
@@ -269,77 +390,21 @@ export default function OperatorProductionOrders() {
   const standardComponents = components.filter(c => !c.is_dren)
   const drenComponents = components.filter(c => c.is_dren)
 
-  function ComponentRow({ component }: { component: ProductionJobComponent }) {
-    const isEditing = editingKey === component.id
-    const hasValue = !!component.batch_number
-
-    return (
-      <div className="rounded-xl bg-navy-900 border border-navy-700 px-4 py-3">
-        <div className="flex items-center justify-between gap-3 flex-wrap">
-          <div className="min-w-0">
-            <div className="text-sm font-semibold text-white">{component.component_label}</div>
-            <div className="text-xs text-navy-500 mt-0.5">
-              {hasValue
-                ? <>Nr serii: <span className="font-mono text-navy-200">{component.batch_number}</span></>
-                : 'Brak wpisu'}
-              {component.entered_at && <span> · {new Date(component.entered_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}</span>}
-            </div>
-          </div>
-          <span className={cn(
-            'text-[10px] font-bold uppercase tracking-wider px-2 py-1 rounded-lg border',
-            component.status === 'aktywny' ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-navy-600 text-navy-400'
-          )}>
-            {component.status}
-          </span>
-        </div>
-
-        {!isLocked && !hasValue && (
-          <div className="flex gap-2 mt-3">
-            <input
-              value={entryValues[component.id] ?? ''}
-              onChange={e => setEntryValues(prev => ({ ...prev, [component.id]: e.target.value }))}
-              placeholder="Numer serii / partii..."
-              className="input text-sm flex-1"
-            />
-            <button
-              onClick={() => handleSaveEntry(component)}
-              disabled={savingKey === component.id}
-              className="btn-primary text-xs px-4 disabled:opacity-40"
-            >
-              Zapisz
-            </button>
-          </div>
-        )}
-
-        {!isLocked && hasValue && !isEditing && (
-          <button onClick={() => { setEditingKey(component.id); setEntryValues(prev => ({ ...prev, [component.id]: '' })) }}
-            className="btn-secondary text-xs px-3 py-1.5 mt-3">
-            Wymiana
-          </button>
-        )}
-
-        {!isLocked && hasValue && isEditing && (
-          <div className="flex gap-2 mt-3">
-            <input
-              value={entryValues[component.id] ?? ''}
-              onChange={e => setEntryValues(prev => ({ ...prev, [component.id]: e.target.value }))}
-              placeholder="Nowy numer serii / partii..."
-              className="input text-sm flex-1"
-              autoFocus
-            />
-            <button
-              onClick={() => handleConfirmWymiana(component)}
-              disabled={savingKey === component.id}
-              className="btn-primary text-xs px-4 disabled:opacity-40"
-            >
-              Zatwierdź wymianę
-            </button>
-            <button onClick={() => setEditingKey(null)} className="btn-secondary text-xs px-3">Anuluj</button>
-          </div>
-        )}
-      </div>
-    )
-  }
+  const renderComponentRow = (component: ProductionJobComponent) => (
+    <ComponentRow
+      key={component.id}
+      component={component}
+      isLocked={isLocked}
+      isEditing={editingKey === component.id}
+      value={entryValues[component.id] ?? ''}
+      saving={savingKey === component.id}
+      onValueChange={v => setEntryValues(prev => ({ ...prev, [component.id]: v }))}
+      onSaveEntry={() => handleSaveEntry(component)}
+      onStartWymiana={() => { setEditingKey(component.id); setEntryValues(prev => ({ ...prev, [component.id]: '' })) }}
+      onCancelWymiana={() => setEditingKey(null)}
+      onConfirmWymiana={() => handleConfirmWymiana(component)}
+    />
+  )
 
   return (
     <div className="max-w-3xl mx-auto space-y-5 py-2">
@@ -423,7 +488,32 @@ export default function OperatorProductionOrders() {
               </span>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
-              <div><div className="text-navy-500 text-xs">Numer zlecenia</div><div className="font-mono text-white">{job.order_number}</div></div>
+              <div className="col-span-2 sm:col-span-1">
+                <div className="text-navy-500 text-xs">Numer zlecenia</div>
+                {editingOrderNumber ? (
+                  <div className="mt-1 space-y-1.5">
+                    <div className="flex gap-1.5">
+                      <input
+                        value={orderNumberEdit}
+                        onChange={e => { setOrderNumberEdit(e.target.value); setOrderNumberEditError('') }}
+                        className="input font-mono text-sm py-1.5 flex-1"
+                        autoFocus
+                      />
+                      <button onClick={handleSaveOrderNumber} disabled={savingOrderNumber}
+                        className="btn-primary text-xs px-3 disabled:opacity-40">Zapisz</button>
+                      <button onClick={() => setEditingOrderNumber(false)} className="btn-secondary text-xs px-3">Anuluj</button>
+                    </div>
+                    {orderNumberEditError && <div className="text-xs text-red-300">{orderNumberEditError}</div>}
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <div className="font-mono text-white">{job.order_number}</div>
+                    {!isLocked && (
+                      <button onClick={startEditOrderNumber} className="text-xs text-brand hover:text-brand-light underline">Edytuj</button>
+                    )}
+                  </div>
+                )}
+              </div>
               <div><div className="text-navy-500 text-xs">Numer serii</div><div className="font-mono text-white">{job.series_number ?? '—'}</div></div>
               <div><div className="text-navy-500 text-xs">Start</div><div className="text-white">{new Date(job.started_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
               <div><div className="text-navy-500 text-xs">Automat</div><div className="text-white">{activeMachine.name}</div></div>
@@ -439,14 +529,14 @@ export default function OperatorProductionOrders() {
           <div className="card space-y-3">
             <div className="card-title">Półfabrykaty</div>
             <div className="space-y-2">
-              {standardComponents.map(c => <ComponentRow key={c.id} component={c} />)}
+              {standardComponents.map(renderComponentRow)}
             </div>
           </div>
 
           <div className="card space-y-3">
             <div className="card-title">Dren</div>
             <div className="space-y-2">
-              {drenComponents.map(c => <ComponentRow key={c.id} component={c} />)}
+              {drenComponents.map(renderComponentRow)}
             </div>
           </div>
 
