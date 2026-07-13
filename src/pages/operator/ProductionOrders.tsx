@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, logAudit } from '@/lib/supabase'
@@ -22,7 +22,7 @@ function historyOperatorName(row: HistoryRow) {
 // nowy typ komponentu przy kazdym renderze rodzica i pole input traciloby fokus po
 // kazdym wpisanym znaku (trzeba by bylo klikac ponownie przed kazdym kolejnym znakiem).
 function ComponentRow({
-  component, isLocked, isEditing, value, saving,
+  component, isLocked, isEditing, value, saving, inputRef,
   onValueChange, onSaveEntry, onStartWymiana, onCancelWymiana, onConfirmWymiana
 }: {
   component: ProductionJobComponent
@@ -30,6 +30,7 @@ function ComponentRow({
   isEditing: boolean
   value: string
   saving: boolean
+  inputRef?: (el: HTMLInputElement | null) => void
   onValueChange: (v: string) => void
   onSaveEntry: () => void
   onStartWymiana: () => void
@@ -61,9 +62,13 @@ function ComponentRow({
       {!isLocked && !hasValue && (
         <div className="flex gap-2 mt-3">
           <input
+            ref={inputRef}
             value={value}
             onChange={e => onValueChange(e.target.value)}
-            placeholder="Numer serii / partii..."
+            onKeyDown={e => { if (e.key === 'Enter') onSaveEntry() }}
+            placeholder="Numer serii / partii... (Enter = zapisz)"
+            autoComplete="off"
+            enterKeyHint="done"
             className="input text-sm flex-1"
           />
           <button
@@ -87,7 +92,13 @@ function ComponentRow({
           <input
             value={value}
             onChange={e => onValueChange(e.target.value)}
-            placeholder="Nowy numer serii / partii..."
+            onKeyDown={e => {
+              if (e.key === 'Enter') onConfirmWymiana()
+              if (e.key === 'Escape') onCancelWymiana()
+            }}
+            placeholder="Nowy numer serii / partii... (Enter = zapisz, Esc = anuluj)"
+            autoComplete="off"
+            enterKeyHint="done"
             className="input text-sm flex-1"
             autoFocus
           />
@@ -150,6 +161,10 @@ export default function OperatorProductionOrders() {
   const [orderMonthPart, setOrderMonthPart] = useState('')
   const [orderYearPart, setOrderYearPart] = useState('')
   const orderNumber = `Z/${orderNumberPart}/${orderMonthPart}/${orderYearPart}`
+  const orderNumberPartRef = useRef<HTMLInputElement>(null)
+  const orderMonthPartRef = useRef<HTMLInputElement>(null)
+  const orderYearPartRef = useRef<HTMLInputElement>(null)
+  const labelCountRef = useRef<HTMLInputElement>(null)
   const [selectedAssortment, setSelectedAssortment] = useState('')
   const [labelCount, setLabelCount] = useState('')
   const [startErrors, setStartErrors] = useState<string[]>([])
@@ -170,9 +185,17 @@ export default function OperatorProductionOrders() {
   const [confirming, setConfirming] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
 
-  const load = async () => {
+  // Rejestr pol wpisu (tylko pierwszy wpis, nie wymiana) do automatycznego
+  // przenoszenia fokusu na kolejna pusta pozycje po zapisie - operator wpisuje
+  // 20 numerow serii pod rzad, wiec nie powinien musiec klikac w kazde pole recznie.
+  const inputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+
+  // load(silent) nie pokazuje pelnoekranowego "Ladowanie..." przy odswiezaniu po
+  // zapisie pojedynczego pola - tylko przy pierwszym wejsciu na strone. Bez tego
+  // cala lista znikala i wracala po kazdym wpisanym numerze serii.
+  const load = async (silent = false) => {
     if (!activeMachine) { setLoading(false); return }
-    setLoading(true)
+    if (!silent) setLoading(true)
     const current = await fetchCurrentJob(activeMachine.id)
     setJob(current)
     if (current) {
@@ -187,6 +210,15 @@ export default function OperatorProductionOrders() {
   }
 
   useEffect(() => { load() }, [activeMachine?.id])
+
+  // Po wejsciu na strone z juz rozpoczetym zleceniem, ustaw fokus od razu na
+  // pierwsza pusta pozycje - operator moze zaczac wpisywac bez klikania.
+  useEffect(() => {
+    if (loading || !job) return
+    const firstEmpty = [...components].sort((a, b) => a.sort_order - b.sort_order).find(c => !c.batch_number)
+    if (firstEmpty) requestAnimationFrame(() => inputRefs.current[firstEmpty.id]?.focus())
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loading, job?.id])
 
   const assortment: AssortmentOption | undefined = ASSORTMENTS.find(a => a.name === selectedAssortment)
   const previewQty = assortment && labelCount ? calculateQty(parseInt(labelCount) || 0, assortment.multiplier) : 0
@@ -248,16 +280,26 @@ export default function OperatorProductionOrders() {
       return
     }
     setSavingKey(component.id)
+    const now = new Date().toISOString()
     const { error } = await supabase.from('production_job_components').update({
       batch_number: value,
       status: 'aktywny',
-      entered_at: new Date().toISOString(),
+      entered_at: now,
       entered_by: profile!.id
     }).eq('id', component.id)
     if (!error) {
       await logAudit('production_job_component_update', 'production_job_components', component.id, undefined, { batch_number: value })
+      const updated = components.map(c => c.id === component.id
+        ? { ...c, batch_number: value, status: 'aktywny' as const, entered_at: now, entered_by: profile!.id }
+        : c)
+      setComponents(updated)
       setEntryValues(prev => { const next = { ...prev }; delete next[component.id]; return next })
-      await load()
+      setConfirmErrors([])
+      // przenies fokus na kolejna pusta pozycje - operator wpisuje wiele numerow pod rzad
+      const next = updated
+        .filter(c => c.sort_order > component.sort_order && !c.batch_number)
+        .sort((a, b) => a.sort_order - b.sort_order)[0]
+      if (next) requestAnimationFrame(() => inputRefs.current[next.id]?.focus())
     }
     setSavingKey(null)
   }
@@ -269,24 +311,31 @@ export default function OperatorProductionOrders() {
       return
     }
     setSavingKey(component.id)
-    const { error: histError } = await supabase.from('production_job_component_history').insert({
+    const now = new Date().toISOString()
+    const { error: histError, data: histRow } = await supabase.from('production_job_component_history').insert({
       component_id: component.id,
       job_id: component.job_id,
       previous_batch_number: component.batch_number,
       new_batch_number: value,
       changed_by: profile!.id
-    })
+    }).select('*').single()
     if (!histError) {
       await supabase.from('production_job_components').update({
         batch_number: value,
-        entered_at: new Date().toISOString(),
+        entered_at: now,
         entered_by: profile!.id
       }).eq('id', component.id)
       await logAudit('production_job_component_update', 'production_job_components', component.id,
         { batch_number: component.batch_number }, { batch_number: value })
+      setComponents(prev => prev.map(c => c.id === component.id
+        ? { ...c, batch_number: value, entered_at: now, entered_by: profile!.id }
+        : c))
+      if (histRow) {
+        setHistory(prev => [{ ...(histRow as HistoryRow), changed_by_profile: { id: profile!.id, full_name: profile?.full_name ?? '—' } }, ...prev])
+      }
       setEntryValues(prev => { const next = { ...prev }; delete next[component.id]; return next })
       setEditingKey(null)
-      await load()
+      setConfirmErrors([])
     }
     setSavingKey(null)
   }
@@ -315,8 +364,8 @@ export default function OperatorProductionOrders() {
       return
     }
     await logAudit('production_job_start', 'production_jobs', job.id, { order_number: job.order_number }, { order_number: value })
+    setJob(prev => prev ? { ...prev, order_number: value } : prev)
     setEditingOrderNumber(false)
-    await load()
   }
 
   const handleConfirmJob = async () => {
@@ -341,9 +390,10 @@ export default function OperatorProductionOrders() {
 
     setConfirming(true)
     setConfirmErrors([])
+    const confirmedAt = new Date().toISOString()
     const { error } = await supabase.from('production_jobs').update({
       status: 'confirmed',
-      confirmed_at: new Date().toISOString(),
+      confirmed_at: confirmedAt,
       confirmed_by: profile!.id
     }).eq('id', job.id)
     setConfirming(false)
@@ -351,7 +401,7 @@ export default function OperatorProductionOrders() {
       setConfirmErrors([`Nie udało się zatwierdzić zlecenia: ${error.message}`])
       return
     }
-    await load()
+    setJob(prev => prev ? { ...prev, status: 'confirmed', confirmed_at: confirmedAt, confirmed_by: profile!.id } : prev)
   }
 
   const handleCopyPreview = async () => {
@@ -389,6 +439,8 @@ export default function OperatorProductionOrders() {
   const isLocked = job?.status === 'confirmed'
   const standardComponents = components.filter(c => !c.is_dren)
   const drenComponents = components.filter(c => c.is_dren)
+  const standardFilled = standardComponents.filter(c => isPlausibleBatchNumber(c.batch_number)).length
+  const drenFilled = drenComponents.filter(c => isPlausibleBatchNumber(c.batch_number)).length
 
   const renderComponentRow = (component: ProductionJobComponent) => (
     <ComponentRow
@@ -398,6 +450,7 @@ export default function OperatorProductionOrders() {
       isEditing={editingKey === component.id}
       value={entryValues[component.id] ?? ''}
       saving={savingKey === component.id}
+      inputRef={el => { inputRefs.current[component.id] = el }}
       onValueChange={v => setEntryValues(prev => ({ ...prev, [component.id]: v }))}
       onSaveEntry={() => handleSaveEntry(component)}
       onStartWymiana={() => { setEditingKey(component.id); setEntryValues(prev => ({ ...prev, [component.id]: '' })) }}
@@ -425,23 +478,33 @@ export default function OperatorProductionOrders() {
             <div className="flex items-center gap-1.5 mt-1">
               <span className="font-mono text-navy-400 text-sm">Z /</span>
               <input
+                ref={orderNumberPartRef}
                 value={orderNumberPart}
                 onChange={e => setOrderNumberPart(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') orderMonthPartRef.current?.focus() }}
                 placeholder="numer"
+                inputMode="numeric"
+                autoFocus
                 className="input font-mono w-16 text-center"
               />
               <span className="font-mono text-navy-400">/</span>
               <input
+                ref={orderMonthPartRef}
                 value={orderMonthPart}
                 onChange={e => setOrderMonthPart(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') orderYearPartRef.current?.focus() }}
                 placeholder="MM"
+                inputMode="numeric"
                 className="input font-mono w-14 text-center"
               />
               <span className="font-mono text-navy-400">/</span>
               <input
+                ref={orderYearPartRef}
                 value={orderYearPart}
                 onChange={e => setOrderYearPart(e.target.value)}
+                onKeyDown={e => { if (e.key === 'Enter') labelCountRef.current?.focus() }}
                 placeholder="RR"
+                inputMode="numeric"
                 className="input font-mono w-14 text-center"
               />
             </div>
@@ -458,8 +521,13 @@ export default function OperatorProductionOrders() {
           </div>
           <div>
             <label className="label">Liczba etykiet</label>
-            <input type="number" min={1} value={labelCount} onChange={e => setLabelCount(e.target.value)}
-              placeholder="np. 200" className="input mt-1 font-mono" />
+            <input
+              ref={labelCountRef}
+              type="number" min={1} value={labelCount}
+              onChange={e => setLabelCount(e.target.value)}
+              onKeyDown={e => { if (e.key === 'Enter') handleStart() }}
+              placeholder="np. 200" className="input mt-1 font-mono"
+            />
           </div>
           {assortment && labelCount && (
             <div className="rounded-xl bg-navy-900 border border-navy-700 p-3 text-sm">
@@ -527,14 +595,30 @@ export default function OperatorProductionOrders() {
           </div>
 
           <div className="card space-y-3">
-            <div className="card-title">Półfabrykaty</div>
+            <div className="flex items-center justify-between">
+              <div className="card-title">Półfabrykaty</div>
+              <span className={cn(
+                'text-xs font-bold font-mono px-2 py-1 rounded-lg border',
+                standardFilled === standardComponents.length ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-navy-600 text-navy-400'
+              )}>
+                {standardFilled}/{standardComponents.length}
+              </span>
+            </div>
             <div className="space-y-2">
               {standardComponents.map(renderComponentRow)}
             </div>
           </div>
 
           <div className="card space-y-3">
-            <div className="card-title">Dren</div>
+            <div className="flex items-center justify-between">
+              <div className="card-title">Dren</div>
+              <span className={cn(
+                'text-xs font-bold font-mono px-2 py-1 rounded-lg border',
+                drenFilled === drenComponents.length ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-navy-600 text-navy-400'
+              )}>
+                {drenFilled}/{drenComponents.length}
+              </span>
+            </div>
             <div className="space-y-2">
               {drenComponents.map(renderComponentRow)}
             </div>
