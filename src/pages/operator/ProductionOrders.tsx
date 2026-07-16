@@ -117,11 +117,14 @@ function ComponentRow({
 }
 
 async function fetchCurrentJob(machineId: string) {
+  // Pokazuje najnowsze zlecenie automatu NIEZALEZNIE od statusu (nie tylko 'active') -
+  // inaczej zatwierdzone zlecenie znikaloby calkowicie z widoku po odswiezeniu strony
+  // i nie dalo by sie go juz nigdy przywrocic do edycji (przycisk "Przywroc do edycji"
+  // bylby nieosiagalny).
   const { data } = await supabase
     .from('production_jobs')
     .select('*')
     .eq('machine_id', machineId)
-    .eq('status', 'active')
     .order('started_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -154,6 +157,9 @@ export default function OperatorProductionOrders() {
   const [components, setComponents] = useState<ProductionJobComponent[]>([])
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [loading, setLoading] = useState(true)
+  // Pozwala rozpoczac zupelnie nowe zlecenie mimo ze ostatnie (zatwierdzone) wciaz
+  // jest widoczne - operator wybiera: przywrocic stare do edycji albo zaczac nowe.
+  const [showStartForm, setShowStartForm] = useState(false)
 
   // Start formularza — numer zlecenia w formacie Z/NN/MM/RR, "Z/" jest stalym prefiksem,
   // operator wpisuje tylko czesc zmienna (numer/miesiac/rok) - eliminuje literowki w prefiksie.
@@ -270,6 +276,7 @@ export default function OperatorProductionOrders() {
     setSelectedAssortment('')
     setLabelCount('')
     setStarting(false)
+    setShowStartForm(false)
     await load()
   }
 
@@ -488,8 +495,14 @@ export default function OperatorProductionOrders() {
         <p className="text-navy-400 text-sm">{activeMachine.name} · Zmiana {activeShift.shift_type}</p>
       </div>
 
-      {!job && (
+      {(!job || showStartForm) && (
         <div className="card space-y-4">
+          {job && (
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3 text-sm text-navy-300 flex items-center justify-between gap-3">
+              <span>Ostatnie zlecenie na tym automacie ({job.order_number}) wciąż istnieje i można je przywrócić.</span>
+              <button onClick={() => setShowStartForm(false)} className="btn-secondary text-xs px-3 py-1.5 shrink-0">Anuluj</button>
+            </div>
+          )}
           {startErrors.length > 0 && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
               {startErrors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
@@ -565,12 +578,17 @@ export default function OperatorProductionOrders() {
         </div>
       )}
 
-      {job && (
+      {job && !showStartForm && (
         <>
           <div className="card space-y-3">
             <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="card-title">Dane zlecenia</div>
               <div className="flex items-center gap-2">
+                {isLocked && (
+                  <button onClick={() => setShowStartForm(true)} className="text-xs text-navy-400 hover:text-white underline">
+                    Rozpocznij nowe zlecenie
+                  </button>
+                )}
                 <span className={cn(
                   'text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
                   isLocked ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
