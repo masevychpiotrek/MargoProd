@@ -404,6 +404,28 @@ export default function OperatorProductionOrders() {
     setJob(prev => prev ? { ...prev, status: 'confirmed', confirmed_at: confirmedAt, confirmed_by: profile!.id } : prev)
   }
 
+  const handleReopenJob = async () => {
+    if (!job) return
+    if (!confirm('Przywrócić to zlecenie do edycji? Będzie znów można wpisywać i wymieniać numery serii.')) return
+    setConfirming(true)
+    setConfirmErrors([])
+    const { error } = await supabase.from('production_jobs').update({
+      status: 'active',
+      confirmed_at: null,
+      confirmed_by: null
+    }).eq('id', job.id)
+    setConfirming(false)
+    if (error) {
+      setConfirmErrors([error.message.includes('idx_production_jobs_one_active_per_machine')
+        ? 'Nie można przywrócić - na tym automacie jest już inne aktywne zlecenie. Najpierw je zatwierdź.'
+        : `Nie udało się przywrócić zlecenia: ${error.message}`])
+      return
+    }
+    await logAudit('production_job_start', 'production_jobs', job.id,
+      { status: 'confirmed' }, { status: 'active', reopened_by: profile!.id })
+    setJob(prev => prev ? { ...prev, status: 'active', confirmed_at: null, confirmed_by: null } : prev)
+  }
+
   const handleCopyPreview = async () => {
     if (!job) return
     const text = formatJobCopyText({
@@ -546,14 +568,22 @@ export default function OperatorProductionOrders() {
       {job && (
         <>
           <div className="card space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <div className="card-title">Dane zlecenia</div>
-              <span className={cn(
-                'text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
-                isLocked ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-              )}>
-                {isLocked ? 'Zatwierdzone' : 'W trakcie'}
-              </span>
+              <div className="flex items-center gap-2">
+                <span className={cn(
+                  'text-xs font-bold uppercase tracking-wider px-2.5 py-1 rounded-lg border',
+                  isLocked ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                )}>
+                  {isLocked ? 'Zatwierdzone' : 'W trakcie'}
+                </span>
+                {isLocked && (
+                  <button onClick={handleReopenJob} disabled={confirming}
+                    className="text-xs text-brand hover:text-brand-light underline disabled:opacity-40">
+                    {confirming ? 'Przywracanie...' : 'Przywróć do edycji'}
+                  </button>
+                )}
+              </div>
             </div>
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
               <div className="col-span-2 sm:col-span-1">
