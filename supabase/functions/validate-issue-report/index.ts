@@ -54,7 +54,10 @@ Deno.serve(async (req) => {
   try {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY')
-    const anthropicKey = Deno.env.get('ANTHROPIC_API_KEY')
+    // .trim() jest krytyczny: sekret zapisany z koncowym znakiem nowej linii
+    // (np. przy wklejaniu do CLI) przechodzi walidacje "czy istnieje", ale
+    // fetch w Deno odrzuca taki naglowek bledem "failed to parse header value".
+    const anthropicKey = (Deno.env.get('ANTHROPIC_API_KEY') ?? '').trim()
     const authHeader = req.headers.get('Authorization') ?? ''
     const token = authHeader.replace('Bearer ', '').trim()
 
