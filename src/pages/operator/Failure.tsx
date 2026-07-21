@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { cn } from '@/lib/utils'
+import { compressImage } from '@/lib/imageCompression'
 import type { Machine, DowntimeCategory } from '@/types/database'
 
 // ─── Stałe ───────────────────────────────────────────────────────────────────
@@ -222,27 +223,6 @@ function getErrorMessage(error: unknown) {
   }
   if (typeof error === 'string' && error.trim()) return error
   return 'Blad zglaszania awarii'
-}
-
-async function compressImage(file: File) {
-  if (!file.type.startsWith('image/') || file.size < 700_000) return file
-
-  const bitmap = await createImageBitmap(file)
-  const scale = Math.min(1, 1600 / Math.max(bitmap.width, bitmap.height))
-  const width = Math.max(1, Math.round(bitmap.width * scale))
-  const height = Math.max(1, Math.round(bitmap.height * scale))
-  const canvas = document.createElement('canvas')
-  canvas.width = width
-  canvas.height = height
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return file
-  ctx.drawImage(bitmap, 0, 0, width, height)
-
-  const blob = await new Promise<Blob | null>(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.78))
-  bitmap.close()
-  if (!blob) return file
-
-  return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })
 }
 
 export default function OperatorFailure() {

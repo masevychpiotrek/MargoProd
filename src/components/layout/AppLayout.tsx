@@ -31,6 +31,7 @@ const Icons = {
   schedule:   (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="3" y="4" width="16" height="16" rx="2" stroke="currentColor" strokeWidth="1.5"/><path d="M16 2v4M8 2v4M3 10h16" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   audit:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M11 20l-7-4V6l7-4 7 4v10l-7 4z" stroke="currentColor" strokeWidth="1.5"/><path d="M11 12a2 2 0 100-4 2 2 0 000 4zM11 12v4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
   reset:      (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><polyline points="1 4 1 10 7 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/><path d="M3.51 15a9 9 0 102.13-9.36L1 10" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/></svg>),
+  camera:     (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><path d="M3 8a2 2 0 012-2h1.5l1-1.8A1 1 0 018.4 3.6h5.2a1 1 0 01.9.6L15.5 6H17a2 2 0 012 2v9a2 2 0 01-2 2H5a2 2 0 01-2-2V8z" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round"/><circle cx="11" cy="12.5" r="3.5" stroke="currentColor" strokeWidth="1.5"/></svg>),
   logo:       (<svg width="22" height="22" viewBox="0 0 22 22" fill="none"><path d="M11 2 L19.5 7 L19.5 15 L11 20 L2.5 15 L2.5 7 Z" stroke="#c9a84c" strokeWidth="1.5" fill="none"/><path d="M11 2 L11 20 M2.5 7 L19.5 15 M19.5 7 L2.5 15" stroke="#c9a84c" strokeWidth="0.75" opacity="0.25"/><circle cx="11" cy="11" r="2.5" fill="#c9a84c"/></svg>),
 }
 
@@ -58,6 +59,7 @@ const NAV_MANAGER = [
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
   { to: '/manager/production-jobs', label: 'Zlecenia produkcyjne', icon: Icons.orders },
+  { to: '/manager/shift-stat-photos', label: 'Statystyki zmianowe', icon: Icons.camera },
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
   { to: '/syringe/reports',      label: '── Raporty SA',     icon: Icons.export },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },

@@ -18,6 +18,7 @@ const ManagerDashboard   = lazy(() => import('@/pages/manager/Dashboard'))
 const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ManagerProductionJobs = lazy(() => import('@/pages/manager/ProductionJobs'))
+const ManagerShiftStatPhotos = lazy(() => import('@/pages/manager/ShiftStatPhotos'))
 const ViewerDemo         = lazy(() => import('@/pages/viewer/Demo'))
 const ExecutiveDashboard = lazy(() => import('@/pages/executive/Dashboard'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
@@ -230,6 +231,10 @@ const router = createBrowserRouter([
       {
         path: 'manager/production-jobs',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerProductionJobs /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/shift-stat-photos',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerShiftStatPhotos /></Wrap></RequireAuth>
       },
       // ── SYRINGE OPERATOR MODULE ──
       {

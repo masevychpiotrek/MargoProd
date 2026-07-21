@@ -5,6 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
+import ShiftStatPhotosCard from '@/components/operator/ShiftStatPhotosCard'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -724,6 +725,9 @@ export default function OperatorShift() {
                 Wszystkie bloki zmiany sa uzupelnione.
               </div>
             )}
+          </div>
+          <div className="mb-6">
+            <ShiftStatPhotosCard />
           </div>
           <div className="flex flex-col gap-3 sm:flex-row">
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">

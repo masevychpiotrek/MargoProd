@@ -645,3 +645,41 @@ export interface ProductionJobComponentHistory {
   // joined
   changed_by_profile?: { id: string; full_name: string }
 }
+
+// ─────────────────────────────────────────────────────────────
+// ZDJĘCIA STATYSTYK ZMIANOWYCH AUTOMATU (ekran PLC) + odczyt AI
+// ─────────────────────────────────────────────────────────────
+
+export type ShiftStatOcrStatus = 'pending' | 'done' | 'failed'
+
+export interface ShiftStatPhoto {
+  id: string
+  shift_id: string | null
+  machine_id: string
+  operator_id: string
+  shift_type: string | null
+  shift_date: string | null
+  photo_path: string
+  captured_at: string
+  ocr_status: ShiftStatOcrStatus
+  ocr_error: string | null
+  ocr_attempts: number
+  raw_response: string | null
+  created_at: string
+  // joined
+  machine?: Machine
+  operator?: { id: string; full_name: string }
+}
+
+export interface ShiftStatReading {
+  id: string
+  photo_id: string
+  metric_label: string
+  metric_value: string
+  numeric_value: number | null
+  station_key: string | null
+  confirmed: boolean
+  corrected_value: string | null
+  sort_order: number
+  created_at: string
+}
