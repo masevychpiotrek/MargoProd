@@ -69,6 +69,25 @@ function matchPlcTimeField(label: string): PlcTimeField | null {
   return null
 }
 
+// Liczniki produkcji z ekranu PLC: "GOOD" -> dobre sztuki, "SCRAP" -> odrzut.
+// Etykiety stacji (np. "ST 15 DRIP CHAMBER RIGHT") nie zawieraja tych slow,
+// wiec nie zostana bledne dopasowane.
+type PlcCountField = 'good' | 'reject'
+
+function matchPlcCountField(label: string): PlcCountField | null {
+  const l = label.toUpperCase()
+  if (/\bGOOD\b/.test(l)) return 'good'
+  if (l.includes('SCRAP') || l.includes('REJECT') || /\bNOK\b/.test(l)) return 'reject'
+  return null
+}
+
+function parsePlcCount(value: string): number | null {
+  const v = value.trim()
+  if (v.includes('%')) return null
+  const digits = v.replace(/[\s,.]/g, '')
+  return /^\d+$/.test(digits) ? Number(digits) : null
+}
+
 function hourlyRate(pieces: number, runtimeMin: number) {
   return runtimeMin > 0 ? Math.round(pieces / runtimeMin * 60) : 0
 }
@@ -340,15 +359,29 @@ export default function OperatorShift() {
     if (!latestDone) return
     const readings = await fetchShiftStatReadings(latestDone.id)
     const patch: Partial<Record<PlcTimeField, string>> = {}
+    const counts: Partial<Record<PlcCountField, number>> = {}
     for (const reading of readings) {
-      const field = matchPlcTimeField(reading.metric_label)
-      if (!field || patch[field] !== undefined) continue
-      const mins = parsePlcDurationToMin(reading.corrected_value ?? reading.metric_value)
-      if (mins != null) patch[field] = minsToHHMM(mins)
+      const value = reading.corrected_value ?? reading.metric_value
+      const timeField = matchPlcTimeField(reading.metric_label)
+      if (timeField && patch[timeField] === undefined) {
+        const mins = parsePlcDurationToMin(value)
+        if (mins != null) patch[timeField] = minsToHHMM(mins)
+        continue
+      }
+      const countField = matchPlcCountField(reading.metric_label)
+      if (countField && counts[countField] === undefined) {
+        const count = parsePlcCount(value)
+        if (count != null) counts[countField] = count
+      }
     }
-    if (Object.keys(patch).length === 0) return
+    if (Object.keys(patch).length === 0 && Object.keys(counts).length === 0) return
+    // Liczniki GOOD/SCRAP z automatu maja pierwszenstwo nad suma wpisow
+    // godzinowych - to twardy licznik maszyny, a nie reczne przepisywanie.
+    // Operator widzi wypelnione pola i moze je poprawic przed zapisem.
     setEndForm(prev => ({
       ...prev,
+      good: counts.good !== undefined ? String(counts.good) : prev.good,
+      reject: counts.reject !== undefined ? String(counts.reject) : prev.reject,
       runtime: prev.runtime === '00:00' ? (patch.runtime ?? prev.runtime) : prev.runtime,
       ready: prev.ready === '00:00' ? (patch.ready ?? prev.ready) : prev.ready,
       alarm: prev.alarm === '00:00' ? (patch.alarm ?? prev.alarm) : prev.alarm,
@@ -562,7 +595,7 @@ export default function OperatorShift() {
                   <div className="text-xs text-navy-400">Produkcja i odrzut sa podpowiedziane z wpisow godzinowych. Czasy wpisujesz dopiero tutaj.</div>
                   {timesFromPhoto && (
                     <div className="mt-1.5 text-xs text-brand">
-                      Czasy podpowiedziane ze zdjecia ekranu automatu — sprawdz i popraw jesli trzeba.
+                      Dane (produkcja, odrzut, czasy) podpowiedziane ze zdjecia ekranu automatu — sprawdz i popraw jesli trzeba.
                     </div>
                   )}
                 </div>
