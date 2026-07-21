@@ -66,11 +66,27 @@ export default function ShiftStatPhotosCard() {
 
   const runExtraction = async (photoId: string) => {
     setPhotos(prev => prev.map(p => p.id === photoId ? { ...p, ocr_status: 'pending' } : p))
-    const { data, error: fnError } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>(
-      'extract-shift-stats', { body: { photoId } }
-    )
-    if (fnError || data?.error) {
-      setError(data?.error || fnError?.message || 'Nie udało się odczytać zdjęcia.')
+    try {
+      const { data, error: fnError } = await supabase.functions.invoke<{ ok?: boolean; error?: string }>(
+        'extract-shift-stats', { body: { photoId } }
+      )
+      if (fnError || data?.error) {
+        console.error('extract-shift-stats error:', fnError, data)
+        let detail = data?.error || fnError?.message || ''
+        // Bledy SDK (np. FunctionsHttpError) czesto nie maja czytelnego .message -
+        // prawdziwa tresc odpowiedzi jest w .context (obiekt Response). Bez tego
+        // operator widzialby tylko ogolnikowy, bezuzyteczny komunikat.
+        if (!detail) {
+          const ctx = (fnError as { context?: Response } | undefined)?.context
+          if (ctx && typeof ctx.text === 'function') {
+            try { detail = await ctx.text() } catch { /* ignore */ }
+          }
+        }
+        setError(detail || `Nie udało się połączyć z AI (${fnError?.name ?? 'nieznany błąd'}). Sprawdź połączenie internetowe i spróbuj ponownie.`)
+      }
+    } catch (e) {
+      console.error('extract-shift-stats exception:', e)
+      setError('Błąd połączenia z AI: ' + (e instanceof Error ? e.message : String(e)))
     }
     const [freshPhotos, readings] = await Promise.all([
       fetchPhotos(activeShift!.id),

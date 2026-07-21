@@ -36,14 +36,33 @@ Deno.serve(async (req) => {
     const token = authHeader.replace('Bearer ', '').trim()
 
     if (!supabaseUrl || !serviceRoleKey) throw new Error('Missing Supabase service configuration')
-    if (!token) return json({ error: 'Brak sesji operatora.' })
 
     const admin = createClient(supabaseUrl, serviceRoleKey, {
       auth: { persistSession: false, autoRefreshToken: false },
     })
 
+    // Body czytamy PRZED weryfikacja sesji, zeby znac photoId jak najwczesniej -
+    // dzieki temu KAZDY blad (nawet "brak sesji") zostaje utrwalony na wierszu
+    // zdjecia w bazie i jest widoczny w UI oraz diagnozowalny bez logow platformy.
+    const body = await req.json().catch(() => ({}))
+    const photoId = String(body.photoId ?? '')
+
+    const failEarly = async (message: string) => {
+      console.error(`extract-shift-stats early failure (photoId=${photoId || 'none'}): ${message}`)
+      if (photoId) {
+        await admin.from('shift_stat_photos')
+          .update({ ocr_status: 'failed', ocr_error: message })
+          .eq('id', photoId)
+      }
+      return json({ error: message })
+    }
+
+    if (!token) return await failEarly('Brak sesji operatora - odswiez strone i zaloguj sie ponownie.')
+
     const { data: callerData, error: callerError } = await admin.auth.getUser(token)
-    if (callerError || !callerData.user) return json({ error: 'Nie udalo sie potwierdzic sesji.' })
+    if (callerError || !callerData.user) {
+      return await failEarly(`Nie udalo sie potwierdzic sesji (${callerError?.message ?? 'brak uzytkownika'}). Odswiez strone i sprobuj ponownie.`)
+    }
     const callerId = callerData.user.id
 
     const { data: callerProfile, error: profileError } = await admin
@@ -52,17 +71,15 @@ Deno.serve(async (req) => {
       .eq('id', callerId)
       .maybeSingle()
 
-    if (profileError) throw profileError
+    if (profileError) return await failEarly(`Blad odczytu profilu: ${profileError.message}`)
     if (!callerProfile || !ALLOWED_ROLES.has(callerProfile.role) || !callerProfile.is_active || callerProfile.deleted_at) {
-      return json({ error: 'Brak uprawnien do odczytu zdjecia.' })
+      return await failEarly(`Brak uprawnien do odczytu zdjecia (rola: ${callerProfile?.role ?? 'brak profilu'}).`)
     }
 
     if (!anthropicKey) {
-      return json({ error: 'AI niedostepne: brak konfiguracji klucza.' })
+      return await failEarly('AI niedostepne: brak skonfigurowanego klucza ANTHROPIC_API_KEY na serwerze.')
     }
 
-    const body = await req.json().catch(() => ({}))
-    const photoId = String(body.photoId ?? '')
     if (!photoId) return json({ error: 'Brak identyfikatora zdjecia.' })
 
     const { data: photo, error: photoError } = await admin
@@ -70,7 +87,7 @@ Deno.serve(async (req) => {
       .select('id, photo_path, ocr_attempts, machine_id')
       .eq('id', photoId)
       .maybeSingle()
-    if (photoError) throw photoError
+    if (photoError) return await failEarly(`Blad odczytu rekordu zdjecia: ${photoError.message}`)
     if (!photo) return json({ error: 'Nie znaleziono zdjecia.' })
 
     if (photo.ocr_attempts >= MAX_ATTEMPTS) {
