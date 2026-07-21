@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
-import ShiftStatPhotosCard from '@/components/operator/ShiftStatPhotosCard'
+import ShiftStatPhotosCard, { fetchPhotos as fetchShiftStatPhotos, fetchReadings as fetchShiftStatReadings } from '@/components/operator/ShiftStatPhotosCard'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -38,6 +38,35 @@ interface ShiftEndForm {
   alarm: string
   downtime: string
   notes: string
+}
+
+// Najlepsza-mozliwa proba dopasowania odczytow AI ze zdjecia ekranu PLC
+// ("Shift Statistics") do pol rozliczenia czasu zmiany. Nazewnictwo etykiet
+// rozni sie miedzy automatami, wiec dopasowanie jest po slowach kluczowych -
+// operator zawsze widzi i moze poprawic wypelnione pole przed zapisaniem.
+function parsePlcDurationToMin(value: string): number | null {
+  const v = value.trim().toUpperCase()
+  const colon = v.match(/^(\d{1,3}):([0-5]\d)(?::([0-5]\d))?$/)
+  if (colon) return Number(colon[1]) * 60 + Number(colon[2])
+  const h = v.match(/(\d+)\s*H/)
+  const m = v.match(/(\d+)\s*M\b/)
+  const s = v.match(/(\d+)\s*S\b/)
+  if (!h && !m && !s) return null
+  const hours = h ? Number(h[1]) : 0
+  const mins = m ? Number(m[1]) : 0
+  const secs = s ? Number(s[1]) : 0
+  return hours * 60 + mins + Math.round(secs / 60)
+}
+
+type PlcTimeField = 'runtime' | 'ready' | 'alarm' | 'downtime'
+
+function matchPlcTimeField(label: string): PlcTimeField | null {
+  const l = label.toUpperCase()
+  if (l.includes('ALARM') || l.includes('FAULT')) return 'alarm'
+  if (l.includes('STANDBY') || l.includes('READY') || l.includes('IDLE')) return 'ready'
+  if (l.includes('DOWNTIME') || l.includes('STOP')) return 'downtime'
+  if (l.includes('RUN')) return 'runtime'
+  return null
 }
 
 function hourlyRate(pieces: number, runtimeMin: number) {
@@ -83,6 +112,7 @@ export default function OperatorShift() {
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
   const [earlyEndRequested, setEarlyEndRequested] = useState(false)
   const [earlyEndReason,    setEarlyEndReason]    = useState('')
+  const [timesFromPhoto,    setTimesFromPhoto]    = useState(false)
   const EARLY_END_MIN_REASON_LENGTH = 15
   const [endForm, setEndForm] = useState<ShiftEndForm>({
     good: '0',
@@ -283,6 +313,7 @@ export default function OperatorShift() {
     const good = latestReports.reduce((s, r) => s + r.good_count, 0)
     const reject = latestReports.reduce((s, r) => s + r.reject_count, 0)
     setMissingHours(missing)
+    const hadSavedTimes = activeShift.summary_runtime_min != null
     setEndForm({
       good: String(good),
       reject: String(reject),
@@ -295,7 +326,35 @@ export default function OperatorShift() {
     setEndConfirmText('')
     setEarlyEndRequested(false)
     setEarlyEndReason('')
+    setTimesFromPhoto(false)
     setShowEndWarning(true)
+    // Zmiana nie ma jeszcze zapisanego rozliczenia czasu - sprobuj wypelnic
+    // je z ostatniego odczytanego zdjecia ekranu PLC ("Shift Statistics"),
+    // zeby operator nie musial przepisywac tych samych liczb recznie.
+    if (!hadSavedTimes) void prefillTimesFromPlcPhoto(activeShift.id)
+  }
+
+  const prefillTimesFromPlcPhoto = async (shiftId: string) => {
+    const photos = await fetchShiftStatPhotos(shiftId)
+    const latestDone = photos.find(p => p.ocr_status === 'done')
+    if (!latestDone) return
+    const readings = await fetchShiftStatReadings(latestDone.id)
+    const patch: Partial<Record<PlcTimeField, string>> = {}
+    for (const reading of readings) {
+      const field = matchPlcTimeField(reading.metric_label)
+      if (!field || patch[field] !== undefined) continue
+      const mins = parsePlcDurationToMin(reading.corrected_value ?? reading.metric_value)
+      if (mins != null) patch[field] = minsToHHMM(mins)
+    }
+    if (Object.keys(patch).length === 0) return
+    setEndForm(prev => ({
+      ...prev,
+      runtime: prev.runtime === '00:00' ? (patch.runtime ?? prev.runtime) : prev.runtime,
+      ready: prev.ready === '00:00' ? (patch.ready ?? prev.ready) : prev.ready,
+      alarm: prev.alarm === '00:00' ? (patch.alarm ?? prev.alarm) : prev.alarm,
+      downtime: prev.downtime === '00:00' ? (patch.downtime ?? prev.downtime) : prev.downtime
+    }))
+    setTimesFromPhoto(true)
   }
 
   // Operator wpisal ostatni zaplanowany blok godzinowy w Report.tsx - od razu
@@ -501,6 +560,11 @@ export default function OperatorShift() {
                 <div className="mb-3">
                   <div className="text-sm font-bold text-white">Rozliczenie koncowe zmiany</div>
                   <div className="text-xs text-navy-400">Produkcja i odrzut sa podpowiedziane z wpisow godzinowych. Czasy wpisujesz dopiero tutaj.</div>
+                  {timesFromPhoto && (
+                    <div className="mt-1.5 text-xs text-brand">
+                      Czasy podpowiedziane ze zdjecia ekranu automatu — sprawdz i popraw jesli trzeba.
+                    </div>
+                  )}
                 </div>
                 <div className="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
                   <div className="rounded-lg bg-navy-800 p-3">

@@ -8,7 +8,7 @@ import type { ShiftStatPhoto, ShiftStatReading } from '@/types/database'
 
 const MAX_PHOTOS = 6
 
-async function fetchPhotos(shiftId: string) {
+export async function fetchPhotos(shiftId: string) {
   const { data } = await supabase
     .from('shift_stat_photos')
     .select('*')
@@ -17,7 +17,7 @@ async function fetchPhotos(shiftId: string) {
   return (data ?? []) as ShiftStatPhoto[]
 }
 
-async function fetchReadings(photoId: string) {
+export async function fetchReadings(photoId: string) {
   const { data } = await supabase
     .from('shift_stat_readings')
     .select('*')
@@ -48,6 +48,7 @@ export default function ShiftStatPhotosCard() {
   const [error, setError] = useState('')
   const [editValues, setEditValues] = useState<Record<string, string>>({})
   const [savingReading, setSavingReading] = useState<string | null>(null)
+  const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null)
 
   const load = async () => {
     if (!activeShift) return
@@ -115,6 +116,21 @@ export default function ShiftStatPhotosCard() {
     }
   }
 
+  const handleDelete = async (photo: ShiftStatPhoto) => {
+    if (!window.confirm('Usunac to zdjecie? Nie mozna cofnac tej operacji.')) return
+    setDeletingPhoto(photo.id)
+    await supabase.storage.from('shift-stats-photos').remove([photo.photo_path])
+    const { error: deleteError } = await supabase.from('shift_stat_photos').delete().eq('id', photo.id)
+    if (deleteError) {
+      setError('Nie udało się usunąć zdjęcia: ' + deleteError.message)
+      setDeletingPhoto(null)
+      return
+    }
+    setPhotos(prev => prev.filter(p => p.id !== photo.id))
+    setExpandedPhoto(prev => prev === photo.id ? null : prev)
+    setDeletingPhoto(null)
+  }
+
   const toggleExpand = async (photoId: string) => {
     if (expandedPhoto === photoId) { setExpandedPhoto(null); return }
     setExpandedPhoto(photoId)
@@ -175,26 +191,36 @@ export default function ShiftStatPhotosCard() {
             const confirmedCount = readings.filter(r => r.confirmed).length
             return (
               <div key={photo.id} className="rounded-xl border border-navy-700 bg-navy-900 overflow-hidden">
-                <button onClick={() => toggleExpand(photo.id)} className="w-full flex items-center gap-3 p-3 text-left hover:bg-navy-800/60 transition-all">
-                  {signedUrls[photo.id] && (
-                    <img src={signedUrls[photo.id]} alt="Miniatura" className="w-14 h-14 object-cover rounded-lg border border-navy-600 shrink-0" />
-                  )}
-                  <div className="min-w-0 flex-1">
-                    <div className="text-xs text-navy-300">{new Date(photo.captured_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
-                    <div className="text-xs mt-0.5">
-                      {photo.ocr_status === 'pending' && <span className="text-amber-300">Odczytuję dane z AI...</span>}
-                      {photo.ocr_status === 'done' && <span className="text-green-400">{readings.length} pozycji odczytanych · {confirmedCount} potwierdzonych</span>}
-                      {photo.ocr_status === 'failed' && <span className="text-red-300">{photo.ocr_error || 'Nie udało się odczytać'}</span>}
+                <div className="w-full flex items-center gap-3 p-3">
+                  <button onClick={() => toggleExpand(photo.id)} className="flex items-center gap-3 flex-1 min-w-0 text-left hover:opacity-80 transition-opacity">
+                    {signedUrls[photo.id] && (
+                      <img src={signedUrls[photo.id]} alt="Miniatura" className="w-14 h-14 object-cover rounded-lg border border-navy-600 shrink-0" />
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <div className="text-xs text-navy-300">{new Date(photo.captured_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div>
+                      <div className="text-xs mt-0.5">
+                        {photo.ocr_status === 'pending' && <span className="text-amber-300">Odczytuję dane z AI...</span>}
+                        {photo.ocr_status === 'done' && <span className="text-green-400">{readings.length} pozycji odczytanych · {confirmedCount} potwierdzonych</span>}
+                        {photo.ocr_status === 'failed' && <span className="text-red-300">{photo.ocr_error || 'Nie udało się odczytać'}</span>}
+                      </div>
                     </div>
-                  </div>
-                  <span className="text-navy-500 text-xs shrink-0">{expandedPhoto === photo.id ? '▲' : '▼'}</span>
-                </button>
+                    <span className="text-navy-500 text-xs shrink-0">{expandedPhoto === photo.id ? '▲' : '▼'}</span>
+                  </button>
+                  <button
+                    onClick={() => handleDelete(photo)}
+                    disabled={deletingPhoto === photo.id}
+                    title="Usuń zdjęcie"
+                    className="shrink-0 rounded-lg border border-navy-700 text-navy-400 hover:text-red-300 hover:border-red-500/40 w-7 h-7 flex items-center justify-center text-sm disabled:opacity-40"
+                  >
+                    {deletingPhoto === photo.id ? '…' : '✕'}
+                  </button>
+                </div>
 
                 {expandedPhoto === photo.id && (
                   <div className="border-t border-navy-700 p-3 space-y-2">
-                    {photo.ocr_status === 'failed' && (
+                    {photo.ocr_status !== 'done' && (
                       <button onClick={() => runExtraction(photo.id)} className="btn-secondary text-xs px-3 py-1.5">
-                        Spróbuj ponownie
+                        {photo.ocr_status === 'pending' ? 'Odczytaj ponownie' : 'Spróbuj ponownie'}
                       </button>
                     )}
                     {readings.map(reading => (

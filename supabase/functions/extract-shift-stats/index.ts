@@ -77,17 +77,26 @@ Deno.serve(async (req) => {
       return json({ error: 'Osiagnieto limit prob odczytu tego zdjecia. Zglos to kierownikowi.' })
     }
 
-    const { data: fileBlob, error: downloadError } = await admin.storage
-      .from('shift-stats-photos')
-      .download(photo.photo_path)
-    if (downloadError || !fileBlob) {
-      return json({ error: 'Nie udalo sie pobrac zdjecia ze storage.' })
-    }
+    // Zapisz start proby OD RAZU, przed pobraniem zdjecia i wywolaniem AI -
+    // jesli polaczenie zostanie przerwane (timeout sieci operatora, zabicie
+    // funkcji przez platforme przy dlugim wywolaniu AI), wiersz nigdy nie
+    // zostaje trwale w stanie 'pending' bez zadnego sladu proby.
+    await admin.from('shift_stat_photos').update({
+      ocr_attempts: photo.ocr_attempts + 1, ocr_status: 'pending', ocr_error: null
+    }).eq('id', photoId)
 
-    const bytes = new Uint8Array(await fileBlob.arrayBuffer())
-    const base64 = toBase64(bytes)
+    try {
+      const { data: fileBlob, error: downloadError } = await admin.storage
+        .from('shift-stats-photos')
+        .download(photo.photo_path)
+      if (downloadError || !fileBlob) {
+        throw new Error('Nie udalo sie pobrac zdjecia ze storage.')
+      }
 
-    const prompt = `Odczytaj WSZYSTKIE widoczne pary etykieta/wartosc z tego zdjecia ekranu "Shift Statistics" panelu PLC automatu produkcyjnego. Obejmuje to m.in.: czasy (TIME IN RUN/STANDBY/ALARM), liczniki (GOOD, SCRAP), kazda pozycje stacji (np. "ST 15 DRIP CHAMBER RIGHT"), wskazniki procentowe (EFF % BATCH PROD), Total Machine cycles - kazda widoczna etykiete z jej wartoscia.
+      const bytes = new Uint8Array(await fileBlob.arrayBuffer())
+      const base64 = toBase64(bytes)
+
+      const prompt = `Odczytaj WSZYSTKIE widoczne pary etykieta/wartosc z tego zdjecia ekranu "Shift Statistics" panelu PLC automatu produkcyjnego. Obejmuje to m.in.: czasy (TIME IN RUN/STANDBY/ALARM), liczniki (GOOD, SCRAP), kazda pozycje stacji (np. "ST 15 DRIP CHAMBER RIGHT"), wskazniki procentowe (EFF % BATCH PROD), Total Machine cycles - kazda widoczna etykiete z jej wartoscia.
 
 ZASADY:
 1. Zwroc etykiete DOKLADNIE tak jak jest napisana na ekranie (zachowaj wielkie litery, numery stacji).
@@ -98,88 +107,99 @@ ZASADY:
 Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
 [{"label": "...", "value": "..."}]`
 
-    const response = await fetch('https://api.anthropic.com/v1/messages', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-api-key': anthropicKey,
-        'anthropic-version': '2023-06-01',
-      },
-      body: JSON.stringify({
-        model: 'claude-sonnet-5',
-        max_tokens: 3000,
-        messages: [{
-          role: 'user',
-          content: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
-            { type: 'text', text: prompt }
-          ]
-        }]
-      })
-    })
+      // Twardy limit czasu na wywolanie AI - bez tego dluga/wisząca odpowiedz
+      // moglaby doprowadzic do zabicia calej funkcji przez platforme zanim
+      // zdazymy zapisac jakikolwiek wynik do bazy.
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 45_000)
+      let response: Response
+      try {
+        response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: 'claude-sonnet-5',
+            max_tokens: 3000,
+            messages: [{
+              role: 'user',
+              content: [
+                { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: base64 } },
+                { type: 'text', text: prompt }
+              ]
+            }]
+          }),
+          signal: controller.signal
+        })
+      } catch (fetchError) {
+        if (fetchError instanceof Error && fetchError.name === 'AbortError') {
+          throw new Error('AI nie odpowiedzialo w wyznaczonym czasie. Sprobuj ponownie.')
+        }
+        throw fetchError
+      } finally {
+        clearTimeout(timeout)
+      }
 
-    await admin.from('shift_stat_photos').update({ ocr_attempts: photo.ocr_attempts + 1 }).eq('id', photoId)
+      if (!response.ok) {
+        throw new Error(`AI extraction failed: ${response.status}`)
+      }
 
-    if (!response.ok) {
-      const errMsg = `AI extraction failed: ${response.status}`
-      await admin.from('shift_stat_photos').update({ ocr_status: 'failed', ocr_error: errMsg }).eq('id', photoId)
-      return json({ error: errMsg })
-    }
+      const data = await response.json() as { content: { type: string; text?: string }[] }
+      const raw = data.content.map(c => c.text || '').join('').trim()
+        .replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
 
-    const data = await response.json() as { content: { type: string; text?: string }[] }
-    const raw = data.content.map(c => c.text || '').join('').trim()
-      .replace(/^```(?:json)?\n?/i, '').replace(/\n?```$/i, '').trim()
+      let parsed: unknown
+      try {
+        parsed = JSON.parse(raw)
+      } catch {
+        await admin.from('shift_stat_photos').update({ raw_response: raw }).eq('id', photoId)
+        throw new Error('AI zwrocilo nieprawidlowa odpowiedz.')
+      }
 
-    let parsed: unknown
-    try {
-      parsed = JSON.parse(raw)
-    } catch {
+      if (!Array.isArray(parsed)) {
+        await admin.from('shift_stat_photos').update({ raw_response: raw }).eq('id', photoId)
+        throw new Error('AI zwrocilo nieoczekiwany format.')
+      }
+
+      const items = (parsed as Array<Record<string, unknown>>)
+        .filter(item => typeof item.label === 'string' && typeof item.value === 'string')
+        .map(item => ({ label: (item.label as string).trim(), value: (item.value as string).trim() }))
+        .filter(item => item.label && item.value)
+
+      if (items.length === 0) {
+        await admin.from('shift_stat_photos').update({ raw_response: raw }).eq('id', photoId)
+        throw new Error('AI nie odczytalo zadnych danych ze zdjecia. Sprobuj ostrzejsze zdjecie.')
+      }
+
+      // Usun tylko NIEPOTWIERDZONE odczyty z poprzednich prob dla tego zdjecia -
+      // zeby ponowna proba nie duplikowala wierszy, ale nie kasowala tego co
+      // operator juz zweryfikowal i potwierdzil.
+      await admin.from('shift_stat_readings').delete().eq('photo_id', photoId).eq('confirmed', false)
+
+      const { error: insertError } = await admin.from('shift_stat_readings').insert(
+        items.map((item, index) => ({
+          photo_id: photoId,
+          metric_label: item.label,
+          metric_value: item.value,
+          numeric_value: toNumericValue(item.value),
+          sort_order: index
+        }))
+      )
+      if (insertError) throw insertError
+
       await admin.from('shift_stat_photos').update({
-        ocr_status: 'failed', ocr_error: 'AI zwrocilo nieprawidlowa odpowiedz.', raw_response: raw
+        ocr_status: 'done', ocr_error: null, raw_response: raw
       }).eq('id', photoId)
-      return json({ error: 'AI zwrocilo nieprawidlowa odpowiedz.' })
+
+      return json({ ok: true, count: items.length })
+    } catch (processingError) {
+      const message = processingError instanceof Error ? processingError.message : 'Nie udalo sie odczytac zdjecia.'
+      await admin.from('shift_stat_photos').update({ ocr_status: 'failed', ocr_error: message }).eq('id', photoId)
+      return json({ error: message })
     }
-
-    if (!Array.isArray(parsed)) {
-      await admin.from('shift_stat_photos').update({
-        ocr_status: 'failed', ocr_error: 'AI zwrocilo nieoczekiwany format.', raw_response: raw
-      }).eq('id', photoId)
-      return json({ error: 'AI zwrocilo nieoczekiwany format.' })
-    }
-
-    const items = (parsed as Array<Record<string, unknown>>)
-      .filter(item => typeof item.label === 'string' && typeof item.value === 'string')
-      .map(item => ({ label: (item.label as string).trim(), value: (item.value as string).trim() }))
-      .filter(item => item.label && item.value)
-
-    if (items.length === 0) {
-      await admin.from('shift_stat_photos').update({
-        ocr_status: 'failed', ocr_error: 'AI nie odczytalo zadnych danych ze zdjecia.', raw_response: raw
-      }).eq('id', photoId)
-      return json({ error: 'AI nie odczytalo zadnych danych ze zdjecia. Sprobuj ostrzejsze zdjecie.' })
-    }
-
-    // Usun tylko NIEPOTWIERDZONE odczyty z poprzednich prob dla tego zdjecia -
-    // zeby ponowna proba nie duplikowala wierszy, ale nie kasowala tego co
-    // operator juz zweryfikowal i potwierdzil.
-    await admin.from('shift_stat_readings').delete().eq('photo_id', photoId).eq('confirmed', false)
-
-    const { error: insertError } = await admin.from('shift_stat_readings').insert(
-      items.map((item, index) => ({
-        photo_id: photoId,
-        metric_label: item.label,
-        metric_value: item.value,
-        numeric_value: toNumericValue(item.value),
-        sort_order: index
-      }))
-    )
-    if (insertError) throw insertError
-
-    await admin.from('shift_stat_photos').update({
-      ocr_status: 'done', ocr_error: null, raw_response: raw
-    }).eq('id', photoId)
-
-    return json({ ok: true, count: items.length })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udalo sie odczytac zdjecia.'
     return json({ error: message })
