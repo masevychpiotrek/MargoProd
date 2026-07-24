@@ -50,7 +50,7 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY')
     const anthropicKey = (Deno.env.get('ANTHROPIC_API_KEY') ?? '').replace(/[^\x21-\x7E]/g, '')
-    const model = (Deno.env.get('ANTHROPIC_REPORT_MODEL') ?? 'claude-sonnet-5').trim()
+    const model = (Deno.env.get('ANTHROPIC_REPORT_MODEL') ?? 'claude-sonnet-4-20250514').trim()
     const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim()
 
     if (!supabaseUrl || !serviceRoleKey) throw new Error('Brak konfiguracji Supabase po stronie serwera.')
@@ -203,7 +203,18 @@ ${input}`
     if (!response.ok) {
       const responseText = await response.text().catch(() => '')
       console.error('Period AI response error', response.status, responseText.slice(0, 500))
-      return json({ error: `Usługa AI zwróciła błąd ${response.status}.` })
+      let apiMessage = ''
+      try {
+        const parsedError = JSON.parse(responseText) as { error?: { message?: string } }
+        apiMessage = text(parsedError.error?.message, 240)
+      } catch {
+        apiMessage = ''
+      }
+      return json({
+        error: apiMessage
+          ? `Usługa AI odrzuciła żądanie: ${apiMessage}`
+          : `Usługa AI zwróciła błąd ${response.status}.`
+      })
     }
 
     const data = await response.json() as { content?: Array<{ type?: string; text?: string }> }
