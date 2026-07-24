@@ -1,3 +1,8 @@
 node_modules
 .env
 dist
+
+# Lokalny skrypt synchronizacji zdjec na SharePoint - zawiera dane logowania
+# konta technicznego, nigdy nie trafia do repo.
+scripts/sync-config.json
+scripts/sync-log.txt
