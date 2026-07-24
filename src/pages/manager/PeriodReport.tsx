@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { Chart } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController } from 'chart.js'
 import { supabase } from '@/lib/supabase'
-import { cn } from '@/lib/utils'
+import { cn, getProductionDate } from '@/lib/utils'
+import { issueStatusLabel, problemCategoryLabel, reportStationLabel } from '@/lib/issueReports'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController)
@@ -23,6 +24,40 @@ type ShiftRow = Shift & {
 
 type FailureRow = FailureReport & {
   machine?: Pick<Machine, 'id' | 'name' | 'code'> | Pick<Machine, 'id' | 'name' | 'code'>[] | null
+  reporter?: { full_name: string } | { full_name: string }[] | null
+  assignee?: { full_name: string } | { full_name: string }[] | null
+  shift?: { shift_type: ShiftType; shift_date: string } | { shift_type: ShiftType; shift_date: string }[] | null
+}
+
+type OperatorIssueKind = 'performance' | 'reject' | 'note' | 'failure'
+
+type OperatorIssue = {
+  id: string
+  date: string
+  sortAt: string
+  shift: ShiftType | null
+  hour: string | null
+  machineId: string
+  machineName: string
+  kind: OperatorIssueKind
+  source: 'Wpis godzinowy' | 'Zgloszenie awarii'
+  title: string
+  description: string
+  station: string | null
+  action: string | null
+  status: string | null
+  operator: string | null
+  severity: string | null
+  photoUrls: string[]
+}
+
+type RecurringIssue = {
+  key: string
+  label: string
+  station: string | null
+  count: number
+  machines: string[]
+  lastDate: string
 }
 
 type Group = {
@@ -53,7 +88,7 @@ function iso(date: Date) {
 }
 
 function today() {
-  return iso(new Date())
+  return getProductionDate()
 }
 
 function addDays(date: string, days: number) {
@@ -95,6 +130,181 @@ function mins(value: number) {
 
 function esc(value: string) {
   return value.replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c] ?? c))
+}
+
+function productionBoundaryIso(date: string, hour = 6) {
+  const [year, month, day] = date.split('-').map(Number)
+  return new Date(year, month - 1, day, hour, 0, 0, 0).toISOString()
+}
+
+function formatTimestamp(value: string) {
+  return new Date(value).toLocaleString('pl-PL', {
+    day: '2-digit',
+    month: '2-digit',
+    year: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
+}
+
+const FAILURE_CATEGORY_LABELS: Record<string, string> = {
+  mechanical_failure: 'Awaria mechaniczna',
+  electrical_failure: 'Awaria elektryczna',
+  quality_control: 'Problem jakosciowy',
+  material_shortage: 'Brak materialu',
+  process_issue: 'Problem procesu',
+  logistics_issue: 'Problem logistyczny',
+  changeover: 'Przezbrojenie',
+  cleaning: 'Czyszczenie',
+  no_operator: 'Brak operatora',
+  other: 'Inne'
+}
+
+const FAILURE_STATUS_LABELS: Record<string, string> = {
+  new: 'Nowe',
+  acknowledged: 'Przyjete',
+  in_progress: 'W trakcie',
+  unresolved: 'Nierozwiazane',
+  resolved: 'Rozwiazane'
+}
+
+const SEVERITY_LABELS: Record<string, string> = {
+  low: 'Niska',
+  medium: 'Srednia',
+  high: 'Wysoka',
+  critical: 'Krytyczna'
+}
+
+function cleanLabel(value: string | null | undefined) {
+  if (!value || value === '—' || value === 'â€”') return null
+  return value
+}
+
+function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], machines: Machine[]) {
+  const machineNames = new Map(machines.map(machine => [machine.id, machine.name]))
+  const issues: OperatorIssue[] = []
+
+  reports.forEach(report => {
+    const shift = one(report.shift)
+    const operator = one(report.operator)?.full_name ?? null
+    const machineName = machineNames.get(report.machine_id) ?? 'Maszyna'
+    const date = shift?.shift_date ?? report.report_date
+    const base = {
+      date,
+      sortAt: `${date}T${String(report.hour_start).padStart(2, '0')}:00:00`,
+      shift: shift?.shift_type ?? null,
+      hour: report.hour_block || null,
+      machineId: report.machine_id,
+      machineName,
+      operator,
+      severity: null,
+      photoUrls: [] as string[]
+    }
+
+    if (report.downtime_reason?.trim()) {
+      issues.push({
+        ...base,
+        id: `${report.id}-performance`,
+        kind: 'performance',
+        source: 'Wpis godzinowy',
+        title: cleanLabel(problemCategoryLabel('downtime', report.downtime_problem_name)) ?? 'Przebieg pracy / niska wydajnosc',
+        description: report.downtime_reason.trim(),
+        station: cleanLabel(reportStationLabel(report.downtime_stations, report.downtime_station)),
+        action: report.downtime_action_taken?.trim() || null,
+        status: cleanLabel(issueStatusLabel(report.downtime_status))
+      })
+    }
+
+    if (report.reject_reason?.trim()) {
+      issues.push({
+        ...base,
+        id: `${report.id}-reject`,
+        kind: 'reject',
+        source: 'Wpis godzinowy',
+        title: cleanLabel(problemCategoryLabel('reject', report.reject_problem_name)) ?? 'Podwyzszony odrzut',
+        description: report.reject_reason.trim(),
+        station: cleanLabel(reportStationLabel(report.reject_stations, report.reject_station)),
+        action: report.reject_action_taken?.trim() || null,
+        status: cleanLabel(issueStatusLabel(report.reject_status))
+      })
+    }
+
+    if (report.notes?.trim()) {
+      issues.push({
+        ...base,
+        id: `${report.id}-note`,
+        kind: 'note',
+        source: 'Wpis godzinowy',
+        title: 'Dodatkowa informacja operatora',
+        description: report.notes.trim(),
+        station: null,
+        action: null,
+        status: null
+      })
+    }
+  })
+
+  failures.filter(failure => !failure.auto_generated).forEach(failure => {
+    const machine = one(failure.machine)
+    const shift = one(failure.shift)
+    const reporter = one(failure.reporter)
+    issues.push({
+      id: `${failure.id}-failure`,
+      date: shift?.shift_date ?? getProductionDate(new Date(failure.created_at)),
+      sortAt: failure.created_at,
+      shift: shift?.shift_type ?? null,
+      hour: formatTimestamp(failure.created_at),
+      machineId: failure.machine_id,
+      machineName: machine?.name ?? machineNames.get(failure.machine_id) ?? 'Maszyna',
+      kind: 'failure',
+      source: 'Zgloszenie awarii',
+      title: FAILURE_CATEGORY_LABELS[failure.category] ?? failure.category,
+      description: failure.description.trim(),
+      station: failure.station?.trim() || null,
+      action: failure.resolution_notes?.trim() || null,
+      status: FAILURE_STATUS_LABELS[failure.status] ?? failure.status,
+      operator: reporter?.full_name ?? null,
+      severity: SEVERITY_LABELS[failure.severity] ?? failure.severity,
+      photoUrls: failure.photo_urls ?? []
+    })
+  })
+
+  return issues.sort((a, b) => b.sortAt.localeCompare(a.sortAt))
+}
+
+function recurringIssuesFrom(items: OperatorIssue[]) {
+  const map = new Map<string, RecurringIssue>()
+  items.forEach(item => {
+    const station = item.station?.trim() || null
+    const key = `${item.title.toLocaleLowerCase('pl-PL')}|${station?.toLocaleLowerCase('pl-PL') ?? ''}`
+    const row = map.get(key) ?? {
+      key,
+      label: item.title,
+      station,
+      count: 0,
+      machines: [],
+      lastDate: item.date
+    }
+    row.count += 1
+    if (!row.machines.includes(item.machineName)) row.machines.push(item.machineName)
+    if (item.date > row.lastDate) row.lastDate = item.date
+    map.set(key, row)
+  })
+  return [...map.values()].sort((a, b) => b.count - a.count || b.lastDate.localeCompare(a.lastDate))
+}
+
+function issueKindLabel(kind: OperatorIssueKind) {
+  if (kind === 'performance') return 'Przebieg / wydajnosc'
+  if (kind === 'reject') return 'Odrzut'
+  if (kind === 'failure') return 'Awaria'
+  return 'Uwaga operatora'
+}
+
+function issueKindClass(kind: OperatorIssueKind) {
+  if (kind === 'reject') return 'border-red-500/35 bg-red-500/10 text-red-300'
+  if (kind === 'failure') return 'border-orange-500/35 bg-orange-500/10 text-orange-300'
+  if (kind === 'performance') return 'border-amber-500/35 bg-amber-500/10 text-amber-300'
+  return 'border-blue-500/35 bg-blue-500/10 text-blue-300'
 }
 
 function emptyGroup(params: Pick<Group, 'key' | 'date' | 'shift' | 'machineId' | 'machineName'>): Group {
@@ -182,11 +392,14 @@ function groupData(reports: ReportRow[], shifts: ShiftRow[], machines: Machine[]
 function buildEmailHtml(params: {
   from: string
   to: string
+  machineLabel: string
   groups: Group[]
   failures: FailureRow[]
+  operatorIssues: OperatorIssue[]
+  recurringIssues: RecurringIssue[]
   conclusions: string[]
 }) {
-  const { from, to, groups, failures, conclusions } = params
+  const { from, to, machineLabel, groups, failures, operatorIssues, recurringIssues, conclusions } = params
   const totalGood = groups.reduce((sum, group) => sum + group.good, 0)
   const totalReject = groups.reduce((sum, group) => sum + group.reject, 0)
   const totalTarget = groups.reduce((sum, group) => sum + group.target, 0)
@@ -225,16 +438,35 @@ function buildEmailHtml(params: {
     </tr>
   `).join('')
 
-  const failureRows = failures.slice(0, 12).map(failure => {
+  const failureRows = failures.filter(failure => failure.auto_generated).slice(0, 12).map(failure => {
     const machine = one(failure.machine)
     return `<li style="margin:0 0 8px"><strong>${esc(machine?.name ?? 'Maszyna')}</strong>: ${esc(failure.description ?? '')}</li>`
   }).join('')
+
+  const recurringRows = recurringIssues.slice(0, 10).map(issue => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;font-weight:bold">${esc(issue.label)}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(issue.station ?? '-')}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(issue.machines.join(', '))}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;font-weight:bold">${issue.count}</td>
+    </tr>
+  `).join('')
+
+  const operatorIssueRows = operatorIssues.map(issue => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top;white-space:nowrap">${esc(formatDate(issue.date))}<br><span style="color:#64748b">${esc(issue.shift ? `Zmiana ${issue.shift}` : 'Bez przypisanej zmiany')}${issue.hour ? ` · ${esc(issue.hour)}` : ''}</span></td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top"><strong>${esc(issue.machineName)}</strong><br><span style="color:#64748b">${esc(issue.source)}</span></td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top"><strong>${esc(issue.title)}</strong>${issue.station ? `<br><span style="color:#64748b">${esc(issue.station)}</span>` : ''}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top">${esc(issue.description)}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;vertical-align:top">${issue.action ? esc(issue.action) : '-'}${issue.status ? `<br><span style="color:#64748b">Status: ${esc(issue.status)}</span>` : ''}${issue.photoUrls.length ? `<br>${issue.photoUrls.map((url, index) => `<a href="${esc(url)}" style="color:#2563eb">Zdjecie ${index + 1}</a>`).join(' · ')}` : ''}</td>
+    </tr>
+  `).join('')
 
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:980px">
       <div style="background:#1d4ed8;color:white;padding:18px 22px">
         <div style="font-size:20px;font-weight:700">Raport zbiorczy produkcji</div>
-        <div style="margin-top:4px;font-size:13px">Okres: ${esc(range)} · MargoLine beta</div>
+        <div style="margin-top:4px;font-size:13px">Okres: ${esc(range)} · ${esc(machineLabel)} · MargoLine beta</div>
         <div style="font-size:12px;opacity:.9">Built on data. Driven by precision.</div>
       </div>
       <div style="padding:18px 22px;background:#ffffff;border:1px solid #dbe3ef">
@@ -253,12 +485,26 @@ function buildEmailHtml(params: {
         </table>
         <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Wnioski systemowe</h3>
         <ol>${conclusions.map(item => `<li style="margin:0 0 8px">${esc(item)}</li>`).join('')}</ol>
+        ${recurringRows ? `
+          <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Najczesciej zglaszane problemy</h3>
+          <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
+            <tr style="background:#eaf1fb"><th align="left" style="padding:8px">Problem</th><th align="left" style="padding:8px">Stacja / obszar</th><th align="left" style="padding:8px">Automat</th><th align="right" style="padding:8px">Liczba wpisow</th></tr>
+            ${recurringRows}
+          </table>
+        ` : ''}
         <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Przebieg okresu</h3>
         <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
           <tr style="background:#eaf1fb"><th align="left" style="padding:8px">Data</th><th align="left" style="padding:8px">Zmiana</th><th align="left" style="padding:8px">Automat</th><th align="right" style="padding:8px">Szt.</th><th align="right" style="padding:8px">Real.</th><th align="right" style="padding:8px">Odrzut</th><th align="right" style="padding:8px">Praca</th></tr>
           ${detailRows}
         </table>
-        ${failureRows ? `<h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Zdarzenia i alerty</h3><ul>${failureRows}</ul>` : ''}
+        ${operatorIssueRows ? `
+          <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Problemy i dzialania zarejestrowane przez operatorow</h3>
+          <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:11px">
+            <tr style="background:#1e3a8a;color:white"><th align="left" style="padding:8px">Kiedy</th><th align="left" style="padding:8px">Zrodlo</th><th align="left" style="padding:8px">Klasyfikacja</th><th align="left" style="padding:8px">Opis operatora</th><th align="left" style="padding:8px">Dzialanie / status</th></tr>
+            ${operatorIssueRows}
+          </table>
+        ` : ''}
+        ${failureRows ? `<h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Automatyczne alerty systemowe</h3><ul>${failureRows}</ul>` : ''}
         <div style="margin-top:24px;padding:12px;background:#eff6ff;color:#1e3a8a;font-size:12px;text-align:right">Dane pochodza z systemu <strong>MargoLine</strong></div>
       </div>
     </div>
@@ -275,6 +521,7 @@ export default function ManagerPeriodReport() {
   const [reports, setReports] = useState<ReportRow[]>([])
   const [shifts, setShifts] = useState<ShiftRow[]>([])
   const [failures, setFailures] = useState<FailureRow[]>([])
+  const [selectedMachineId, setSelectedMachineId] = useState('all')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
 
@@ -296,7 +543,7 @@ export default function ManagerPeriodReport() {
     async function load() {
       setLoading(true)
       const [machineRes, reportRes, shiftRes, failureRes] = await Promise.all([
-        supabase.from('machines').select('*').eq('is_active', true).is('deleted_at', null).order('code'),
+        supabase.from('machines').select('*').is('deleted_at', null).order('code'),
         supabase
           .from('hourly_reports')
           .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
@@ -313,11 +560,17 @@ export default function ManagerPeriodReport() {
           .order('shift_date', { ascending: true }),
         supabase
           .from('failure_reports')
-          .select('*, machine:machines!machine_id(id, name, code)')
-          .gte('created_at', `${range.from}T00:00:00`)
-          .lte('created_at', `${range.to}T23:59:59`)
+          .select(`
+            *,
+            machine:machines!machine_id(id, name, code),
+            reporter:profiles!reporter_id(full_name),
+            assignee:profiles!assigned_to(full_name),
+            shift:shifts!shift_id(shift_type, shift_date)
+          `)
+          .gte('created_at', productionBoundaryIso(range.from))
+          .lt('created_at', productionBoundaryIso(addDays(range.to, 1)))
           .order('created_at', { ascending: false })
-          .limit(200)
+          .limit(500)
       ])
       if (!alive) return
       if (!machineRes.error) setMachines((machineRes.data ?? []) as Machine[])
@@ -330,7 +583,34 @@ export default function ManagerPeriodReport() {
     return () => { alive = false }
   }, [range.from, range.to])
 
-  const groups = useMemo(() => groupData(reports, shifts, machines), [machines, reports, shifts])
+  const machineLabel = useMemo(
+    () => selectedMachineId === 'all'
+      ? 'Wszystkie automaty'
+      : machines.find(machine => machine.id === selectedMachineId)?.name ?? 'Wybrany automat',
+    [machines, selectedMachineId]
+  )
+
+  const filteredReports = useMemo(
+    () => selectedMachineId === 'all' ? reports : reports.filter(report => report.machine_id === selectedMachineId),
+    [reports, selectedMachineId]
+  )
+  const filteredShifts = useMemo(
+    () => selectedMachineId === 'all' ? shifts : shifts.filter(shift => shift.machine_id === selectedMachineId),
+    [selectedMachineId, shifts]
+  )
+  const filteredFailures = useMemo(
+    () => selectedMachineId === 'all' ? failures : failures.filter(failure => failure.machine_id === selectedMachineId),
+    [failures, selectedMachineId]
+  )
+
+  const groups = useMemo(() => groupData(filteredReports, filteredShifts, machines), [filteredReports, filteredShifts, machines])
+  const operatorIssues = useMemo(
+    () => operatorIssuesFromData(filteredReports, filteredFailures, machines),
+    [filteredFailures, filteredReports, machines]
+  )
+  const recurringIssues = useMemo(() => recurringIssuesFrom(operatorIssues), [operatorIssues])
+  const systemAlerts = useMemo(() => filteredFailures.filter(failure => failure.auto_generated), [filteredFailures])
+  const manualFailures = useMemo(() => filteredFailures.filter(failure => !failure.auto_generated), [filteredFailures])
 
   const totals = useMemo(() => {
     const good = groups.reduce((sum, group) => sum + group.good, 0)
@@ -390,11 +670,29 @@ export default function ManagerPeriodReport() {
     if (totals.lowOutput) list.push(`${totals.lowOutput} wpisow mialo wynik ponizej 2000 szt.`)
     const weakest = byMachine[byMachine.length - 1]
     if (weakest) list.push(`Najslabszy automat w okresie: ${weakest.name}, realizacja ${pct(weakest.good, weakest.target)}%.`)
-    if (failures.length) list.push(`W okresie odnotowano ${failures.length} zgloszen i alertow w module technicznym.`)
+    if (operatorIssues.length) list.push(`Operatorzy zarejestrowali ${operatorIssues.length} opisow problemow, dzialan i uwag dla zakresu: ${machineLabel}.`)
+    if (manualFailures.length) {
+      const unresolved = manualFailures.filter(failure => failure.status !== 'resolved').length
+      list.push(`W module awarii zapisano ${manualFailures.length} zgloszen operatorow${unresolved ? `, w tym ${unresolved} bez statusu rozwiazane` : ', wszystkie ze statusem rozwiazane'}.`)
+    }
+    if (systemAlerts.length) list.push(`System automatycznie wykryl ${systemAlerts.length} alertow wydajnosci lub odrzutu.`)
+    const recurring = recurringIssues[0]
+    if (recurring && recurring.count > 1) {
+      list.push(`Najczesciej powtarzal sie problem: ${recurring.label}${recurring.station ? ` (${recurring.station})` : ''} - ${recurring.count} wpisow.`)
+    }
     return list
-  }, [byMachine, failures.length, groups.length, totals.highReject, totals.lowOutput, totals.realization, totals.rejectPct])
+  }, [byMachine, groups.length, machineLabel, manualFailures, operatorIssues.length, recurringIssues, systemAlerts.length, totals.highReject, totals.lowOutput, totals.realization, totals.rejectPct])
 
-  const emailHtml = useMemo(() => buildEmailHtml({ from: range.from, to: range.to, groups, failures, conclusions }), [conclusions, failures, groups, range.from, range.to])
+  const emailHtml = useMemo(() => buildEmailHtml({
+    from: range.from,
+    to: range.to,
+    machineLabel,
+    groups,
+    failures: filteredFailures,
+    operatorIssues,
+    recurringIssues,
+    conclusions
+  }), [conclusions, filteredFailures, groups, machineLabel, operatorIssues, range.from, range.to, recurringIssues])
 
   const chartData = useMemo(() => ({
     labels: byDay.map(day => formatDate(day.date).slice(0, 5)),
@@ -451,7 +749,7 @@ export default function ManagerPeriodReport() {
       </div>
 
       <div className="card">
-        <div className="grid gap-4 lg:grid-cols-[1.2fr_2fr]">
+        <div className="grid gap-4 lg:grid-cols-[1.1fr_2fr_1fr]">
           <div>
             <div className="label">Typ raportu</div>
             <div className="grid grid-cols-3 gap-2">
@@ -489,6 +787,14 @@ export default function ManagerPeriodReport() {
               <div className="font-bold text-white">{buildRangeLabel(range.from, range.to)}</div>
             </div>
           </div>
+          <label>
+            <span className="label">Automat w raporcie</span>
+            <select className="input" value={selectedMachineId} onChange={event => setSelectedMachineId(event.target.value)}>
+              <option value="all">Wszystkie automaty</option>
+              {machines.map(machine => <option key={machine.id} value={machine.id}>{machine.name}</option>)}
+            </select>
+            <span className="mt-2 block text-xs text-navy-400">Filtr obejmuje wskazniki, wykresy, wpisy operatorow i awarie.</span>
+          </label>
         </div>
       </div>
 
@@ -501,7 +807,7 @@ export default function ManagerPeriodReport() {
             <Kpi label="Realizacja" value={`${totals.realization}%`} sub="produkcja / cel zmian" tone={totals.realization >= 90 ? 'text-green-400' : totals.realization >= 80 ? 'text-amber-400' : 'text-red-400'} />
             <Kpi label="Odrzut" value={`${totals.rejectPct}%`} sub={`${pieces(totals.reject)} szt`} tone={totals.rejectPct > 5 ? 'text-red-400' : 'text-green-400'} />
             <Kpi label="Czas pracy" value={mins(totals.runtime)} sub={`straty ${mins(totals.alarmLoss)}`} tone="text-cyan-300" />
-            <Kpi label="Alerty" value={failures.length} sub={`${totals.highReject} odrzut / ${totals.lowOutput} niski wynik`} tone={failures.length ? 'text-amber-400' : 'text-green-400'} />
+            <Kpi label="Zdarzenia" value={operatorIssues.length} sub={`${manualFailures.length} awarii / ${systemAlerts.length} alertow systemu`} tone={operatorIssues.length ? 'text-amber-400' : 'text-green-400'} />
           </div>
 
           <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
@@ -579,6 +885,107 @@ export default function ManagerPeriodReport() {
                   </div>
                 ))}
                 {!groups.length && <Empty text="Brak zmian w wybranym okresie" />}
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-5 xl:grid-cols-[0.8fr_1.7fr]">
+            <div className="card">
+              <div className="card-title">Najczesciej zglaszane problemy</div>
+              <div className="card-sub mb-4">Klasyfikacja na podstawie wpisow operatorow i formularzy awarii</div>
+              <div className="space-y-3">
+                {recurringIssues.slice(0, 10).map((issue, index) => (
+                  <div key={issue.key} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-bold text-white">{issue.label}</div>
+                        <div className="mt-1 text-xs text-navy-400">
+                          {issue.station ?? 'Bez wskazanej stacji'} · {issue.machines.join(', ')}
+                        </div>
+                      </div>
+                      <div className={cn(
+                        'min-w-10 rounded-lg border px-2 py-1 text-center font-mono text-sm font-bold',
+                        index === 0 && issue.count > 1
+                          ? 'border-red-500/40 bg-red-500/10 text-red-300'
+                          : 'border-navy-600 bg-navy-800 text-brand'
+                      )}>
+                        {issue.count}
+                      </div>
+                    </div>
+                    <div className="mt-2 text-xs text-navy-500">Ostatni wpis: {formatDate(issue.lastDate)}</div>
+                  </div>
+                ))}
+                {!recurringIssues.length && <Empty text="Brak opisanych problemow w wybranym zakresie" />}
+              </div>
+            </div>
+
+            <div className="card overflow-hidden">
+              <div className="card-header">
+                <div>
+                  <div className="card-title">Problemy i dzialania zarejestrowane przez operatorow</div>
+                  <div className="card-sub">Pelna chronologia dla: {machineLabel}</div>
+                </div>
+                <div className="rounded-lg border border-navy-600 bg-navy-900 px-3 py-2 text-sm text-navy-300">
+                  <span className="font-mono font-bold text-white">{operatorIssues.length}</span> wpisow
+                </div>
+              </div>
+              <div className="max-h-[680px] space-y-3 overflow-y-auto pr-1">
+                {operatorIssues.map(issue => (
+                  <div key={issue.id} className="rounded-xl border border-navy-700 bg-navy-900 p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={cn('rounded-md border px-2 py-1 text-[11px] font-bold uppercase', issueKindClass(issue.kind))}>
+                            {issueKindLabel(issue.kind)}
+                          </span>
+                          <span className="text-xs text-navy-400">{issue.source}</span>
+                          {issue.severity && <span className="text-xs font-bold text-red-300">Pilnosc: {issue.severity}</span>}
+                        </div>
+                        <div className="mt-2 text-base font-bold text-white">{issue.title}</div>
+                        <div className="mt-1 text-xs text-navy-400">
+                          {formatDate(issue.date)}
+                          {issue.shift ? ` · Zmiana ${issue.shift}` : ''}
+                          {issue.hour ? ` · ${issue.hour}` : ''}
+                          {` · ${issue.machineName}`}
+                        </div>
+                      </div>
+                      <div className="text-right text-xs text-navy-400">
+                        {issue.operator && <div>Operator: <span className="font-semibold text-navy-200">{issue.operator}</span></div>}
+                        {issue.status && <div className="mt-1">Status: <span className="font-semibold text-white">{issue.status}</span></div>}
+                      </div>
+                    </div>
+
+                    <div className="mt-3 rounded-lg bg-navy-800 px-3 py-3 text-sm leading-relaxed text-navy-100">
+                      {issue.description}
+                    </div>
+
+                    {(issue.station || issue.action) && (
+                      <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                        {issue.station && (
+                          <div className="rounded-lg border border-navy-700 px-3 py-2 text-xs text-navy-300">
+                            <span className="text-navy-500">Stacja / obszar:</span> {issue.station}
+                          </div>
+                        )}
+                        {issue.action && (
+                          <div className="rounded-lg border border-navy-700 px-3 py-2 text-xs text-navy-300">
+                            <span className="text-navy-500">Podjete dzialanie:</span> {issue.action}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {issue.photoUrls.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {issue.photoUrls.map((url, index) => (
+                          <a key={url} href={url} target="_blank" rel="noreferrer" className="rounded-lg border border-blue-500/30 bg-blue-500/10 px-3 py-2 text-xs font-semibold text-blue-300 hover:bg-blue-500/20">
+                            Zdjecie {index + 1}
+                          </a>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                ))}
+                {!operatorIssues.length && <Empty text="Operatorzy nie opisali problemow w wybranym okresie" />}
               </div>
             </div>
           </div>
