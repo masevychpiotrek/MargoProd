@@ -51,8 +51,13 @@ Deno.serve(async (req) => {
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY')
     const anthropicKey = (Deno.env.get('ANTHROPIC_API_KEY') ?? '').replace(/[^\x21-\x7E]/g, '')
     const configuredModel = (Deno.env.get('ANTHROPIC_REPORT_MODEL') ?? '').trim()
+    const retiredModels = new Set([
+      'claude-sonnet-4-20250514',
+      'claude-opus-4-20250514',
+    ])
     const modelCandidates = Array.from(new Set([
-      configuredModel,
+      retiredModels.has(configuredModel) ? '' : configuredModel,
+      'claude-sonnet-5',
       'claude-haiku-4-5-20251001',
     ].filter(Boolean)))
     const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim()
@@ -195,7 +200,6 @@ ${input}`
           body: JSON.stringify({
             model: candidate,
             max_tokens: 6500,
-            temperature: 0,
             messages: [{ role: 'user', content: prompt }]
           }),
           signal: controller.signal
@@ -213,7 +217,7 @@ ${input}`
 
       responseText = await response.text().catch(() => '')
       console.error('Period AI response error', candidate, response.status, responseText.slice(0, 500))
-      const canTryFallback = (response.status === 400 || response.status === 404)
+      const canTryFallback = [400, 403, 404].includes(response.status)
         && candidate !== modelCandidates.at(-1)
       if (!canTryFallback) break
     }
@@ -243,8 +247,18 @@ ${input}`
     try {
       analysis = JSON.parse(raw)
     } catch {
-      console.error('Period AI invalid JSON', raw.slice(0, 500))
-      return json({ error: 'AI zwróciło nieprawidłowy format. Uruchom analizę ponownie.' })
+      const jsonStart = raw.indexOf('{')
+      const jsonEnd = raw.lastIndexOf('}')
+      if (jsonStart < 0 || jsonEnd <= jsonStart) {
+        console.error('Period AI invalid JSON', raw.slice(0, 500))
+        return json({ error: 'AI zwróciło nieprawidłowy format. Uruchom analizę ponownie.' })
+      }
+      try {
+        analysis = JSON.parse(raw.slice(jsonStart, jsonEnd + 1))
+      } catch {
+        console.error('Period AI invalid JSON', raw.slice(0, 500))
+        return json({ error: 'AI zwróciło nieprawidłowy format. Uruchom analizę ponownie.' })
+      }
     }
 
     return json({ analysis, model: usedModel })

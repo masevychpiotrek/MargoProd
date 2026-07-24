@@ -17,7 +17,8 @@ import {
   productionHourOrder
 } from '@/lib/utils'
 import { reportStationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
-import { computeOee, planAttainmentPct, WORLD_CLASS_OEE } from '@/lib/oee'
+import { computeOee, planAttainmentPct } from '@/lib/oee'
+import OeeHero from '@/components/manager/OeeHero'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
@@ -688,6 +689,30 @@ export default function ManagerDashboard() {
       ? Math.round(oeeAvailability / 100 * (oeePerformance / 100) * (oeeQuality / 100) * 1000) / 10
       : null
 
+    // "Six Big Losses" przelozone na sztuki, per grupa (bo kazda maszyna ma
+    // wlasna norme) - zeby pokazac NA CZYM konkretnie tracimy OEE, nie tylko
+    // finalny procent. Teoretyczne maksimum = caly zaplanowany czas zmiany
+    // przy idealnym tempie maszyny.
+    let theoreticalMaxPieces = 0
+    let lossAvailabilityPieces = 0
+    let lossPerformancePieces = 0
+    let lossQualityPieces = 0
+    timedGroups.forEach(row => {
+      const rate = machineTargetById[row.machineId] ?? TARGET
+      const plannedMin = row.runtime + row.ready + row.alarm + row.downtime
+      const groupMax = plannedMin / 60 * rate
+      const groupIdeal = row.runtime / 60 * rate
+      const produced = row.good + row.reject
+      theoreticalMaxPieces += groupMax
+      lossAvailabilityPieces += groupMax - groupIdeal
+      lossPerformancePieces += Math.max(0, groupIdeal - produced)
+      lossQualityPieces += row.reject
+    })
+    theoreticalMaxPieces = Math.round(theoreticalMaxPieces)
+    lossAvailabilityPieces = Math.round(lossAvailabilityPieces)
+    lossPerformancePieces = Math.round(lossPerformancePieces)
+    lossQualityPieces = Math.round(lossQualityPieces)
+
     return {
       totalGood,
       totalReject,
@@ -704,6 +729,11 @@ export default function ManagerDashboard() {
       oeeAvailability,
       oeePerformance,
       oeeQuality,
+      theoreticalMaxPieces,
+      lossAvailabilityPieces,
+      lossPerformancePieces,
+      lossQualityPieces,
+      timedGood,
       machineRate,
       goodRate,
       summarizedShifts,
@@ -1789,38 +1819,27 @@ export default function ManagerDashboard() {
 
       {activeTab === 'production' && (
         <>
-      {/* Kafel-bohater OEE (standard przemyslowy: Dostepnosc x Wydajnosc x Jakosc) */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-        <div className="card lg:col-span-1 flex flex-col justify-center items-center py-5">
-          <div className="kpi-label">OEE (efektywnosc maszyn)</div>
-          <div className={cn('text-5xl font-bold mt-1', kpi.oee == null ? 'text-navy-500' : efficiencyColor(kpi.oee))}>
-            {loading ? '...' : kpi.oee == null ? '—' : `${kpi.oee}%`}
-          </div>
-          <div className="text-xs text-navy-400 mt-1">
-            {kpi.oee == null ? 'brak rozliczenia czasu zmian' : `cel world-class: ${WORLD_CLASS_OEE}%`}
-          </div>
-        </div>
-        <div className="lg:col-span-2 grid grid-cols-3 gap-3">
-          {[
-            { label: 'Dostepnosc', value: kpi.oeeAvailability, sub: 'praca / czas planowany' },
-            { label: 'Wydajnosc', value: kpi.oeePerformance, sub: 'tempo vs norma maszyny' },
-            { label: 'Jakosc', value: kpi.oeeQuality, sub: 'dobre / wszystkie' }
-          ].map(item => (
-            <div key={item.label} className="kpi-card flex flex-col justify-center">
-              <div className="kpi-label">{item.label}</div>
-              <div className={cn('kpi-value', item.value == null ? 'text-navy-500' : efficiencyColor(item.value))}>
-                {loading ? '...' : item.value == null ? '—' : `${item.value}%`}
-              </div>
-              <div className="kpi-sub">{item.sub}</div>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Kafel-bohater OEE (standard przemyslowy: Dostepnosc x Wydajnosc x Jakosc)
+          + straty przelozone na sztuki (Six Big Losses) + realizacja planu. */}
+      <OeeHero
+        loading={loading}
+        oee={kpi.oee}
+        oeeAvailability={kpi.oeeAvailability}
+        oeePerformance={kpi.oeePerformance}
+        oeeQuality={kpi.oeeQuality}
+        theoreticalMaxPieces={kpi.theoreticalMaxPieces}
+        lossAvailabilityPieces={kpi.lossAvailabilityPieces}
+        lossPerformancePieces={kpi.lossPerformancePieces}
+        lossQualityPieces={kpi.lossQualityPieces}
+        goodPieces={kpi.timedGood}
+        planGood={kpi.totalGood}
+        planTarget={kpi.target}
+        planAttainmentPct={planAttainmentPct(kpi.totalGood, kpi.target)}
+      />
 
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <div className="grid grid-cols-3 gap-3">
         {[
           { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `cel ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'Realizacja planu', value: kpi.target ? `${planAttainmentPct(kpi.totalGood, kpi.target)}%` : '-', sub: 'produkcja / cel zmianowy', color: efficiencyColor(planAttainmentPct(kpi.totalGood, kpi.target)) },
           { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' },
           { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'produkcja / czas pracy', color: 'text-cyan-400' }
         ].map(item => (
