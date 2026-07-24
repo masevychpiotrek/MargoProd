@@ -57,6 +57,7 @@ const NAV_MANAGER = [
   { to: '/manager/operators',    label: 'Ranking operatorow', icon: Icons.users },
   { to: '/manager/forecast',     label: 'Prognoza dnia',    icon: Icons.dashboard },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
+  { to: '/manager/period-report', label: 'Raport zbiorczy',  icon: Icons.report },
   { to: '/manager/failures',     label: 'Awarie i technik', icon: Icons.failure },
   { to: '/password',             label: 'Zmien haslo',      icon: Icons.password },
   { to: '/manager/export',       label: 'Eksport',          icon: Icons.export },
