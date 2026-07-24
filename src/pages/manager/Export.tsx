@@ -28,6 +28,7 @@ interface ReportData {
 
 type ExportReport = HourlyReport & {
   operator?: { full_name: string } | { full_name: string }[] | null
+  shift?: { shift_type: string } | { shift_type: string }[] | null
 }
 
 function one<T>(value: T | T[] | null | undefined) {
@@ -110,11 +111,16 @@ const MACHINE_COLS = [
   { label: 'Uwagi',           key: 'notes',      width: 30 },
 ]
 
-const shiftLabel = (hour: number) => {
+const shiftLabelFromHour = (hour: number) => {
   if (hour >= 6  && hour < 14) return 'I'
   if (hour >= 14 && hour < 22) return 'II'
   return 'III'
 }
+
+// Zmiana z ZAPISANEGO typu zmiany (join do shifts) - zgodnie z panelem kierownika.
+// Wyliczanie z godziny tylko jako fallback (dane bez powiazanej zmiany).
+const reportShift = (r: ExportReport) =>
+  one(r.shift)?.shift_type ?? shiftLabelFromHour(r.hour_start ?? 0)
 
 const shiftOrder = (shift: string) => ({ I: 1, II: 2, III: 3 }[shift] ?? 9)
 
@@ -161,7 +167,7 @@ const buildMachineSheet = (
     const vals: (string | number | { formula: string })[] = [
       r.report_date,
       r.hour_block ?? '',
-      shiftLabel(r.hour_start ?? 0),
+      reportShift(r),
       one(r.operator)?.full_name ?? '—',
       r.good_count,
       r.reject_count || 0,
@@ -270,7 +276,7 @@ const buildSummarySheet = (
 
   reports.forEach(r => {
     const m     = machines.find(m => m.id === r.machine_id)
-    const shift = shiftLabel(r.hour_start ?? 0)
+    const shift = reportShift(r)
     const key   = `${r.report_date}__${r.machine_id}__${shift}`
     if (!groups[key]) groups[key] = {
       date: r.report_date, machineId: r.machine_id, machineName: m?.name ?? '—', shift,
@@ -403,7 +409,7 @@ export default function ManagerExport() {
 
   const loadData = async () => {
     setLoading(true)
-    let q = supabase.from('hourly_reports').select('*, operator:profiles!operator_id(full_name)')
+    let q = supabase.from('hourly_reports').select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type)')
       .gte('report_date', dateFrom).lte('report_date', dateTo)
       .is('deleted_at', null).order('report_date').order('hour_start')
     if (selMachine) q = q.eq('machine_id', selMachine)
@@ -592,7 +598,7 @@ export default function ManagerExport() {
                           <td className="py-1.5 px-3 text-navy-300 font-medium">{m?.name ?? '—'}</td>
                           <td className="py-1.5 px-3 text-center">
                             <span className="px-1.5 py-0.5 rounded text-xs font-bold bg-navy-700 text-navy-300">
-                              {shiftLabel(r.hour_start ?? 0)}
+                              {reportShift(r)}
                             </span>
                           </td>
                           <td className="py-1.5 px-3 font-bold font-mono text-white">{r.good_count.toLocaleString('pl-PL')}</td>
@@ -651,7 +657,7 @@ export default function ManagerExport() {
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px' }}>{r.report_date}</td>
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px', fontFamily: 'monospace' }}>{r.hour_block}</td>
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px', fontWeight: 'bold' }}>{m?.name ?? '—'}</td>
-                    <td style={{ border: '1px solid #ddd', padding: '4px 7px', textAlign: 'center', fontWeight: 'bold' }}>{shiftLabel(r.hour_start ?? 0)}</td>
+                    <td style={{ border: '1px solid #ddd', padding: '4px 7px', textAlign: 'center', fontWeight: 'bold' }}>{reportShift(r)}</td>
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px', fontWeight: 'bold' }}>{r.good_count.toLocaleString('pl-PL')}</td>
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px', color: r.reject_count > 0 ? '#DC2626' : undefined }}>{r.reject_count || '—'}</td>
                     <td style={{ border: '1px solid #ddd', padding: '4px 7px', fontWeight: 'bold', color: eff >= 90 ? '#16A34A' : eff >= 70 ? '#D97706' : '#DC2626' }}>{eff}%</td>

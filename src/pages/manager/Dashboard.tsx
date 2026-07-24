@@ -17,6 +17,7 @@ import {
   productionHourOrder
 } from '@/lib/utils'
 import { reportStationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
+import { computeOee, planAttainmentPct, WORLD_CLASS_OEE } from '@/lib/oee'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
@@ -138,6 +139,10 @@ type GroupRow = {
   rejectPct: number
   wEpq: number
   wEpqTotal: number
+  availabilityPct: number | null
+  performancePct: number | null
+  qualityPct: number
+  oeePct: number | null
   lowOutput: number
   highReject: number
   missingLowOutputReason: number
@@ -395,17 +400,38 @@ export default function ManagerDashboard() {
     return { from: fromDate <= toDate ? fromDate : toDate, to: fromDate <= toDate ? toDate : fromDate }
   }, [activeTab, fromDate, mode, month, selectedDate, toDate, year])
 
+  // Plan miesieczny z bazy (wspolny dla wszystkich kierownikow). Gdy w bazie
+  // nie ma jeszcze wpisu - miekki fallback do starej wartosci z localStorage.
   useEffect(() => {
-    setMonthlyTargetInput(readStoredMonthlyTarget(year, month))
+    let cancelled = false
     setMonthlySaveMessage('')
+    void (async () => {
+      const { data } = await supabase
+        .from('monthly_production_targets')
+        .select('target_qty')
+        .eq('year', Number(year))
+        .eq('month', Number(month))
+        .is('machine_id', null)
+        .maybeSingle()
+      if (cancelled) return
+      setMonthlyTargetInput(data?.target_qty != null
+        ? String(Math.round(Number(data.target_qty)))
+        : readStoredMonthlyTarget(year, month))
+    })()
+    return () => { cancelled = true }
   }, [month, year])
 
   const machineNameById = useMemo(
     () => Object.fromEntries(machines.map(machine => [machine.id, machine.name])),
     [machines]
   )
+  // Norma godzinowa per-maszyna z konfiguracji (target_per_hour); stala TARGET
+  // tylko jako fallback. Wczesniej wszystkie maszyny miały narzuconą tę samą 3200.
   const machineTargetById = useMemo(
-    () => Object.fromEntries(machines.map(machine => [machine.id, TARGET])),
+    () => Object.fromEntries(machines.map(machine => [
+      machine.id,
+      machine.target_per_hour && machine.target_per_hour > 0 ? machine.target_per_hour : TARGET
+    ])),
     [machines]
   )
 
@@ -567,13 +593,21 @@ export default function ManagerDashboard() {
       const reportGroup = reportGroups[key]
       const shift = shiftByKey[key]
       const hasSummary = hasShiftSummary(shift)
-      const good = hasSummary && shift?.summary_good_count != null ? shift.summary_good_count : reportGroup?.good ?? 0
-      const reject = hasSummary && shift?.summary_reject_count != null ? shift.summary_reject_count : reportGroup?.reject ?? 0
+      // JEDNO zrodlo prawdy dla sztuk: suma wpisow godzinowych. Podsumowanie
+      // zmiany (summary_*) sluzy tylko jako fallback, gdy nie ma zadnego wpisu
+      // (dane legacy) - dzieki temu korekta wpisu przez kierownika jest
+      // natychmiast widoczna, a wszystkie ekrany licza tak samo.
+      const good = reportGroup ? reportGroup.good : shift?.summary_good_count ?? 0
+      const reject = reportGroup ? reportGroup.reject : shift?.summary_reject_count ?? 0
+      // Czas bierzemy WYLACZNIE z podsumowania zmiany (wpisy godzinowe maja
+      // sztuczny runtime_min=60) - to jedyne realne zrodlo rozkladu czasu.
       const runtime = hasSummary ? shift?.summary_runtime_min ?? 0 : 0
       const ready = hasSummary ? shift?.summary_ready_min ?? 0 : 0
       const alarm = hasSummary ? shift?.summary_alarm_min ?? 0 : 0
       const downtime = hasSummary ? shift?.summary_downtime_min ?? 0 : 0
       const target = reportGroup || shift ? TARGET_PER_SHIFT : 0
+      const idealRate = machineTargetById[machineId] ?? TARGET
+      const oee = computeOee({ good, reject, runtimeMin: runtime, readyMin: ready, alarmMin: alarm, downtimeMin: downtime, idealRatePerHour: idealRate })
       const base = {
         key,
         date,
@@ -598,6 +632,11 @@ export default function ManagerDashboard() {
         rejectPct: pct1(reject, good + reject),
         wEpq: pct(good, target),
         wEpqTotal: pct(good + reject, target),
+        // OEE = Dostepnosc x Wydajnosc x Jakosc (standard przemyslowy).
+        availabilityPct: oee.availabilityPct,
+        performancePct: oee.performancePct,
+        qualityPct: oee.qualityPct,
+        oeePct: oee.oeePct,
         lowOutput: reportGroup?.lowOutput ?? 0,
         highReject: reportGroup?.highReject ?? 0,
         missingLowOutputReason: reportGroup?.missingLowOutputReason ?? 0,
@@ -632,6 +671,23 @@ export default function ManagerDashboard() {
     const highReject = groups.reduce((sum, row) => sum + row.highReject, 0)
     const missingReasons = groups.reduce((sum, row) => sum + row.missingLowOutputReason + row.missingRejectReason, 0)
 
+    // Zbiorcze OEE - liczone z sum po grupach majacych rozliczenie czasu.
+    // Wydajnosc wazona: laczne sztuki / suma "idealnego wyjscia" kazdej grupy
+    // (runtime x norma tej maszyny), zeby rozne normy maszyn byly uwzglednione.
+    const timedGroups = groups.filter(row => row.hasTimeSummary && row.runtime > 0)
+    const timedRuntime = timedGroups.reduce((sum, row) => sum + row.runtime, 0)
+    const timedPlanned = timedGroups.reduce((sum, row) => sum + row.runtime + row.ready + row.alarm + row.downtime, 0)
+    const timedGood = timedGroups.reduce((sum, row) => sum + row.good, 0)
+    const timedReject = timedGroups.reduce((sum, row) => sum + row.reject, 0)
+    const idealOutput = timedGroups.reduce((sum, row) =>
+      sum + row.runtime / 60 * (machineTargetById[row.machineId] ?? TARGET), 0)
+    const oeeAvailability = timedPlanned > 0 ? Math.round(timedRuntime / timedPlanned * 1000) / 10 : null
+    const oeePerformance = idealOutput > 0 ? Math.min(100, Math.round((timedGood + timedReject) / idealOutput * 1000) / 10) : null
+    const oeeQuality = (timedGood + timedReject) > 0 ? Math.round(timedGood / (timedGood + timedReject) * 1000) / 10 : null
+    const oee = oeeAvailability != null && oeePerformance != null && oeeQuality != null
+      ? Math.round(oeeAvailability / 100 * (oeePerformance / 100) * (oeeQuality / 100) * 1000) / 10
+      : null
+
     return {
       totalGood,
       totalReject,
@@ -644,6 +700,10 @@ export default function ManagerDashboard() {
       wepqTotal,
       rejectPct,
       availability,
+      oee,
+      oeeAvailability,
+      oeePerformance,
+      oeeQuality,
       machineRate,
       goodRate,
       summarizedShifts,
@@ -951,14 +1011,22 @@ export default function ManagerDashboard() {
       machines: Set<string>
       shifts: Set<string>
     }> = {}
-    const countedOperatorShiftTargets = new Set<string>()
+    // Cel planowy zmiany (18000) dzielimy MIEDZY operatorow proporcjonalnie do
+    // liczby ich wpisow w tej zmianie (proxy przepracowanych godzin). Wczesniej
+    // kazdy z dwoch operatorow na zmianie dostawal pelne 18000 - podwojne liczenie.
+    const groupReportCount: Record<string, number> = {}
+    filteredReports.forEach(report => {
+      const shiftType = one(report.shift)?.shift_type ?? '-'
+      const gk = `${report.report_date}|${shiftType}|${report.machine_id}`
+      groupReportCount[gk] = (groupReportCount[gk] ?? 0) + 1
+    })
 
     filteredReports.forEach(report => {
       const operatorId = report.operator_id
       const operatorName = one(report.operator)?.full_name ?? 'Nieznany operator'
       const shiftType = one(report.shift)?.shift_type ?? '-'
-      const targetKey = `${operatorId}|${report.report_date}|${shiftType}|${report.machine_id}`
-      const target = countedOperatorShiftTargets.has(targetKey) ? 0 : TARGET_PER_SHIFT
+      const gk = `${report.report_date}|${shiftType}|${report.machine_id}`
+      const target = groupReportCount[gk] > 0 ? TARGET_PER_SHIFT / groupReportCount[gk] : 0
       const wepq = reportWepq(report, machineTargetById[report.machine_id] ?? TARGET)
       const rejectPct = reportRejectPct(report)
 
@@ -983,7 +1051,6 @@ export default function ManagerDashboard() {
       map[operatorId].reports += 1
       map[operatorId].machines.add(machineNameById[report.machine_id] ?? '-')
       map[operatorId].shifts.add(shiftType)
-      countedOperatorShiftTargets.add(targetKey)
       if (wepq > 0 && wepq < 80) map[operatorId].lowOutput += 1
       if (rejectPct > 5) map[operatorId].highReject += 1
     })
@@ -1232,16 +1299,43 @@ export default function ManagerDashboard() {
     ]
   }), [monthlyPlan.points, monthlyPlan.previousHasData, monthlyPlan.previousLabel])
 
-  const saveMonthlyTarget = () => {
-    const cleanValue = String(monthlyTarget)
+  // Zapis planu miesiecznego do bazy (wspolny dla wszystkich). Plan zakladowy =
+  // wiersz z machine_id NULL. Recznie select->update/insert/delete, bo unikalnosc
+  // (rok,miesiac,machine_id) dla NULL opiera sie na indeksie wyrazeniowym.
+  const saveMonthlyTarget = async () => {
+    const yearNum = Number(year)
+    const monthNum = Number(month)
+    const { data: existing } = await supabase
+      .from('monthly_production_targets')
+      .select('id')
+      .eq('year', yearNum)
+      .eq('month', monthNum)
+      .is('machine_id', null)
+      .maybeSingle()
+
+    let error = null
     if (monthlyTarget > 0) {
-      window.localStorage.setItem(monthTargetKey(year, month), cleanValue)
-      setMonthlyTargetInput(cleanValue)
-      setMonthlySaveMessage(`Plan na ${month}.${year} zapisany: ${monthlyTarget.toLocaleString('pl-PL')} szt.`)
+      const payload = { year: yearNum, month: monthNum, machine_id: null, target_qty: monthlyTarget, updated_by: profile?.id ?? null, updated_at: new Date().toISOString() }
+      const res = existing
+        ? await supabase.from('monthly_production_targets').update(payload).eq('id', existing.id)
+        : await supabase.from('monthly_production_targets').insert(payload)
+      error = res.error
+      if (!error) {
+        setMonthlyTargetInput(String(monthlyTarget))
+        setMonthlySaveMessage(`Plan na ${month}.${year} zapisany: ${monthlyTarget.toLocaleString('pl-PL')} szt.`)
+      }
     } else {
-      window.localStorage.removeItem(monthTargetKey(year, month))
-      setMonthlyTargetInput('')
-      setMonthlySaveMessage(`Plan na ${month}.${year} wyczyszczony.`)
+      if (existing) {
+        const res = await supabase.from('monthly_production_targets').delete().eq('id', existing.id)
+        error = res.error
+      }
+      if (!error) {
+        setMonthlyTargetInput('')
+        setMonthlySaveMessage(`Plan na ${month}.${year} wyczyszczony.`)
+      }
+    }
+    if (error) {
+      setMonthlySaveMessage('Nie udalo sie zapisac planu: ' + error.message)
     }
     window.setTimeout(() => setMonthlySaveMessage(''), 4000)
   }
@@ -1695,12 +1789,40 @@ export default function ManagerDashboard() {
 
       {activeTab === 'production' && (
         <>
+      {/* Kafel-bohater OEE (standard przemyslowy: Dostepnosc x Wydajnosc x Jakosc) */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+        <div className="card lg:col-span-1 flex flex-col justify-center items-center py-5">
+          <div className="kpi-label">OEE (efektywnosc maszyn)</div>
+          <div className={cn('text-5xl font-bold mt-1', kpi.oee == null ? 'text-navy-500' : efficiencyColor(kpi.oee))}>
+            {loading ? '...' : kpi.oee == null ? '—' : `${kpi.oee}%`}
+          </div>
+          <div className="text-xs text-navy-400 mt-1">
+            {kpi.oee == null ? 'brak rozliczenia czasu zmian' : `cel world-class: ${WORLD_CLASS_OEE}%`}
+          </div>
+        </div>
+        <div className="lg:col-span-2 grid grid-cols-3 gap-3">
+          {[
+            { label: 'Dostepnosc', value: kpi.oeeAvailability, sub: 'praca / czas planowany' },
+            { label: 'Wydajnosc', value: kpi.oeePerformance, sub: 'tempo vs norma maszyny' },
+            { label: 'Jakosc', value: kpi.oeeQuality, sub: 'dobre / wszystkie' }
+          ].map(item => (
+            <div key={item.label} className="kpi-card flex flex-col justify-center">
+              <div className="kpi-label">{item.label}</div>
+              <div className={cn('kpi-value', item.value == null ? 'text-navy-500' : efficiencyColor(item.value))}>
+                {loading ? '...' : item.value == null ? '—' : `${item.value}%`}
+              </div>
+              <div className="kpi-sub">{item.sub}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Produkcja', value: `${kpi.totalGood.toLocaleString('pl-PL')} szt`, sub: `cel ${kpi.target.toLocaleString('pl-PL')} szt`, color: 'text-brand' },
-          { label: 'W EPQ', value: kpi.avgWepq ? `${kpi.avgWepq}%` : '-', sub: 'dobre / cel zmianowy', color: efficiencyColor(kpi.avgWepq) },
-          { label: 'WEPQ TOTAL', value: kpi.wepqTotal ? `${kpi.wepqTotal}%` : '-', sub: 'dobre + odrzut / cel', color: efficiencyColor(kpi.wepqTotal) },
-          { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' }
+          { label: 'Realizacja planu', value: kpi.target ? `${planAttainmentPct(kpi.totalGood, kpi.target)}%` : '-', sub: 'produkcja / cel zmianowy', color: efficiencyColor(planAttainmentPct(kpi.totalGood, kpi.target)) },
+          { label: 'Odrzut', value: `${kpi.rejectPct}%`, sub: `${kpi.totalReject.toLocaleString('pl-PL')} szt`, color: kpi.rejectPct > 5 ? 'text-red-400' : kpi.rejectPct > 2 ? 'text-amber-400' : 'text-green-400' },
+          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'produkcja / czas pracy', color: 'text-cyan-400' }
         ].map(item => (
           <div key={item.label} className="kpi-card">
             <div className="kpi-label">{item.label}</div>
@@ -1710,14 +1832,12 @@ export default function ManagerDashboard() {
         ))}
       </div>
 
-      <div className="grid grid-cols-2 lg:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
         {[
           { label: 'Czas pracy', value: kpi.summarizedShifts ? minsToHHMM(kpi.runtime) : '-', sub: `z rozliczen: ${kpi.summarizedShifts}`, color: 'text-green-400' },
-          { label: 'Wyd. maszyny', value: kpi.machineRate ? `${kpi.machineRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'produkcja / czas pracy', color: 'text-cyan-400' },
           { label: 'Wyd. dobrych', value: kpi.goodRate ? `${kpi.goodRate.toLocaleString('pl-PL')} szt/h` : '-', sub: kpi.missingTimeSummaries ? `brakuje czasu: ${kpi.missingTimeSummaries}` : 'dobre / czas pracy', color: 'text-green-400' },
           { label: 'Alarmy', value: kpi.summarizedShifts ? minsToHHMM(kpi.alarm) : '-', sub: 'z konca zmiany', color: kpi.alarm > 60 ? 'text-red-400' : 'text-amber-400' },
-          { label: 'Postoje', value: kpi.summarizedShifts ? minsToHHMM(kpi.downtime) : '-', sub: 'z konca zmiany', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' },
-          { label: 'Dostepnosc', value: kpi.summarizedShifts && kpi.availability ? `${kpi.availability}%` : '-', sub: kpi.missingTimeSummaries ? `brakuje ${kpi.missingTimeSummaries}` : 'praca / caly czas', color: efficiencyColor(kpi.availability) }
+          { label: 'Postoje', value: kpi.summarizedShifts ? minsToHHMM(kpi.downtime) : '-', sub: 'z konca zmiany', color: kpi.downtime > 60 ? 'text-red-400' : 'text-amber-400' }
         ].map(item => (
           <div key={item.label} className="kpi-card">
             <div className="kpi-label">{item.label}</div>

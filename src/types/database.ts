@@ -251,7 +251,41 @@ export interface ShiftStartFormData {
   operator_2_id?: string
 }
 
+// Reklamacja wewnetrzna - wada jakosciowa polfabrykatu zgloszona przez operatora.
+export interface InternalComplaint {
+  id: string
+  reporter_id: string
+  shift_id: string | null
+  machine_id: string | null
+  batch_number: string
+  production_date: string | null
+  semi_product: string
+  defect_type: string
+  description: string | null
+  photo_url: string | null
+  status: string
+  resolution_note: string | null
+  created_at: string
+  updated_at: string
+  // joined
+  reporter?: { full_name: string } | { full_name: string }[] | null
+  machine?: { name: string } | { name: string }[] | null
+}
+
 // ---- Dashboard / Analytics ----
+
+// Plan (cel) miesieczny produkcji - wspolny w bazie zamiast localStorage.
+// machine_id NULL = plan zbiorczy zakladu na dany miesiac.
+export interface MonthlyProductionTarget {
+  id: string
+  year: number
+  month: number
+  machine_id: string | null
+  target_qty: number
+  updated_by: string | null
+  updated_at: string
+  created_at: string
+}
 
 export interface MachineStats {
   machine_id: string

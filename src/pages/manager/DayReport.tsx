@@ -110,8 +110,14 @@ function hasClosingSummary(shift: ShiftWithSummary) {
 
 function applyClosingSummary(target: ShiftSummary, shift: ShiftWithSummary) {
   target.hasSummary = true
-  target.good = shift.summary_good_count ?? target.good
-  target.reject = shift.summary_reject_count ?? target.reject
+  // JEDNO zrodlo prawdy dla sztuk: suma wpisow godzinowych (juz policzona w target.good/
+  // reject). Z podsumowania zmiany bierzemy WYLACZNIE rozklad czasu i notatke - dzieki
+  // temu korekta wpisu przez kierownika jest natychmiast widoczna, a DayReport zgadza
+  // sie z panelem kierownika i eksportem. Fallback do summary tylko gdy brak wpisow.
+  if (target.reports === 0) {
+    target.good = shift.summary_good_count ?? target.good
+    target.reject = shift.summary_reject_count ?? target.reject
+  }
   target.runtime = shift.summary_runtime_min ?? target.runtime
   target.ready = shift.summary_ready_min ?? target.ready
   target.alarm = shift.summary_alarm_min ?? target.alarm

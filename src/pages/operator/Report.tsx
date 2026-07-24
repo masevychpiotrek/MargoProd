@@ -318,7 +318,12 @@ export default function OperatorReport() {
   const { display: countdown, isUrgent } = useHourCountdown()
   const { now, hour } = useClock()
   const shiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
-  const activeTarget = TARGET
+  // Norma godzinowa z konfiguracji maszyny (target_per_hour); stala TARGET tylko
+  // jako fallback. Dzieki temu zapisany target i generowana efficiency_pct
+  // zgadzaja sie z metryka na panelu kierownika.
+  const activeTarget = activeMachine?.target_per_hour && activeMachine.target_per_hour > 0
+    ? activeMachine.target_per_hour
+    : TARGET
 
   const [counterGood,    setCounterGood]    = useState('')
   const [counterReject,  setCounterReject]  = useState('')

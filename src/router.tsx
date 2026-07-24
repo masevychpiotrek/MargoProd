@@ -19,6 +19,8 @@ const ManagerDayReport   = lazy(() => import('@/pages/manager/DayReport'))
 const ManagerExport      = lazy(() => import('@/pages/manager/Export'))
 const ManagerProductionJobs = lazy(() => import('@/pages/manager/ProductionJobs'))
 const ManagerShiftStatPhotos = lazy(() => import('@/pages/manager/ShiftStatPhotos'))
+const OperatorQualityComplaint = lazy(() => import('@/pages/operator/QualityComplaint'))
+const ManagerQualityComplaints = lazy(() => import('@/pages/manager/QualityComplaints'))
 const ViewerDemo         = lazy(() => import('@/pages/viewer/Demo'))
 const ExecutiveDashboard = lazy(() => import('@/pages/executive/Dashboard'))
 const AdminDashboard     = lazy(() => import('@/pages/admin/Dashboard'))
@@ -195,7 +197,8 @@ const router = createBrowserRouter([
           { path: 'tasks',    element: <Wrap><OperatorTasks /></Wrap> },
           { path: 'password', element: <Wrap><OperatorPassword /></Wrap> },
           { path: 'history',  element: <Wrap><OperatorHistory /></Wrap> },
-          { path: 'production-jobs', element: <Wrap><OperatorProductionOrders /></Wrap> }
+          { path: 'production-jobs', element: <Wrap><OperatorProductionOrders /></Wrap> },
+          { path: 'complaint', element: <Wrap><OperatorQualityComplaint /></Wrap> }
         ]
       },
 
@@ -235,6 +238,10 @@ const router = createBrowserRouter([
       {
         path: 'manager/shift-stat-photos',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerShiftStatPhotos /></Wrap></RequireAuth>
+      },
+      {
+        path: 'manager/complaints',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerQualityComplaints /></Wrap></RequireAuth>
       },
       // ── SYRINGE OPERATOR MODULE ──
       {
