@@ -30,8 +30,11 @@ export async function compressImage(file: File, options: CompressImageOptions = 
   return new File([blob], file.name.replace(/\.[^.]+$/, '.jpg'), { type: 'image/jpeg' })
 }
 
-// Dla zdjec ekranow PLC z gesta tabela liczb - wyzsza rozdzielczosc i jakosc,
-// zeby AI mialo szanse odczytac drobny tekst (limit wysokiej rozdzielczosci Claude ~2600px).
+// Dla zdjec ekranow PLC z gesta tabela liczb.
 // minSizeBytes: 0 - zawsze konwertuje do JPEG (przewidywalny media_type dla wywolania AI),
 // niezaleznie od oryginalnego formatu/rozmiaru pliku (np. HEIC z telefonu).
-export const SCREEN_PHOTO_OPTIONS: CompressImageOptions = { minSizeBytes: 0, maxDimension: 2560, quality: 0.92 }
+// maxDimension 1568: powyzej tego progu Claude nalicza ~3x wiecej tokenow za obraz
+// (~4800 zamiast ~1600) - przy zdjeciu ekranu z tabela liczb 1568px w zupelnosci
+// wystarcza do odczytu, a kazde zdjecie kosztuje ~3x mniej.
+// quality 0.85: mniejszy plik (szybszy upload z hali), tekst ekranu nadal ostry.
+export const SCREEN_PHOTO_OPTIONS: CompressImageOptions = { minSizeBytes: 0, maxDimension: 1568, quality: 0.85 }

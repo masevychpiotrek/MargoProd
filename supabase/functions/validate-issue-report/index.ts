@@ -7,7 +7,9 @@ const corsHeaders = {
 }
 
 const ALLOWED_ROLES = new Set(['operator', 'syringe_operator', 'manager', 'admin'])
-const RATE_LIMIT_PER_HOUR = 8
+// Sprawdzanie odpala sie automatycznie (debounce podczas pisania), wiec limit
+// musi pomiescic kilka iteracji na kazdy z 2 komentarzy w kazdym raporcie.
+const RATE_LIMIT_PER_HOUR = 40
 
 const DOWNTIME_CATEGORIES = [
   'awaria_mechaniczna', 'awaria_elektryczna_czujnik', 'problem_pneumatyczny', 'problem_z_robotem',
@@ -123,30 +125,28 @@ Deno.serve(async (req) => {
 
     const categories = reportType === 'downtime' ? DOWNTIME_CATEGORIES : REJECT_CATEGORIES
 
-    const prompt = `Jestes kontrolerem jakosci zgloszen na hali produkcyjnej (branza medyczna, produkcja strzykawek/automatow).
-Operator zglasza przyczyne ${reportType === 'downtime' ? 'niskiej wydajnosci' : 'nadmiernego odrzutu'} na maszynie "${machineName}".
+    const prompt = `Jestes asystentem operatora na hali produkcyjnej (branza medyczna, produkcja na automatach montazowych).
+Twoim zadaniem NIE jest ocenianie ani odrzucanie zgloszen - tylko PRZEKSZTALCENIE roboczej notatki operatora w uporzadkowany wpis raportowy. Operator pisze szybko i skrotowo, a Ty tlumaczysz to na czytelny jezyk raportu.
+Operator opisuje przyczyne ${reportType === 'downtime' ? 'niskiej wydajnosci' : 'nadmiernego odrzutu'} na maszynie "${machineName}".
 Wybrane stacje/obszary wraz z orientacyjnym procentowym udzialem w problemie: ${stationsLabel}.
 ${stations.length > 1 ? 'Operator wskazal WIECEJ NIZ JEDNA stacje - problem moze dotyczyc kilku obszarow jednoczesnie.' : ''}
 ${priorOccurrencesThisShift > 0 ? `Uwaga: to ${priorOccurrencesThisShift + 1}. zgloszenie z tych stacji/obszarow w biezacej zmianie.` : ''}
 
-OPIS OPERATORA:
+NOTATKA OPERATORA:
 "${text}"
 
-ZASADY OCENY:
-1. Opis NIE MOZE byc ogolnikowy. Zakazane, zbyt ogolne wpisy (przyklady, nie wyczerpujace): ${BANNED_GENERIC_PHRASES.join(', ')}.
-2. Dobry opis musi wskazywac: czego dotyczyl problem, jaki komponent/element automatu byl zaangazowany, jaki byl skutek (zatrzymanie/spadek wydajnosci/zwiekszony odrzut), oraz czy wystepowal stale/okresowo/jednorazowo.
-3. Jesli opis jest zbyt ogolny lub nie pozwala okreslic co sie wydarzylo - ustaw ok=false i w "message" zwroc DOKLADNIE ten tekst (po polsku, bez zmian):
-"Opis jest zbyt ogolny. Wskaz konkretnie, co sie wydarzylo, na jakiej stacji, jaki element nie zadzialal prawidlowo oraz jaki byl skutek. Przyklad: 'Stacja 52 - nieprawidlowe podanie filtra odpowietrznika, automat zatrzymywal sie okresowo, konieczna byla regulacja podajnika.'"
-4. Jesli opis jest wystarczajaco konkretny, ustaw ok=true, message=null.
-5. Sprawdz zgodnosc stacji z opisem: czy tresc opisu (np. wspomniane podzespoly: kamera, robot, zgrzew, filtr, dren, luer-lock, igla, komora) pasuje do CO NAJMNIEJ JEDNEJ z wybranych stacji/obszarow (${stationsLabel}). Jesli opis WYRAZNIE nie pasuje do zadnej z wybranych stacji, ustaw stationMismatch=true i napisz krotkie ostrzezenie po polsku w "mismatchMessage" (np. "Opis moze nie pasowac do wybranych stacji. Sprawdz, czy wybor jest prawidlowy."). Jesli pasuje do co najmniej jednej lub nie da sie jednoznacznie ocenic, stationMismatch=false, mismatchMessage=null.
-6. Wybierz najbardziej pasujaca kategorie problemu z tej listy (zwroc DOKLADNIE jedna z wartosci, bez zmian): ${categories.join(', ')}.
-7. Zaproponuj krotka standaryzowana nazwe problemu (problemName, kilka slow, po polsku, bez ogolnikow).
-8. Zaproponuj uporzadkowany, zwiezly opis zdarzenia (standardizedDescription, 1-2 zdania, oparty TYLKO na faktach z opisu operatora - nie dodawaj informacji ktorych operator nie podal).
-9. Okresl skutek (effect) jednym krotkim zdaniem/fraza po polsku (np. "zatrzymanie automatu", "spadek wydajnosci", "nadmierny odrzut").
-10. WAZNE - przeszukaj tresc opisu pod katem KONKRETNYCH numerow stacji wspomnianych wprost (np. "stacja 11", "st.53", "st 8", "stacji 48", "na 21"). Uwzglednij TYLKO numery z zakresu 1-57, 76 lub 77 (to jedyne istniejace stacje). Zwroc te numery w polu "detectedStations" jako liste stringow w formacie "st_N" (np. ["st_11","st_53","st_8"]) - dla KAZDEGO numeru stacji wspomnianego w opisie, niezaleznie od tego czy zostal juz wybrany przez operatora czy nie. Jesli opis nie wspomina zadnego numeru stacji wprost, zwroc pusta liste [].
+ZASADY:
+1. Prawie zawsze ok=true. Ustaw ok=false WYLACZNIE gdy notatka nie zawiera ZADNEJ konkretnej informacji (np. samo "${BANNED_GENERIC_PHRASES.slice(0, 4).join('", "')}" bez zadnego szczegolu) - wtedy w "message" zwroc jedno krotkie, zyczliwe zdanie z podpowiedzia czego dopisac (np. "Dopisz co konkretnie sie stalo i na jakim elemencie, np. awaria chwytaka na stacji 7."). Notatka typu "awaria chwytaka st 7" JEST wystarczajaca - ok=true.
+2. standardizedDescription: przeksztalc notatke w 1-2 zdania poprawna polszczyzna, w formie raportowej (np. z "awaria chwytaka na stacji 7" zrob "Podczas pracy doszlo do uszkodzenia chwytaka na stacji 7."). Opieraj sie TYLKO na faktach z notatki - niczego nie zmyslaj i nie dodawaj.
+3. Wybierz najbardziej pasujaca kategorie problemu z tej listy (zwroc DOKLADNIE jedna z wartosci, bez zmian): ${categories.join(', ')}.
+4. Zaproponuj krotka standaryzowana nazwe problemu (problemName, kilka slow, po polsku).
+5. Okresl skutek (effect) jedna krotka fraza po polsku (np. "zatrzymanie automatu", "spadek wydajnosci", "nadmierny odrzut").
+6. askCause: ustaw true, jesli notatka opisuje objaw/zdarzenie, ale NIE podaje przyczyny zrodlowej (dlaczego do tego doszlo). Ustaw false, jesli przyczyna jest podana albo pytanie o przyczyne nie ma sensu (np. brak obsady, przezbrojenie).
+7. Zgodnosc stacji: jesli tresc notatki (wspomniane podzespoly: kamera, robot, zgrzew, filtr, dren, luer-lock, igla, komora itp.) WYRAZNIE nie pasuje do zadnej z wybranych stacji/obszarow (${stationsLabel}), ustaw stationMismatch=true i krotkie ostrzezenie po polsku w "mismatchMessage". W przeciwnym razie stationMismatch=false, mismatchMessage=null. To tylko podpowiedz - nie blokada.
+8. Przeszukaj notatke pod katem KONKRETNYCH numerow stacji wspomnianych wprost (np. "stacja 11", "st.53", "st 8", "stacji 48", "na 21"). Uwzglednij TYLKO numery z zakresu 1-57, 76 lub 77. Zwroc je w "detectedStations" jako liste stringow "st_N" (np. ["st_11","st_53"]) - niezaleznie czy operator juz je wybral. Brak numerow -> pusta lista [].
 
 Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
-{"ok": boolean, "message": string|null, "stationMismatch": boolean, "mismatchMessage": string|null, "category": string, "problemName": string, "standardizedDescription": string, "effect": string, "detectedStations": string[]}`
+{"ok": boolean, "message": string|null, "stationMismatch": boolean, "mismatchMessage": string|null, "category": string, "problemName": string, "standardizedDescription": string, "effect": string, "askCause": boolean, "detectedStations": string[]}`
 
     const response = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
@@ -203,6 +203,7 @@ Zwroc WYLACZNIE poprawny JSON (bez markdown, bez dodatkowego tekstu) w formacie:
       problemName: typeof result.problemName === 'string' ? result.problemName : '',
       standardizedDescription: typeof result.standardizedDescription === 'string' ? result.standardizedDescription : text,
       effect: typeof result.effect === 'string' ? result.effect : '',
+      askCause: Boolean(result.askCause),
       additionalStationsFound
     })
   } catch (error) {

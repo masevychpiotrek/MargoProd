@@ -5,7 +5,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
 import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
-import ShiftStatPhotosCard, { fetchPhotos as fetchShiftStatPhotos, fetchReadings as fetchShiftStatReadings } from '@/components/operator/ShiftStatPhotosCard'
+import ShiftStatPhotosCard, { fetchPhotos as fetchShiftStatPhotos, fetchReadings as fetchShiftStatReadings, SHIFT_STAT_MODULES } from '@/components/operator/ShiftStatPhotosCard'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
 
 interface ProductionOrder {
@@ -321,6 +321,21 @@ export default function OperatorShift() {
   // Sprawdź brakujące godziny przed zakończeniem zmiany
   const handleEndRequest = async () => {
     if (!activeShift) return
+    // WYMOG: przed zamknieciem zmiany musza byc dodane zdjecia statystyk
+    // obu modulow automatu. Blokujemy juz na etapie otwierania okna zamkniecia
+    // - dzieki temu operator najpierw robi zdjecia (z ktorych i tak podpowiadamy
+    // produkcje/odrzut/czasy), a dopiero potem wypelnia rozliczenie.
+    const photos = await fetchShiftStatPhotos(activeShift.id)
+    const presentModules = new Set(photos.map(p => p.module_key).filter(Boolean))
+    const missingPhotoModules = SHIFT_STAT_MODULES.filter(m => !presentModules.has(m.key))
+    if (missingPhotoModules.length > 0) {
+      setError(
+        `Aby zamknac zmiane, dodaj zdjecie statystyk dla: ${missingPhotoModules.map(m => m.label).join(' oraz ')}. ` +
+        `Karta „Zdjecia statystyk zmianowych automatu" znajduje sie ponizej.`
+      )
+      document.querySelector('[data-shift-stats-card]')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      return
+    }
     const latestReports = await loadShiftReports()
     const reportedHours = latestReports.map(r => r.hour_start)
     const shiftHours = SHIFT_HOURS[activeShift.shift_type as ShiftType]
@@ -823,9 +838,14 @@ export default function OperatorShift() {
               </div>
             )}
           </div>
-          <div className="mb-6">
+          <div className="mb-6" data-shift-stats-card>
             <ShiftStatPhotosCard />
           </div>
+          {error && (
+            <div className="mb-3 rounded-lg border border-red-500/40 bg-red-500/10 p-3 text-sm font-semibold text-red-300">
+              {error}
+            </div>
+          )}
           <div className="flex flex-col gap-3 sm:flex-row">
             <button onClick={() => navigate('/operator/report')} className="btn-primary flex-1 py-3 text-base">
               ✏️ Wpisz wynik godziny

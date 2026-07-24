@@ -660,6 +660,7 @@ export interface ShiftStatPhoto {
   shift_type: string | null
   shift_date: string | null
   photo_path: string
+  module_key: string | null
   captured_at: string
   ocr_status: ShiftStatOcrStatus
   ocr_error: string | null

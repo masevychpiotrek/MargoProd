@@ -14,6 +14,9 @@ export interface IssueCheckResult extends HeuristicCheckResult {
   standardizedDescription: string | null
   effect: string | null
   additionalStationsFound: DetectedStation[]
+  // true gdy notatka operatora opisuje objaw, ale nie podaje przyczyny -
+  // UI pokazuje wtedy opcjonalne pole "przyczyna (jesli znana)"
+  askCause: boolean
   validatedBy: 'ai' | 'heuristic'
 }
 
@@ -42,6 +45,7 @@ function toHeuristicResult(text: string): IssueCheckResult {
     standardizedDescription: null,
     effect: null,
     additionalStationsFound: [],
+    askCause: false,
     validatedBy: 'heuristic'
   }
 }
@@ -68,6 +72,7 @@ export async function checkIssueDescription(params: CheckIssueParams): Promise<I
       standardizedDescription: data.standardizedDescription ?? null,
       effect: data.effect ?? null,
       additionalStationsFound: Array.isArray(data.additionalStationsFound) ? data.additionalStationsFound : [],
+      askCause: Boolean(data.askCause),
       validatedBy: 'ai'
     }
   } catch {

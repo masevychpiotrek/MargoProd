@@ -7,7 +7,7 @@ import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
 import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
 import { syncProductionAlert } from '@/lib/productionAlerts'
-import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, primaryStation, type ReportIssueType } from '@/lib/issueReports'
+import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, primaryStation, localHeuristicCheck, type ReportIssueType } from '@/lib/issueReports'
 import { checkIssueDescription, type IssueCheckResult } from '@/lib/aiIssueValidation'
 import type { HourlyReport, ShiftType } from '@/types/database'
 
@@ -151,7 +151,7 @@ const ALL_STATION_OPTIONS = [
 
 function IssueStationAndCheck({
   reportType, stations, onStationsChange, text, checking, check, isStale,
-  mismatchConfirmed, onMismatchConfirmedChange, onCheck
+  cause, onCauseChange
 }: {
   reportType: ReportIssueType
   stations: StationAllocation[]
@@ -160,18 +160,17 @@ function IssueStationAndCheck({
   checking: boolean
   check: IssueCheckResult | null
   isStale: boolean
-  mismatchConfirmed: boolean
-  onMismatchConfirmedChange: (v: boolean) => void
-  onCheck: () => void
+  cause: string
+  onCauseChange: (v: string) => void
 }) {
   const [pendingStation, setPendingStation] = useState('')
   const usedValues = new Set(stations.map(s => s.value))
   const stillMissingStations = (check?.additionalStationsFound ?? []).filter(a => !usedValues.has(a.value))
   const step1Done = stations.length > 0
-  const step2Done = !!check && !isStale && check.ok && (!check.stationMismatch || mismatchConfirmed) && stillMissingStations.length === 0
+  const step2Done = step1Done && text.trim().length > 0
   const steps = [
     { label: 'Wybierz stacje', done: step1Done },
-    { label: 'Sprawdź opis z AI', done: step2Done },
+    { label: 'Opisz problem', done: step2Done },
     { label: 'Zapisz raport', done: false }
   ]
   const pctSum = stations.reduce((s, a) => s + (Number.isFinite(a.pct) ? a.pct : 0), 0)
@@ -249,43 +248,49 @@ function IssueStationAndCheck({
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={onCheck}
-        disabled={checking || stations.length === 0 || !text.trim()}
-        className="btn-secondary text-xs py-2 px-3 disabled:opacity-40"
-      >
-        {checking ? 'Sprawdzanie...' : 'Sprawdź opis z AI'}
-      </button>
+      {(checking || (isStale && text.trim().length > 0 && stations.length > 0)) && (
+        <div className="flex items-center gap-2 text-xs text-navy-400">
+          <span className="inline-block w-3 h-3 rounded-full border-2 border-navy-600 border-t-brand animate-spin" />
+          AI porządkuje opis...
+        </div>
+      )}
 
       {check && !isStale && (
         check.ok ? (
-          <div className="rounded-xl border border-green-500/30 bg-green-500/10 p-3 space-y-2 text-sm">
-            <div className="text-green-300 font-bold text-xs uppercase tracking-wider">
-              {check.validatedBy === 'ai' ? 'Sprawdzone przez AI' : 'Sprawdzone lokalnie (AI niedostępne)'}
+          <div className="rounded-xl border border-brand/30 bg-brand/5 p-3 space-y-2 text-sm">
+            <div className="text-brand font-bold text-xs uppercase tracking-wider">
+              Tak zapisze się ten wpis
             </div>
-            {check.category && <div className="text-white"><span className="text-navy-400">Kategoria: </span>{problemCategoryLabel(reportType, check.category)}</div>}
-            {check.problemName && <div className="text-white"><span className="text-navy-400">Problem: </span>{check.problemName}</div>}
             {check.standardizedDescription && (
-              <div className="rounded-lg bg-navy-900/60 border border-green-500/20 p-2.5">
-                <div className="text-[11px] font-bold uppercase tracking-wider text-green-400 mb-1">Ten opis zostanie zapisany (uporządkowany przez AI)</div>
+              <div className="rounded-lg bg-navy-900/60 border border-brand/20 p-2.5">
                 <div className="text-white font-medium">„{check.standardizedDescription}”</div>
               </div>
             )}
-            {check.effect && <div className="text-white"><span className="text-navy-400">Skutek: </span>{check.effect}</div>}
+            <div className="flex flex-wrap gap-x-4 gap-y-1">
+              {check.category && <div className="text-white text-xs"><span className="text-navy-400">Kategoria: </span>{problemCategoryLabel(reportType, check.category)}</div>}
+              {check.problemName && <div className="text-white text-xs"><span className="text-navy-400">Problem: </span>{check.problemName}</div>}
+              {check.effect && <div className="text-white text-xs"><span className="text-navy-400">Skutek: </span>{check.effect}</div>}
+            </div>
+            {check.askCause && (
+              <div className="mt-1">
+                <label className="text-xs text-navy-400 block mb-1">Czy wiadomo, co było przyczyną? (opcjonalnie)</label>
+                <input
+                  value={cause}
+                  onChange={e => onCauseChange(e.target.value)}
+                  placeholder="Np. poluzowany docisk, zużyta uszczelka..."
+                  className="input text-sm w-full"
+                />
+              </div>
+            )}
             {check.stationMismatch && (
-              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
-                <div className="text-amber-300 text-xs">{check.mismatchMessage}</div>
-                <label className="flex items-center gap-2 mt-2 cursor-pointer">
-                  <input type="checkbox" checked={mismatchConfirmed} onChange={e => onMismatchConfirmedChange(e.target.checked)} className="w-4 h-4 rounded accent-brand" />
-                  <span className="text-xs text-amber-200">Potwierdzam, że stacje są prawidłowe</span>
-                </label>
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2 text-amber-300 text-xs">
+                {check.mismatchMessage || 'Opis może nie pasować do wybranych stacji — sprawdź wybór.'}
               </div>
             )}
             {stillMissingStations.length > 0 && (
-              <div className="mt-2 rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
+              <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-2">
                 <div className="text-amber-300 text-xs">
-                  AI wykryło w opisie wzmiankę o dodatkowych stacjach, które nie zostały dodane: {stillMissingStations.map(s => s.label).join(', ')}.
+                  W opisie wspomniane są stacje, których nie dodano: {stillMissingStations.map(s => s.label).join(', ')}.
                 </div>
                 <button type="button" onClick={addAllMissingStations} className="mt-2 rounded-lg border border-amber-500/50 bg-amber-500/15 px-2.5 py-1 text-xs font-bold text-amber-200 hover:bg-amber-500/25">
                   + Dodaj wszystkie ({stillMissingStations.length})
@@ -294,14 +299,11 @@ function IssueStationAndCheck({
             )}
           </div>
         ) : (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 space-y-1 text-sm text-red-300">
-            <div className="text-red-300 font-bold text-xs uppercase tracking-wider">Odpowiedź AI</div>
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-3 space-y-1 text-sm text-amber-300">
+            <div className="font-bold text-xs uppercase tracking-wider">Podpowiedź AI</div>
             <div>{check.message}</div>
           </div>
         )
-      )}
-      {check && isStale && (
-        <div className="text-xs text-amber-400">Opis został zmieniony — sprawdź ponownie przed zapisem.</div>
       )}
     </div>
   )
@@ -333,8 +335,8 @@ export default function OperatorReport() {
   const [rejectCheckedText,   setRejectCheckedText]   = useState<string | null>(null)
   const [downtimeChecking, setDowntimeChecking] = useState(false)
   const [rejectChecking,   setRejectChecking]   = useState(false)
-  const [downtimeMismatchConfirmed, setDowntimeMismatchConfirmed] = useState(false)
-  const [rejectMismatchConfirmed,   setRejectMismatchConfirmed]   = useState(false)
+  const [downtimeCause, setDowntimeCause] = useState('')
+  const [rejectCause,   setRejectCause]   = useState('')
   const [existingReports, setExistingReports] = useState<ReportExt[]>([])
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [saving,  setSaving]  = useState(false)
@@ -507,12 +509,14 @@ export default function OperatorReport() {
   const rejectAboveLimit = !testMode && rejectPct > 5
   const downtimeNeedsCheck = (belowTarget || downtimeReason.trim().length > 0)
   const rejectNeedsCheck = (rejectAboveLimit || rejectReason.trim().length > 0)
-  const downtimeCheckStale = downtimeCheckedText !== downtimeReason
-  const rejectCheckStale = rejectCheckedText !== rejectReason
+  // Klucz sprawdzenia obejmuje tekst ORAZ wybrane stacje - zmiana ktorejkolwiek
+  // z tych rzeczy powoduje automatyczne, ciche odswiezenie podgladu AI.
   const downtimeStationValues = new Set(downtimeStations.map(s => s.value))
   const rejectStationValues = new Set(rejectStations.map(s => s.value))
-  const downtimeStillMissingStations = (downtimeCheck?.additionalStationsFound ?? []).filter(a => !downtimeStationValues.has(a.value))
-  const rejectStillMissingStations = (rejectCheck?.additionalStationsFound ?? []).filter(a => !rejectStationValues.has(a.value))
+  const downtimeCheckKey = [...downtimeStationValues].sort().join(',') + '|' + downtimeReason
+  const rejectCheckKey = [...rejectStationValues].sort().join(',') + '|' + rejectReason
+  const downtimeCheckStale = downtimeCheckedText !== downtimeCheckKey
+  const rejectCheckStale = rejectCheckedText !== rejectCheckKey
   const countPriorStationOverlap = (stations: StationAllocation[], field: 'downtime' | 'reject') => {
     if (stations.length === 0) return 0
     const values = new Set(stations.map(s => s.value))
@@ -572,11 +576,12 @@ export default function OperatorReport() {
   const resetIssueChecks = () => {
     setDowntimeCheck(null); setRejectCheck(null)
     setDowntimeCheckedText(null); setRejectCheckedText(null)
-    setDowntimeMismatchConfirmed(false); setRejectMismatchConfirmed(false)
+    setDowntimeCause(''); setRejectCause('')
   }
 
   const runDowntimeCheck = async () => {
     if (downtimeStations.length === 0 || !downtimeReason.trim()) return
+    const key = downtimeCheckKey
     setDowntimeChecking(true)
     try {
       const result = await checkIssueDescription({
@@ -587,8 +592,7 @@ export default function OperatorReport() {
         priorOccurrencesThisShift: downtimePriorCount
       })
       setDowntimeCheck(result)
-      setDowntimeCheckedText(downtimeReason)
-      setDowntimeMismatchConfirmed(false)
+      setDowntimeCheckedText(key)
     } finally {
       setDowntimeChecking(false)
     }
@@ -596,6 +600,7 @@ export default function OperatorReport() {
 
   const runRejectCheck = async () => {
     if (rejectStations.length === 0 || !rejectReason.trim()) return
+    const key = rejectCheckKey
     setRejectChecking(true)
     try {
       const result = await checkIssueDescription({
@@ -606,12 +611,30 @@ export default function OperatorReport() {
         priorOccurrencesThisShift: rejectPriorCount
       })
       setRejectCheck(result)
-      setRejectCheckedText(rejectReason)
-      setRejectMismatchConfirmed(false)
+      setRejectCheckedText(key)
     } finally {
       setRejectChecking(false)
     }
   }
+
+  // AI dziala jak asystent piszacy na zywo: ~1.2s po przerwaniu pisania
+  // (albo po zmianie stacji) samo porzadkuje opis i pokazuje podglad wpisu.
+  // Zadnych przyciskow, zadnego blokowania - operator tylko pisze.
+  useEffect(() => {
+    if (downtimeStations.length === 0 || !downtimeReason.trim()) return
+    if (!downtimeCheckStale || downtimeChecking) return
+    const t = window.setTimeout(() => { void runDowntimeCheck() }, 1200)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [downtimeCheckKey, downtimeChecking])
+
+  useEffect(() => {
+    if (rejectStations.length === 0 || !rejectReason.trim()) return
+    if (!rejectCheckStale || rejectChecking) return
+    const t = window.setTimeout(() => { void runRejectCheck() }, 1200)
+    return () => window.clearTimeout(t)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rejectCheckKey, rejectChecking])
 
   const cancelEditReport = () => {
     setEditingReportId(null)
@@ -668,19 +691,21 @@ export default function OperatorReport() {
     if (ORDERS_ENABLED && !testMode && !activeOrderId) errs.push('Wybierz aktywne zlecenie produkcyjne')
     if (belowTarget && !downtimeReason.trim()) errs.push(`Wpisz przyczyne wyniku ponizej progu wyjasnienia: przyrost ${incGood} szt przy progu ${explanationTarget} szt`)
     if (rejectAboveLimit && !rejectReason.trim()) errs.push(`Wpisz przyczyne odrzutu powyzej 5%: odrzut ${rejectPct}%`)
+    // AI nie blokuje zapisu - dziala doradczo. Blokuje wylacznie natychmiastowa,
+    // lokalna kontrola ewidentnych ogolnikow (bez czekania na siec).
     if (downtimeNeedsCheck) {
       if (downtimeStations.length === 0) errs.push('Wybierz przynajmniej jedna stacje lub kategorie ogolna dla komentarza do wyniku')
-      else if (!downtimeCheck || downtimeCheckStale) errs.push('Sprawdz opis komentarza do wyniku z AI przed zapisem')
-      else if (!downtimeCheck.ok) errs.push(downtimeCheck.message || 'Opis komentarza do wyniku jest zbyt ogolny')
-      else if (downtimeCheck.stationMismatch && !downtimeMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do wyniku')
-      else if (downtimeStillMissingStations.length > 0) errs.push(`AI wykrylo w opisie wyniku dodatkowe stacje (${downtimeStillMissingStations.map(s => s.label).join(', ')}) - dodaj je albo usun wzmianke z opisu`)
+      else {
+        const h = localHeuristicCheck(downtimeReason)
+        if (!h.ok) errs.push(h.message || 'Opis komentarza do wyniku jest zbyt ogolny - dopisz co konkretnie sie stalo')
+      }
     }
     if (rejectNeedsCheck) {
       if (rejectStations.length === 0) errs.push('Wybierz przynajmniej jedna stacje lub kategorie ogolna dla komentarza do odrzutu')
-      else if (!rejectCheck || rejectCheckStale) errs.push('Sprawdz opis komentarza do odrzutu z AI przed zapisem')
-      else if (!rejectCheck.ok) errs.push(rejectCheck.message || 'Opis komentarza do odrzutu jest zbyt ogolny')
-      else if (rejectCheck.stationMismatch && !rejectMismatchConfirmed) errs.push('Potwierdz zgodnosc stacji z opisem komentarza do odrzutu')
-      else if (rejectStillMissingStations.length > 0) errs.push(`AI wykrylo w opisie odrzutu dodatkowe stacje (${rejectStillMissingStations.map(s => s.label).join(', ')}) - dodaj je albo usun wzmianke z opisu`)
+      else {
+        const h = localHeuristicCheck(rejectReason)
+        if (!h.ok) errs.push(h.message || 'Opis komentarza do odrzutu jest zbyt ogolny - dopisz co konkretnie sie stalo')
+      }
     }
     if (alreadyReported) errs.push(`Raport za ${testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour)} juz istnieje`)
     if (activeOrderId && orderQtyVal > incGood) errs.push('Sztuki na zlecenie nie moga byc wieksze niz przyrost dobrych sztuk')
@@ -688,15 +713,28 @@ export default function OperatorReport() {
     if (counterReject !== '' && prevReject > 0 && curReject < prevReject) errs.push('Licznik odrzutu nie moze malec')
     return errs
   }
-  // Operator wpisuje wlasnymi slowami, ale gdy AI potwierdzi opis (i tekst sie nie zmienil
-  // od tamtej pory), do bazy trafia ustandaryzowana wersja AI - zeby kierownik/zarzad/technik
-  // widzieli uporzadkowany opis zamiast surowego, czesto niechlujnego tekstu operatora.
-  const downtimeFinalText = (!downtimeCheckStale && downtimeCheck?.ok && downtimeCheck.standardizedDescription)
-    ? downtimeCheck.standardizedDescription
-    : downtimeReason
-  const rejectFinalText = (!rejectCheckStale && rejectCheck?.ok && rejectCheck.standardizedDescription)
-    ? rejectCheck.standardizedDescription
-    : rejectReason
+  // Operator wpisuje wlasnymi slowami, ale gdy AI zdazylo uporzadkowac opis
+  // (i tekst/stacje sie nie zmienily), do bazy trafia wersja raportowa AI.
+  // Jesli operator dopisal przyczyne w polu "Czy wiadomo, co bylo przyczyna?",
+  // doklejamy ja na koncu opisu.
+  const appendCause = (text: string, cause: string) => {
+    const c = cause.trim()
+    if (!c) return text
+    const base = text.trim().replace(/[.。]?$/, '.')
+    return `${base} Przyczyna: ${c}${/[.!?]$/.test(c) ? '' : '.'}`
+  }
+  const downtimeFinalText = appendCause(
+    (!downtimeCheckStale && downtimeCheck?.ok && downtimeCheck.standardizedDescription)
+      ? downtimeCheck.standardizedDescription
+      : downtimeReason,
+    downtimeCause
+  )
+  const rejectFinalText = appendCause(
+    (!rejectCheckStale && rejectCheck?.ok && rejectCheck.standardizedDescription)
+      ? rejectCheck.standardizedDescription
+      : rejectReason,
+    rejectCause
+  )
 
   const handleSave = async () => {
     const errs = validate()
@@ -1082,9 +1120,8 @@ export default function OperatorReport() {
                 checking={downtimeChecking}
                 check={downtimeCheck}
                 isStale={downtimeCheckStale}
-                mismatchConfirmed={downtimeMismatchConfirmed}
-                onMismatchConfirmedChange={setDowntimeMismatchConfirmed}
-                onCheck={runDowntimeCheck}
+                cause={downtimeCause}
+                onCauseChange={setDowntimeCause}
               />
             )}
           </div>
@@ -1135,9 +1172,8 @@ export default function OperatorReport() {
                 checking={rejectChecking}
                 check={rejectCheck}
                 isStale={rejectCheckStale}
-                mismatchConfirmed={rejectMismatchConfirmed}
-                onMismatchConfirmedChange={setRejectMismatchConfirmed}
-                onCheck={runRejectCheck}
+                cause={rejectCause}
+                onCauseChange={setRejectCause}
               />
             )}
           </div>

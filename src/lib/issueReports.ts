@@ -165,6 +165,9 @@ export interface HeuristicCheckResult {
   message: string | null
 }
 
+// Celowo lagodna: blokuje tylko ewidentne smieci (samo "awaria", pojedyncze
+// slowo), a nie krotkie-ale-konkretne wpisy typu "awaria chwytaka st 7".
+// Reszte jakosci zapewnia AI, ktore dziala doradczo (nie blokuje zapisu).
 export function localHeuristicCheck(text: string): HeuristicCheckResult {
   const trimmed = text.trim()
   if (!trimmed) return { ok: false, message: GENERIC_DESCRIPTION_MESSAGE }
@@ -173,14 +176,14 @@ export function localHeuristicCheck(text: string): HeuristicCheckResult {
   if (BANNED_GENERIC_PHRASES.some(phrase => normalized === phrase)) {
     return { ok: false, message: GENERIC_DESCRIPTION_MESSAGE }
   }
-  if (trimmed.length < 25) {
+  if (trimmed.length < 12) {
     return { ok: false, message: GENERIC_DESCRIPTION_MESSAGE }
   }
 
   const bannedWords = new Set(BANNED_GENERIC_PHRASES.flatMap(p => p.split(' ')))
   const words = normalized.split(/\s+/).filter(Boolean)
   const meaningfulWords = words.filter(w => !bannedWords.has(w))
-  if (meaningfulWords.length < 4) {
+  if (meaningfulWords.length < 2) {
     return { ok: false, message: GENERIC_DESCRIPTION_MESSAGE }
   }
 

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
+import { shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
 import type { ShiftStatPhoto, ShiftStatReading } from '@/types/database'
 
 type PhotoRow = ShiftStatPhoto & {
@@ -67,6 +68,35 @@ export default function ManagerShiftStatPhotos() {
     setDetailLoading(false)
   }
 
+  // Pobiera zdjecie przez fetch->blob (bezposredni <a download> nie wymusza
+  // pobrania dla adresow cross-origin) i zapisuje pod czytelna nazwa:
+  // 2026-07-21_Zmiana-I_IS-PRO-1_08-57.jpg
+  const [downloading, setDownloading] = useState(false)
+  const handleDownload = async (photo: PhotoRow) => {
+    const url = signedUrls[photo.id]
+    if (!url) return
+    setDownloading(true)
+    try {
+      const response = await fetch(url)
+      const blob = await response.blob()
+      const captured = new Date(photo.captured_at)
+      const hh = String(captured.getHours()).padStart(2, '0')
+      const mm = String(captured.getMinutes()).padStart(2, '0')
+      const machineName = (one(photo.machine)?.name ?? 'automat').replace(/[^\w-]+/g, '-')
+      const fileName = `${photo.shift_date ?? 'brak-daty'}_Zmiana-${photo.shift_type ?? '-'}_${machineName}_${hh}-${mm}.jpg`
+      const objectUrl = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = fileName
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+    } finally {
+      setDownloading(false)
+    }
+  }
+
   const filtered = photos.filter(p => {
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -101,6 +131,9 @@ export default function ManagerShiftStatPhotos() {
                 <img src={signedUrls[photo.id]} alt="Miniatura" className="w-full h-32 object-cover rounded-lg border border-navy-700 mb-2" />
               )}
               <div className="text-xs font-bold text-white">{one(photo.machine)?.name ?? '—'}</div>
+              {shiftStatModuleLabel(photo.module_key) && (
+                <div className="text-xs text-brand">{shiftStatModuleLabel(photo.module_key)}</div>
+              )}
               <div className="text-xs text-navy-400">Zmiana {photo.shift_type} · {photo.shift_date}</div>
               <div className="text-xs text-navy-500 mt-1">{one(photo.operator)?.full_name ?? '—'}</div>
               <span className={cn(
@@ -122,12 +155,24 @@ export default function ManagerShiftStatPhotos() {
             <div className="flex items-start justify-between mb-4">
               <div>
                 <h2 className="text-xl font-bold text-white">{one(selected.machine)?.name ?? '—'}</h2>
+                {shiftStatModuleLabel(selected.module_key) && (
+                  <p className="text-brand text-sm font-semibold">{shiftStatModuleLabel(selected.module_key)}</p>
+                )}
                 <p className="text-navy-400 text-sm">
                   Zmiana {selected.shift_type} · {selected.shift_date} · {one(selected.operator)?.full_name ?? '—'}
                 </p>
                 <p className="text-navy-500 text-xs mt-0.5">{new Date(selected.captured_at).toLocaleString('pl-PL')}</p>
               </div>
-              <button onClick={() => setSelected(null)} className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+              <div className="flex items-center gap-2 shrink-0">
+                <button
+                  onClick={() => handleDownload(selected)}
+                  disabled={downloading || !signedUrls[selected.id]}
+                  className="rounded-xl border border-navy-600 bg-navy-900 px-3 py-1.5 text-xs font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
+                >
+                  {downloading ? 'Pobieranie...' : '⤓ Pobierz zdjęcie'}
+                </button>
+                <button onClick={() => setSelected(null)} className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+              </div>
             </div>
 
             {signedUrls[selected.id] && (
