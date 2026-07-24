@@ -50,7 +50,11 @@ Deno.serve(async (req) => {
     const supabaseUrl = Deno.env.get('SUPABASE_URL')
     const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? Deno.env.get('SERVICE_ROLE_KEY')
     const anthropicKey = (Deno.env.get('ANTHROPIC_API_KEY') ?? '').replace(/[^\x21-\x7E]/g, '')
-    const model = (Deno.env.get('ANTHROPIC_REPORT_MODEL') ?? 'claude-sonnet-4-20250514').trim()
+    const configuredModel = (Deno.env.get('ANTHROPIC_REPORT_MODEL') ?? '').trim()
+    const modelCandidates = Array.from(new Set([
+      configuredModel,
+      'claude-haiku-4-5-20251001',
+    ].filter(Boolean)))
     const token = (req.headers.get('Authorization') ?? '').replace('Bearer ', '').trim()
 
     if (!supabaseUrl || !serviceRoleKey) throw new Error('Brak konfiguracji Supabase po stronie serwera.')
@@ -172,37 +176,49 @@ Limity: maksymalnie osiem findings, dwanaście problemGroups, sześć rootCauses
 DANE ŹRÓDŁOWE:
 ${input}`
 
-    const controller = new AbortController()
-    const timeout = setTimeout(() => controller.abort(), 55_000)
-    let response: Response
-    try {
-      response = await fetch('https://api.anthropic.com/v1/messages', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': anthropicKey,
-          'anthropic-version': '2023-06-01',
-        },
-        body: JSON.stringify({
-          model,
-          max_tokens: 6500,
-          temperature: 0,
-          messages: [{ role: 'user', content: prompt }]
-        }),
-        signal: controller.signal
-      })
-    } catch (error) {
-      if (error instanceof Error && error.name === 'AbortError') {
-        return json({ error: 'Analiza AI trwała zbyt długo. Spróbuj ponownie lub wybierz krótszy okres.' })
+    let response: Response | null = null
+    let responseText = ''
+    let usedModel = modelCandidates[0]
+
+    for (const candidate of modelCandidates) {
+      usedModel = candidate
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 55_000)
+      try {
+        response = await fetch('https://api.anthropic.com/v1/messages', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': anthropicKey,
+            'anthropic-version': '2023-06-01',
+          },
+          body: JSON.stringify({
+            model: candidate,
+            max_tokens: 6500,
+            temperature: 0,
+            messages: [{ role: 'user', content: prompt }]
+          }),
+          signal: controller.signal
+        })
+      } catch (error) {
+        if (error instanceof Error && error.name === 'AbortError') {
+          return json({ error: 'Analiza AI trwała zbyt długo. Spróbuj ponownie lub wybierz krótszy okres.' })
+        }
+        throw error
+      } finally {
+        clearTimeout(timeout)
       }
-      throw error
-    } finally {
-      clearTimeout(timeout)
+
+      if (response.ok) break
+
+      responseText = await response.text().catch(() => '')
+      console.error('Period AI response error', candidate, response.status, responseText.slice(0, 500))
+      const canTryFallback = (response.status === 400 || response.status === 404)
+        && candidate !== modelCandidates.at(-1)
+      if (!canTryFallback) break
     }
 
-    if (!response.ok) {
-      const responseText = await response.text().catch(() => '')
-      console.error('Period AI response error', response.status, responseText.slice(0, 500))
+    if (!response?.ok) {
       let apiMessage = ''
       try {
         const parsedError = JSON.parse(responseText) as { error?: { message?: string } }
@@ -213,7 +229,7 @@ ${input}`
       return json({
         error: apiMessage
           ? `Usługa AI odrzuciła żądanie: ${apiMessage}`
-          : `Usługa AI zwróciła błąd ${response.status}.`
+          : `Usługa AI zwróciła błąd ${response?.status ?? 502}.`
       })
     }
 
@@ -231,7 +247,7 @@ ${input}`
       return json({ error: 'AI zwróciło nieprawidłowy format. Uruchom analizę ponownie.' })
     }
 
-    return json({ analysis, model })
+    return json({ analysis, model: usedModel })
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Nie udało się wygenerować analizy.'
     console.error('analyze-period-report failed', message)
