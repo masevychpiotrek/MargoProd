@@ -3,12 +3,13 @@ import { Chart } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController } from 'chart.js'
 import { supabase } from '@/lib/supabase'
 import { cn, getProductionDate } from '@/lib/utils'
-import { issueStatusLabel, problemCategoryLabel, reportStationLabel } from '@/lib/issueReports'
+import { issueStatusLabel, problemCategoryLabel, reportStationLabel, stationLabel } from '@/lib/issueReports'
 import {
   preparePeriodAiEvidence,
   requestPeriodAiAnalysis,
   type PeriodAiAnalysis,
   type PeriodAiMetrics,
+  type PeriodAiStationAllocation,
   type PreparedPeriodAiData
 } from '@/lib/periodReportAi'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
@@ -51,6 +52,7 @@ type OperatorIssue = {
   title: string
   description: string
   station: string | null
+  stations: PeriodAiStationAllocation[]
   action: string | null
   status: string | null
   operator: string | null
@@ -187,6 +189,38 @@ function cleanLabel(value: string | null | undefined) {
   return value
 }
 
+function canonicalStationKey(value: string) {
+  const stationNumber = value.match(/(?:^|\b)(?:stacja|st)[\s_-]*(\d{1,3})(?:\b|$)/i)
+  if (stationNumber) return `st_${Number(stationNumber[1])}`
+  return `area_${value
+    .toLocaleLowerCase('pl-PL')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 60)}`
+}
+
+function stationAllocations(
+  allocations: Array<{ station: string; pct: number }> | null | undefined,
+  single: string | null | undefined
+): PeriodAiStationAllocation[] {
+  if (allocations?.length) {
+    return allocations
+      .map(item => ({
+        key: item.station,
+        label: stationLabel(item.station),
+        pct: Math.max(0, Math.min(100, Number(item.pct) || 0))
+      }))
+      .filter(item => item.key && item.label !== '—')
+  }
+
+  const label = cleanLabel(stationLabel(single))
+  return label && single
+    ? [{ key: canonicalStationKey(single), label, pct: 100 }]
+    : []
+}
+
 function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], machines: Machine[]) {
   const machineNames = new Map(machines.map(machine => [machine.id, machine.name]))
   const issues: OperatorIssue[] = []
@@ -217,6 +251,7 @@ function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], ma
         title: cleanLabel(problemCategoryLabel('downtime', report.downtime_problem_name)) ?? 'Przebieg pracy / niska wydajność',
         description: report.downtime_reason.trim(),
         station: cleanLabel(reportStationLabel(report.downtime_stations, report.downtime_station)),
+        stations: stationAllocations(report.downtime_stations, report.downtime_station),
         action: report.downtime_action_taken?.trim() || null,
         status: cleanLabel(issueStatusLabel(report.downtime_status))
       })
@@ -231,6 +266,7 @@ function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], ma
         title: cleanLabel(problemCategoryLabel('reject', report.reject_problem_name)) ?? 'Podwyższony odrzut',
         description: report.reject_reason.trim(),
         station: cleanLabel(reportStationLabel(report.reject_stations, report.reject_station)),
+        stations: stationAllocations(report.reject_stations, report.reject_station),
         action: report.reject_action_taken?.trim() || null,
         status: cleanLabel(issueStatusLabel(report.reject_status))
       })
@@ -245,6 +281,7 @@ function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], ma
         title: 'Dodatkowa informacja operatora',
         description: report.notes.trim(),
         station: null,
+        stations: [],
         action: null,
         status: null
       })
@@ -268,6 +305,13 @@ function operatorIssuesFromData(reports: ReportRow[], failures: FailureRow[], ma
       title: FAILURE_CATEGORY_LABELS[failure.category] ?? failure.category,
       description: failure.description.trim(),
       station: failure.station?.trim() || null,
+      stations: failure.station?.trim()
+        ? [{
+            key: canonicalStationKey(failure.station),
+            label: cleanLabel(stationLabel(failure.station)) ?? failure.station.trim(),
+            pct: 100
+          }]
+        : [],
       action: failure.resolution_notes?.trim() || null,
       status: FAILURE_STATUS_LABELS[failure.status] ?? failure.status,
       operator: reporter?.full_name ?? null,
@@ -305,6 +349,14 @@ function issueKindLabel(kind: OperatorIssueKind) {
   if (kind === 'reject') return 'Odrzut'
   if (kind === 'failure') return 'Awaria'
   return 'Uwaga operatora'
+}
+
+function stationKindBreakdown(kinds: Record<OperatorIssueKind, number>) {
+  return (Object.entries(kinds) as Array<[OperatorIssueKind, number]>)
+    .filter(([, count]) => count > 0)
+    .sort((a, b) => b[1] - a[1])
+    .map(([kind, count]) => `${issueKindLabel(kind)}: ${count}`)
+    .join(' · ')
 }
 
 function issueKindClass(kind: OperatorIssueKind) {
@@ -479,6 +531,24 @@ function buildEmailHtml(params: {
     </tr>
   `).join('') ?? ''
 
+  const aiStationRows = aiAnalysis?.stationFindings.map(station => `
+    <tr>
+      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">
+        <strong>${esc(station.stationLabel)}</strong><br>
+        <span style="color:#64748b">${esc(station.machines.join(', '))}</span>
+      </td>
+      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top;text-align:center">
+        <strong>${station.mentions}</strong> wpisów<br>
+        <span style="color:#64748b">udział ważony: ${station.weightedMentions.toLocaleString('pl-PL')}</span>
+      </td>
+      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">
+        <strong>${esc(station.dominantIssue)}</strong><br>
+        <span style="color:#475569">${esc(station.assessment)}</span>
+      </td>
+      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">${esc(station.recommendation)}</td>
+    </tr>
+  `).join('') ?? ''
+
   const aiActions = aiAnalysis?.actions.map(action => `
     <tr>
       <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:bold">${action.priority}</td>
@@ -516,6 +586,13 @@ function buildEmailHtml(params: {
             <div style="margin-top:7px;font-size:13px;color:#334155">${esc(aiAnalysis.managementAssessment || 'Brak oceny zarządczej posiadającej wystarczające potwierdzenie w danych.')}</div>
             <div style="margin-top:9px;font-size:11px;color:#64748b">Przed analizą pominięto ${aiPrepared.lowValueRemoved} wpisów bez wartości informacyjnej i połączono ${aiPrepared.duplicatesRemoved} dokładnych duplikatów.</div>
           </div>
+          ${aiStationRows ? `
+            <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Stacje generujące problemy</h3>
+            <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
+              <tr style="background:#1e3a8a;color:white"><th align="left" style="padding:9px">Stacja / automat</th><th align="center" style="padding:9px">Skala</th><th align="left" style="padding:9px">Ocena AI</th><th align="left" style="padding:9px">Zalecenie</th></tr>
+              ${aiStationRows}
+            </table>
+          ` : ''}
           ${aiFindings ? `
             <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Kluczowe ustalenia AI</h3>
             <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
@@ -1200,6 +1277,9 @@ function AiAnalysisPanel({
           Do analizy: <strong className="text-white">{prepared.evidence.length}</strong>
         </span>
         <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
+          Stacje w danych: <strong className="text-white">{prepared.stationStats.length}</strong>
+        </span>
+        <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
           Połączone duplikaty: <strong className="text-white">{prepared.duplicatesRemoved}</strong>
         </span>
         <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
@@ -1266,6 +1346,57 @@ function AiAnalysisPanel({
                 {analysis.managementAssessment || 'Brak oceny zarządczej posiadającej wystarczające potwierdzenie w danych.'}
               </div>
               <div className="mt-2 text-xs text-navy-500">Potwierdzone przez {analysis.managementEvidenceIds.length} źródeł</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="mb-1 text-base font-bold text-white">Stacje generujące problemy</div>
+            <div className="mb-3 text-sm text-navy-400">
+              Ranking i skala pochodzą z danych operatorów; AI opisuje dominujący problem i zalecane działanie.
+            </div>
+            <div className="overflow-x-auto border-y border-navy-700">
+              <table className="w-full text-sm">
+                <thead className="bg-navy-900 text-xs uppercase text-navy-400">
+                  <tr>
+                    <th className="px-3 py-3 text-left">Stacja</th>
+                    <th className="px-3 py-3 text-left">Skala i automat</th>
+                    <th className="px-3 py-3 text-left">Ocena AI</th>
+                    <th className="px-3 py-3 text-left">Zalecenie</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {analysis.stationFindings.map(station => (
+                    <tr key={station.stationKey} className="border-t border-navy-700 bg-navy-950/40 align-top">
+                      <td className="px-3 py-3">
+                        <div className="font-bold text-white">{station.stationLabel}</div>
+                        <div className="mt-1 text-xs text-navy-500">{station.evidenceIds.length} źródeł reprezentatywnych</div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="font-mono font-bold text-brand">{station.mentions} wpisów</div>
+                        <div className="mt-1 text-xs text-navy-400">
+                          Udział ważony: {station.weightedMentions.toLocaleString('pl-PL')}
+                        </div>
+                        <div className="mt-1 text-xs text-navy-300">{station.machines.join(', ')}</div>
+                        <div className="mt-1 text-xs leading-relaxed text-navy-500">
+                          {stationKindBreakdown(station.byKind)}
+                        </div>
+                      </td>
+                      <td className="px-3 py-3">
+                        <div className="font-semibold text-white">{station.dominantIssue}</div>
+                        <div className="mt-1 max-w-xl text-xs leading-relaxed text-navy-300">{station.assessment}</div>
+                      </td>
+                      <td className="px-3 py-3 text-navy-100">{station.recommendation}</td>
+                    </tr>
+                  ))}
+                  {!analysis.stationFindings.length && (
+                    <tr className="border-t border-navy-700 bg-navy-950/40">
+                      <td colSpan={4} className="px-3 py-5 text-center text-navy-400">
+                        Brak wpisów z przypisaną stacją pozwalających na wiarygodną analizę.
+                      </td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
 

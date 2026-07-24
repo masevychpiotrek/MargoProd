@@ -2,6 +2,13 @@ import { supabase } from '@/lib/supabase'
 
 export type PeriodAiSeverity = 'critical' | 'high' | 'medium' | 'positive'
 export type PeriodAiOwner = 'Produkcja' | 'UR' | 'Jakosc' | 'Technolog' | 'Kierownik'
+export type PeriodAiIssueKind = 'performance' | 'reject' | 'note' | 'failure'
+
+export type PeriodAiStationAllocation = {
+  key: string
+  label: string
+  pct: number
+}
 
 export type PeriodAiRawIssue = {
   id: string
@@ -10,11 +17,12 @@ export type PeriodAiRawIssue = {
   hour: string | null
   machineId: string
   machineName: string
-  kind: 'performance' | 'reject' | 'note' | 'failure'
+  kind: PeriodAiIssueKind
   source: string
   title: string
   description: string
   station: string | null
+  stations: PeriodAiStationAllocation[]
   action: string | null
   status: string | null
   severity: string | null
@@ -31,6 +39,7 @@ export type PeriodAiEvidence = {
   title: string
   description: string
   station: string | null
+  stations: PeriodAiStationAllocation[]
   action: string | null
   status: string | null
   severity: string | null
@@ -69,6 +78,31 @@ export type PeriodAiMetrics = {
     realizationPct: number
     rejectPct: number
   }>
+}
+
+export type PeriodAiStationStat = {
+  key: string
+  label: string
+  mentions: number
+  weightedMentions: number
+  machines: string[]
+  evidenceIds: string[]
+  firstDate: string
+  lastDate: string
+  byKind: Record<PeriodAiIssueKind, number>
+}
+
+export type PeriodAiStationFinding = {
+  stationKey: string
+  stationLabel: string
+  assessment: string
+  dominantIssue: string
+  recommendation: string
+  evidenceIds: string[]
+  machines: string[]
+  mentions: number
+  weightedMentions: number
+  byKind: Record<PeriodAiIssueKind, number>
 }
 
 export type PeriodAiFinding = {
@@ -114,6 +148,7 @@ export type PeriodAiAnalysis = {
   executiveEvidenceIds: string[]
   managementAssessment: string
   managementEvidenceIds: string[]
+  stationFindings: PeriodAiStationFinding[]
   findings: PeriodAiFinding[]
   problemGroups: PeriodAiProblemGroup[]
   rootCauses: PeriodAiRootCause[]
@@ -129,6 +164,7 @@ export type PeriodAiAnalysis = {
 
 export type PreparedPeriodAiData = {
   evidence: PeriodAiEvidence[]
+  stationStats: PeriodAiStationStat[]
   duplicatesRemoved: number
   lowValueRemoved: number
   truncated: number
@@ -163,6 +199,47 @@ function issuePriority(item: PeriodAiEvidence) {
   return kind + unresolved + recurring
 }
 
+function buildStationStats(evidence: PeriodAiEvidence[]): PeriodAiStationStat[] {
+  const stats = new Map<string, PeriodAiStationStat>()
+
+  evidence.forEach(item => {
+    item.stations.forEach(station => {
+      const current = stats.get(station.key) ?? {
+        key: station.key,
+        label: station.label,
+        mentions: 0,
+        weightedMentions: 0,
+        machines: [],
+        evidenceIds: [],
+        firstDate: item.firstDate,
+        lastDate: item.lastDate,
+        byKind: { performance: 0, reject: 0, note: 0, failure: 0 }
+      }
+
+      current.mentions += item.occurrences
+      current.weightedMentions += item.occurrences * (station.pct / 100)
+      current.byKind[item.kind] += item.occurrences
+      if (!current.machines.includes(item.machineName)) current.machines.push(item.machineName)
+      if (!current.evidenceIds.includes(item.id)) current.evidenceIds.push(item.id)
+      if (item.firstDate < current.firstDate) current.firstDate = item.firstDate
+      if (item.lastDate > current.lastDate) current.lastDate = item.lastDate
+      stats.set(station.key, current)
+    })
+  })
+
+  return [...stats.values()]
+    .map(item => ({
+      ...item,
+      weightedMentions: Math.round(item.weightedMentions * 10) / 10,
+      machines: item.machines.sort((a, b) => a.localeCompare(b, 'pl')),
+    }))
+    .sort((a, b) =>
+      b.weightedMentions - a.weightedMentions ||
+      b.mentions - a.mentions ||
+      a.label.localeCompare(b.label, 'pl')
+    )
+}
+
 export function preparePeriodAiEvidence(rawItems: PeriodAiRawIssue[], maxItems = 300): PreparedPeriodAiData {
   const unique = new Map<string, PeriodAiEvidence>()
   let duplicatesRemoved = 0
@@ -178,7 +255,10 @@ export function preparePeriodAiEvidence(rawItems: PeriodAiRawIssue[], maxItems =
       item.machineId,
       item.kind,
       normalized(item.title),
-      normalized(item.station ?? ''),
+      item.stations
+        .map(station => `${station.key}:${station.pct}`)
+        .sort()
+        .join(',') || normalized(item.station ?? ''),
       normalized(item.description)
     ].join('|')
 
@@ -204,6 +284,11 @@ export function preparePeriodAiEvidence(rawItems: PeriodAiRawIssue[], maxItems =
       title: item.title.trim(),
       description: item.description.trim(),
       station: item.station?.trim() || null,
+      stations: item.stations.map(station => ({
+        key: station.key.trim(),
+        label: station.label.trim(),
+        pct: Math.max(0, Math.min(100, Number(station.pct) || 0))
+      })).filter(station => station.key && station.label),
       action: item.action?.trim() || null,
       status: item.status?.trim() || null,
       severity: item.severity?.trim() || null,
@@ -223,7 +308,13 @@ export function preparePeriodAiEvidence(rawItems: PeriodAiRawIssue[], maxItems =
     id: `E${String(index + 1).padStart(3, '0')}`
   }))
 
-  return { evidence, duplicatesRemoved, lowValueRemoved, truncated }
+  return {
+    evidence,
+    stationStats: buildStationStats(evidence),
+    duplicatesRemoved,
+    lowValueRemoved,
+    truncated
+  }
 }
 
 function plainText(value: unknown, maxLength = 1200) {
@@ -246,7 +337,12 @@ function narrativeArray(value: unknown, maxItems = 12) {
   return value.map(item => narrativeText(item, 300)).filter(Boolean).slice(0, maxItems)
 }
 
-function normalizeAnalysis(raw: unknown, evidence: PeriodAiEvidence[], model: string): PeriodAiAnalysis {
+function normalizeAnalysis(
+  raw: unknown,
+  evidence: PeriodAiEvidence[],
+  stationStats: PeriodAiStationStat[],
+  model: string
+): PeriodAiAnalysis {
   if (!raw || typeof raw !== 'object') throw new Error('AI zwróciło nieprawidłowy format analizy.')
   const source = raw as Record<string, unknown>
   const evidenceMap = new Map(evidence.map(item => [item.id, item]))
@@ -257,6 +353,29 @@ function normalizeAnalysis(raw: unknown, evidence: PeriodAiEvidence[], model: st
   }
   const machinesFor = (ids: string[]) => [...new Set(ids.map(id => evidenceMap.get(id)?.machineName).filter((name): name is string => Boolean(name)))]
   const occurrencesFor = (ids: string[]) => ids.reduce((sum, id) => sum + (evidenceMap.get(id)?.occurrences ?? 0), 0)
+  const stationMap = new Map(stationStats.map(item => [item.key, item]))
+
+  const stationFindings = (Array.isArray(source.stationFindings) ? source.stationFindings : []).flatMap(item => {
+    const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
+    const stationKey = plainText(row.stationKey, 80)
+    const station = stationMap.get(stationKey)
+    if (!station) return []
+    const stationEvidence = new Set(station.evidenceIds)
+    const evidenceIds = refs(row.evidenceIds).filter(id => stationEvidence.has(id))
+    if (!evidenceIds.length) return []
+    return [{
+      stationKey,
+      stationLabel: station.label,
+      assessment: narrativeText(row.assessment, 700),
+      dominantIssue: narrativeText(row.dominantIssue, 300),
+      recommendation: narrativeText(row.recommendation, 700),
+      evidenceIds,
+      machines: station.machines,
+      mentions: station.mentions,
+      weightedMentions: station.weightedMentions,
+      byKind: station.byKind
+    }].filter(entry => entry.assessment && entry.dominantIssue && entry.recommendation)
+  }).slice(0, 8)
 
   const findings = (Array.isArray(source.findings) ? source.findings : []).flatMap(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -345,6 +464,7 @@ function normalizeAnalysis(raw: unknown, evidence: PeriodAiEvidence[], model: st
     executiveEvidenceIds,
     managementAssessment: managementEvidenceIds.length ? narrativeText(source.managementAssessment, 1600) : '',
     managementEvidenceIds,
+    stationFindings,
     findings,
     problemGroups,
     rootCauses,
@@ -381,5 +501,10 @@ export async function requestPeriodAiAnalysis(params: {
 
   if (error) throw new Error(error.message || 'Nie udało się uruchomić analizy AI.')
   if (data?.error) throw new Error(String(data.error))
-  return normalizeAnalysis(data?.analysis, params.prepared.evidence, String(data?.model ?? 'Claude'))
+  return normalizeAnalysis(
+    data?.analysis,
+    params.prepared.evidence,
+    params.prepared.stationStats,
+    String(data?.model ?? 'Claude')
+  )
 }

@@ -4,9 +4,34 @@ import { cn } from '@/lib/utils'
 import { shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
 import type { ShiftStatPhoto, ShiftStatReading } from '@/types/database'
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type JSZipLib = any
+declare global { interface Window { JSZip?: JSZipLib } }
+
 type PhotoRow = ShiftStatPhoto & {
   machine?: { name: string } | { name: string }[] | null
   operator?: { full_name: string } | { full_name: string }[] | null
+}
+
+// Wspolna z pojedynczym pobraniem nazwa pliku: 2026-07-21_Zmiana-I_IS-PRO-1_08-57.jpg
+function photoFileName(photo: PhotoRow): string {
+  const captured = new Date(photo.captured_at)
+  const hh = String(captured.getHours()).padStart(2, '0')
+  const mm = String(captured.getMinutes()).padStart(2, '0')
+  const machineName = (one(photo.machine)?.name ?? 'automat').replace(/[^\w-]+/g, '-')
+  const moduleSuffix = photo.module_key ? `_${photo.module_key}` : ''
+  return `${photo.shift_date ?? 'brak-daty'}_Zmiana-${photo.shift_type ?? '-'}_${machineName}${moduleSuffix}_${hh}-${mm}.jpg`
+}
+
+function loadJSZip(): Promise<JSZipLib> {
+  return new Promise((resolve, reject) => {
+    if (window.JSZip) { resolve(window.JSZip); return }
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js'
+    s.onload = () => resolve(window.JSZip!)
+    s.onerror = () => reject(new Error('Nie udało się załadować biblioteki ZIP'))
+    document.head.appendChild(s)
+  })
 }
 
 function one<T>(value: T | T[] | null | undefined): T | undefined {
@@ -69,8 +94,7 @@ export default function ManagerShiftStatPhotos() {
   }
 
   // Pobiera zdjecie przez fetch->blob (bezposredni <a download> nie wymusza
-  // pobrania dla adresow cross-origin) i zapisuje pod czytelna nazwa:
-  // 2026-07-21_Zmiana-I_IS-PRO-1_08-57.jpg
+  // pobrania dla adresow cross-origin) i zapisuje pod czytelna nazwa.
   const [downloading, setDownloading] = useState(false)
   const handleDownload = async (photo: PhotoRow) => {
     const url = signedUrls[photo.id]
@@ -79,21 +103,68 @@ export default function ManagerShiftStatPhotos() {
     try {
       const response = await fetch(url)
       const blob = await response.blob()
-      const captured = new Date(photo.captured_at)
-      const hh = String(captured.getHours()).padStart(2, '0')
-      const mm = String(captured.getMinutes()).padStart(2, '0')
-      const machineName = (one(photo.machine)?.name ?? 'automat').replace(/[^\w-]+/g, '-')
-      const fileName = `${photo.shift_date ?? 'brak-daty'}_Zmiana-${photo.shift_type ?? '-'}_${machineName}_${hh}-${mm}.jpg`
       const objectUrl = URL.createObjectURL(blob)
       const link = document.createElement('a')
       link.href = objectUrl
-      link.download = fileName
+      link.download = photoFileName(photo)
       document.body.appendChild(link)
       link.click()
       link.remove()
       URL.revokeObjectURL(objectUrl)
     } finally {
       setDownloading(false)
+    }
+  }
+
+  // Pobiera WSZYSTKIE aktualnie widoczne (po filtrze) zdjecia jako jeden plik ZIP -
+  // zamiast klikac "pobierz" osobno dla kazdego. JSZip ladowany dynamicznie z CDN,
+  // tak samo jak ExcelJS w Export.tsx - bez zwiekszania rozmiaru bundla appki.
+  const [downloadingAll, setDownloadingAll] = useState(false)
+  const [downloadAllProgress, setDownloadAllProgress] = useState({ done: 0, total: 0 })
+  const [downloadAllError, setDownloadAllError] = useState('')
+  const handleDownloadAll = async (list: PhotoRow[]) => {
+    if (list.length === 0) return
+    setDownloadingAll(true)
+    setDownloadAllError('')
+    setDownloadAllProgress({ done: 0, total: list.length })
+    try {
+      const JSZip = await loadJSZip()
+      const zip = new JSZip()
+      const usedNames = new Set<string>()
+      let done = 0
+      for (const photo of list) {
+        try {
+          const url = signedUrls[photo.id] ?? (await getSignedUrl(photo.photo_path))
+          if (url) {
+            const blob = await (await fetch(url)).blob()
+            let name = photoFileName(photo)
+            // Unikniecie nadpisania w ZIP, gdyby dwa zdjecia miec identyczna nazwe
+            // (ta sama minuta, maszyna, zmiana, modul).
+            if (usedNames.has(name)) {
+              name = name.replace(/\.jpg$/, `_${photo.id.slice(0, 6)}.jpg`)
+            }
+            usedNames.add(name)
+            zip.file(name, blob)
+          }
+        } catch {
+          // pojedyncze zdjecie moglo wygasnac/zniknac - pomijamy, reszta leci dalej
+        }
+        done += 1
+        setDownloadAllProgress({ done, total: list.length })
+      }
+      const content = await zip.generateAsync({ type: 'blob' })
+      const objectUrl = URL.createObjectURL(content)
+      const link = document.createElement('a')
+      link.href = objectUrl
+      link.download = `Statystyki-zmianowe_${new Date().toISOString().slice(0, 10)}.zip`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(objectUrl)
+    } catch (e) {
+      setDownloadAllError(e instanceof Error ? e.message : 'Nie udało się przygotować archiwum ZIP.')
+    } finally {
+      setDownloadingAll(false)
     }
   }
 
@@ -112,11 +183,26 @@ export default function ManagerShiftStatPhotos() {
         <p className="text-navy-400 mt-1">{photos.length} zdjęć</p>
       </div>
 
-      <input
-        value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Szukaj po automacie, operatorze, dacie (RRRR-MM-DD)..."
-        className="input w-full max-w-md"
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Szukaj po automacie, operatorze, dacie (RRRR-MM-DD)..."
+          className="input w-full max-w-md"
+        />
+        <button
+          onClick={() => handleDownloadAll(filtered)}
+          disabled={downloadingAll || filtered.length === 0}
+          className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
+        >
+          {downloadingAll
+            ? `⤓ Pobieranie ${downloadAllProgress.done}/${downloadAllProgress.total}...`
+            : `⤓ Pobierz wszystkie (${filtered.length})`}
+        </button>
+      </div>
+
+      {downloadAllError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{downloadAllError}</div>
+      )}
 
       {loading ? (
         <div className="text-center py-8 text-navy-500">Ładowanie...</div>

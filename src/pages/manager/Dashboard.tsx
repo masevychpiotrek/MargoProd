@@ -16,9 +16,11 @@ import {
   isShiftPastAutoClose,
   productionHourOrder
 } from '@/lib/utils'
-import { reportStationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES } from '@/lib/issueReports'
+import { reportStationLabel, problemCategoryLabel, issueStatusLabel, ISSUE_STATUSES, type ReportIssueType } from '@/lib/issueReports'
 import { computeOee, planAttainmentPct } from '@/lib/oee'
 import OeeHero from '@/components/manager/OeeHero'
+import { detectMachineSignals } from '@/lib/machineDiagnostics'
+import MachineDiagnostics from '@/components/manager/MachineDiagnostics'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
@@ -1006,18 +1008,27 @@ export default function ManagerDashboard() {
     .filter(forecast => forecast.hoursWorked > 0),
   [activeShifts, filteredReports, machineNameById, machineTargetById])
 
+  // Pareto po KATEGORII przypisanej przez AI (nie po surowym tekscie) - dwa
+  // niemal identyczne zgloszenia z innym sformulowaniem operatora traktowane
+  // sa jako TA SAMA przyczyna, wiec slupki faktycznie cos agreguja. Wpisy bez
+  // kategorii (sprzed wprowadzenia AI albo niesklasyfikowane) trafiaja do
+  // osobnego koszyka "bez klasyfikacji AI" - nic nie znika po cichu.
   const downtimePareto = useMemo(() => {
     const reasons: Record<string, { count: number; label: string }> = {}
 
+    const addEntry = (typeLabel: string, reportType: ReportIssueType, category: string | null | undefined, hasRawText: boolean) => {
+      if (!category && !hasRawText) return
+      const key = category ? `${typeLabel}|${category}` : `${typeLabel}|_unclassified`
+      const label = category
+        ? `${typeLabel}: ${problemCategoryLabel(reportType, category)}`
+        : `${typeLabel}: Inne (bez klasyfikacji AI)`
+      if (!reasons[key]) reasons[key] = { count: 0, label }
+      reasons[key].count += 1
+    }
+
     filteredReports.forEach(report => {
-      const values = [report.downtime_reason, report.reject_reason, report.notes]
-      values.forEach(value => {
-        const reason = value?.trim()
-        if (!reason) return
-        const key = reason.toLowerCase().slice(0, 90)
-        if (!reasons[key]) reasons[key] = { count: 0, label: reason.slice(0, 110) }
-        reasons[key].count += 1
-      })
+      addEntry('Wynik', 'downtime', report.downtime_category, Boolean(report.downtime_reason?.trim()))
+      addEntry('Odrzut', 'reject', report.reject_category, Boolean(report.reject_reason?.trim()))
     })
 
     const items = Object.values(reasons).sort((a, b) => b.count - a.count).slice(0, 8)
@@ -1027,6 +1038,13 @@ export default function ManagerDashboard() {
       pct: total > 0 ? Math.round(item.count / total * 100) : 0
     }))
   }, [filteredReports])
+
+  // Sygnaly z regul per maszyna ("automat X potrzebuje Y") - reuzywa te same
+  // filteredReports/groups co Pareto i tabela dzien/zmiana/maszyna powyzej.
+  const machineSignals = useMemo(
+    () => detectMachineSignals(filteredReports, groups, machineNameById),
+    [filteredReports, groups, machineNameById]
+  )
 
   const operatorRanking = useMemo(() => {
     const map: Record<string, {
@@ -1899,6 +1917,8 @@ export default function ManagerDashboard() {
           ))}
         </div>
       </div>
+
+      <MachineDiagnostics machines={machineSignals} />
 
       <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
         <div ref={groupsTableRef} className="card xl:col-span-2 scroll-mt-24">
