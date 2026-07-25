@@ -4,7 +4,6 @@ import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, 
 import { supabase } from '@/lib/supabase'
 import { cn, getProductionDate } from '@/lib/utils'
 import { issueStatusLabel, problemCategoryLabel, reportStationLabel, stationLabel } from '@/lib/issueReports'
-import type { PeriodAiStationAllocation } from '@/lib/periodReportAi'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController)
@@ -13,6 +12,8 @@ const TARGET_PER_SHIFT = 18000
 const SHIFTS: ShiftType[] = ['I', 'II', 'III']
 
 type PeriodMode = 'week' | 'month' | 'range'
+
+type StationAllocation = { key: string; label: string; pct: number }
 
 type ReportRow = HourlyReport & {
   shift?: { shift_type: ShiftType; shift_date?: string } | { shift_type: ShiftType; shift_date?: string }[] | null
@@ -45,7 +46,7 @@ type OperatorIssue = {
   title: string
   description: string
   station: string | null
-  stations: PeriodAiStationAllocation[]
+  stations: StationAllocation[]
   action: string | null
   status: string | null
   operator: string | null
@@ -197,7 +198,7 @@ function canonicalStationKey(value: string) {
 function stationAllocations(
   allocations: Array<{ station: string; pct: number }> | null | undefined,
   single: string | null | undefined
-): PeriodAiStationAllocation[] {
+): StationAllocation[] {
   if (allocations?.length) {
     return allocations
       .map(item => ({
