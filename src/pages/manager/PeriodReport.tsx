@@ -1,17 +1,10 @@
-import { useEffect, useMemo, useState } from 'react'
+﻿import { useEffect, useMemo, useState } from 'react'
 import { Chart } from 'react-chartjs-2'
 import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController } from 'chart.js'
 import { supabase } from '@/lib/supabase'
 import { cn, getProductionDate } from '@/lib/utils'
 import { issueStatusLabel, problemCategoryLabel, reportStationLabel, stationLabel } from '@/lib/issueReports'
-import {
-  preparePeriodAiEvidence,
-  requestPeriodAiAnalysis,
-  type PeriodAiAnalysis,
-  type PeriodAiMetrics,
-  type PeriodAiStationAllocation,
-  type PreparedPeriodAiData
-} from '@/lib/periodReportAi'
+import type { PeriodAiStationAllocation } from '@/lib/periodReportAi'
 import type { FailureReport, HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, BarController, LineController)
@@ -351,14 +344,6 @@ function issueKindLabel(kind: OperatorIssueKind) {
   return 'Uwaga operatora'
 }
 
-function stationKindBreakdown(kinds: Record<OperatorIssueKind, number>) {
-  return (Object.entries(kinds) as Array<[OperatorIssueKind, number]>)
-    .filter(([, count]) => count > 0)
-    .sort((a, b) => b[1] - a[1])
-    .map(([kind, count]) => `${issueKindLabel(kind)}: ${count}`)
-    .join(' · ')
-}
-
 function issueKindClass(kind: OperatorIssueKind) {
   if (kind === 'reject') return 'border-red-500/35 bg-red-500/10 text-red-300'
   if (kind === 'failure') return 'border-orange-500/35 bg-orange-500/10 text-orange-300'
@@ -457,10 +442,8 @@ function buildEmailHtml(params: {
   operatorIssues: OperatorIssue[]
   recurringIssues: RecurringIssue[]
   conclusions: string[]
-  aiAnalysis: PeriodAiAnalysis | null
-  aiPrepared: PreparedPeriodAiData
 }) {
-  const { from, to, machineLabel, groups, reports, operatorIssues, recurringIssues, conclusions, aiAnalysis, aiPrepared } = params
+  const { from, to, machineLabel, groups, reports, operatorIssues, recurringIssues, conclusions } = params
   const totalGood = groups.reduce((sum, group) => sum + group.good, 0)
   const totalReject = groups.reduce((sum, group) => sum + group.reject, 0)
   const totalTarget = groups.reduce((sum, group) => sum + group.target, 0)
@@ -557,41 +540,6 @@ function buildEmailHtml(params: {
     </tr>
   `).join('')
 
-  const aiFindings = aiAnalysis?.findings.map(finding => `
-    <tr>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top;font-weight:bold;color:${finding.severity === 'critical' ? '#b91c1c' : finding.severity === 'high' ? '#c2410c' : finding.severity === 'positive' ? '#166534' : '#1e3a8a'}">${esc(finding.title)}</td>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">${esc(finding.analysis)}<br><span style="color:#64748b">Dotyczy: ${esc(finding.machines.join(', ') || machineLabel)} · źródła: ${finding.evidenceCount}</span></td>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">${esc(finding.recommendation)}</td>
-    </tr>
-  `).join('') ?? ''
-
-  const aiStationRows = aiAnalysis?.stationFindings.map(station => `
-    <tr>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">
-        <strong>${esc(station.stationLabel)}</strong><br>
-        <span style="color:#64748b">${esc(station.machines.join(', '))}</span>
-      </td>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top;text-align:center">
-        <strong>${station.mentions}</strong> wpisów<br>
-        <span style="color:#64748b">udział ważony: ${station.weightedMentions.toLocaleString('pl-PL')}</span>
-      </td>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">
-        <strong>${esc(station.dominantIssue)}</strong><br>
-        <span style="color:#475569">${esc(station.assessment)}</span>
-      </td>
-      <td style="padding:9px;border-bottom:1px solid #e5e7eb;vertical-align:top">${esc(station.recommendation)}</td>
-    </tr>
-  `).join('') ?? ''
-
-  const aiActions = aiAnalysis?.actions.map(action => `
-    <tr>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:center;font-weight:bold">${action.priority}</td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb;font-weight:bold">${esc(action.owner)}</td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(action.action)}</td>
-      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(action.why)}</td>
-    </tr>
-  `).join('') ?? ''
-
   return `
     <div style="font-family:Arial,Helvetica,sans-serif;color:#0f172a;max-width:980px">
       <div style="background:#1d4ed8;color:white;padding:18px 22px">
@@ -613,35 +561,6 @@ function buildEmailHtml(params: {
           <tr style="background:#1e3a8a;color:white"><th align="left" style="padding:10px">Automat</th><th align="right" style="padding:10px">Produkcja</th><th align="right" style="padding:10px">Cel</th><th align="right" style="padding:10px">Realizacja</th><th align="right" style="padding:10px">Odrzut</th></tr>
           ${rowsHtml}
         </table>
-        ${aiAnalysis ? `
-          <div style="margin-top:22px;border:1px solid #bfdbfe;background:#eff6ff;padding:16px">
-            <div style="font-size:11px;font-weight:bold;color:#1d4ed8;text-transform:uppercase;letter-spacing:.5px">Analiza zarządcza AI · oparta na zweryfikowanych wpisach</div>
-            <div style="margin-top:8px;font-size:15px;font-weight:bold">${esc(aiAnalysis.executiveSummary || 'Brak podsumowania posiadającego wystarczające potwierdzenie w danych.')}</div>
-            <div style="margin-top:7px;font-size:13px;color:#334155">${esc(aiAnalysis.managementAssessment || 'Brak oceny zarządczej posiadającej wystarczające potwierdzenie w danych.')}</div>
-            <div style="margin-top:9px;font-size:11px;color:#64748b">Przed analizą pominięto ${aiPrepared.lowValueRemoved} wpisów bez wartości informacyjnej i połączono ${aiPrepared.duplicatesRemoved} dokładnych duplikatów.</div>
-          </div>
-          ${aiStationRows ? `
-            <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Stacje generujące problemy</h3>
-            <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
-              <tr style="background:#1e3a8a;color:white"><th align="left" style="padding:9px">Stacja / automat</th><th align="center" style="padding:9px">Skala</th><th align="left" style="padding:9px">Ocena AI</th><th align="left" style="padding:9px">Zalecenie</th></tr>
-              ${aiStationRows}
-            </table>
-          ` : ''}
-          ${aiFindings ? `
-            <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Kluczowe ustalenia AI</h3>
-            <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
-              <tr style="background:#1e3a8a;color:white"><th align="left" style="padding:9px">Ustalenie</th><th align="left" style="padding:9px">Analiza i źródła</th><th align="left" style="padding:9px">Rekomendacja</th></tr>
-              ${aiFindings}
-            </table>
-          ` : ''}
-          ${aiActions ? `
-            <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Plan działań</h3>
-            <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
-              <tr style="background:#eaf1fb"><th style="padding:8px">Priorytet</th><th align="left" style="padding:8px">Odpowiedzialność</th><th align="left" style="padding:8px">Działanie</th><th align="left" style="padding:8px">Uzasadnienie</th></tr>
-              ${aiActions}
-            </table>
-          ` : ''}
-        ` : ''}
         <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Wnioski systemowe</h3>
         <ol>${conclusions.map(item => `<li style="margin:0 0 8px">${esc(item)}</li>`).join('')}</ol>
         ${recurringRows ? `
@@ -683,6 +602,95 @@ function buildEmailHtml(params: {
   `
 }
 
+function buildAiExportText(params: {
+  from: string
+  to: string
+  machineLabel: string
+  groups: Group[]
+  reports: ReportRow[]
+  shifts: ShiftRow[]
+  operatorIssues: OperatorIssue[]
+}) {
+  const { from, to, machineLabel, groups, reports, shifts, operatorIssues } = params
+  const range = buildRangeLabel(from, to)
+  const totalGood = groups.reduce((sum, group) => sum + group.good, 0)
+  const totalReject = groups.reduce((sum, group) => sum + group.reject, 0)
+  const totalTarget = groups.reduce((sum, group) => sum + group.target, 0)
+  const totalRuntime = groups.reduce((sum, group) => sum + group.runtime, 0)
+  const totalLoss = groups.reduce((sum, group) => sum + group.alarm + group.downtime, 0)
+
+  const dayMap = new Map<string, { date: string; good: number; reject: number; target: number }>()
+  groups.forEach(group => {
+    const row = dayMap.get(group.date) ?? { date: group.date, good: 0, reject: 0, target: 0 }
+    row.good += group.good
+    row.reject += group.reject
+    row.target += group.target
+    dayMap.set(group.date, row)
+  })
+  const dayLines = [...dayMap.values()]
+    .sort((a, b) => a.date.localeCompare(b.date))
+    .map(day => `${formatDate(day.date)}: produkcja ${pieces(day.good)} szt / cel ${pieces(day.target)} szt / realizacja ${pct(day.good, day.target)}% / odrzut ${rejectPct(day.good, day.reject)}%`)
+
+  const hourMap = new Map<string, { hourBlock: string; hourStart: number; good: number; reject: number; entries: number }>()
+  reports.forEach(report => {
+    const hourStart = report.hour_start ?? 0
+    const hourBlock = report.hour_block || `Godz. ${hourStart}`
+    const row = hourMap.get(hourBlock) ?? { hourBlock, hourStart, good: 0, reject: 0, entries: 0 }
+    row.good += report.good_count ?? 0
+    row.reject += report.reject_count ?? 0
+    row.entries += 1
+    hourMap.set(hourBlock, row)
+  })
+  const hourLines = [...hourMap.values()]
+    .sort((a, b) => a.hourStart - b.hourStart)
+    .map(hour => `${hour.hourBlock}: wpisów ${hour.entries}, suma ${pieces(hour.good)} szt, śr. ${pieces(Math.round(hour.good / hour.entries))} szt/wpis, odrzut ${rejectPct(hour.good, hour.reject)}%`)
+
+  const workTimeLines = groups.map(group =>
+    `${formatDate(group.date)}, Zmiana ${group.shift}, ${group.machineName}: praca ${mins(group.runtime)}, gotowość ${mins(group.ready)}, alarm ${mins(group.alarm)}, przestój ${mins(group.downtime)}`
+  )
+
+  const earlyEndShifts = shifts.filter(shift => shift.ended_early && shift.early_end_reason?.trim())
+  const earlyEndLines = earlyEndShifts.map(shift => {
+    const machine = one(shift.machine)
+    return `${formatDate(shift.shift_date)}, Zmiana ${shift.shift_type}, ${machine?.name ?? 'Maszyna'}: ${shift.early_end_reason?.trim()}`
+  })
+
+  const issueLines = operatorIssues.map(issue => [
+    `${formatDate(issue.date)}${issue.shift ? ` Zmiana ${issue.shift}` : ''}${issue.hour ? ` ${issue.hour}` : ''} | ${issue.machineName} | ${issueKindLabel(issue.kind)}: ${issue.title}`,
+    issue.operator ? `Operator: ${issue.operator}` : null,
+    `Opis: ${issue.description}`,
+    issue.station ? `Stacja/obszar: ${issue.station}` : null,
+    issue.action ? `Działanie: ${issue.action}` : null,
+    issue.status ? `Status: ${issue.status}` : null
+  ].filter(Boolean).join('\n'))
+
+  return [
+    'RAPORT ZBIORCZY - DANE ZRODLOWE (do wklejenia w AI)',
+    `Zakres: ${range} | Automat: ${machineLabel}`,
+    '',
+    '=== PODSUMOWANIE ===',
+    `Produkcja: ${pieces(totalGood)} szt / cel ${pieces(totalTarget)} szt (realizacja ${pct(totalGood, totalTarget)}%)`,
+    `Odrzut: ${pieces(totalReject)} szt (${rejectPct(totalGood, totalReject)}%)`,
+    `Czas pracy: ${mins(totalRuntime)} (straty ${mins(totalLoss)})`,
+    `Liczba wpisow godzinowych: ${groups.reduce((sum, group) => sum + group.reports, 0)}`,
+    '',
+    '=== WYDAJNOSC DZIEN PO DNIU ===',
+    ...(dayLines.length ? dayLines : ['Brak danych.']),
+    '',
+    '=== WYDAJNOSC GODZINA PO GODZINIE ===',
+    ...(hourLines.length ? hourLines : ['Brak danych.']),
+    '',
+    '=== CZASY PRACY (per zmiana) ===',
+    ...(workTimeLines.length ? workTimeLines : ['Brak rozliczonych zmian.']),
+    '',
+    '=== PRZEDWCZESNE ZAKONCZENIA ZMIAN ===',
+    ...(earlyEndLines.length ? earlyEndLines : ['Brak przedwczesnych zakonczen zmian w okresie.']),
+    '',
+    '=== WPISY OPERATOROW (problemy, przyczyny, dzialania) ===',
+    ...(issueLines.length ? issueLines.flatMap(line => [line, '---']) : ['Brak wpisow operatorow w okresie.'])
+  ].join('\n')
+}
+
 export default function ManagerPeriodReport() {
   const defaultTo = today()
   const [mode, setMode] = useState<PeriodMode>('week')
@@ -696,9 +704,7 @@ export default function ManagerPeriodReport() {
   const [selectedMachineId, setSelectedMachineId] = useState('all')
   const [loading, setLoading] = useState(false)
   const [copied, setCopied] = useState(false)
-  const [aiAnalysis, setAiAnalysis] = useState<PeriodAiAnalysis | null>(null)
-  const [aiLoading, setAiLoading] = useState(false)
-  const [aiError, setAiError] = useState('')
+  const [copiedAi, setCopiedAi] = useState(false)
 
   const range = useMemo(() => {
     if (mode === 'week') return { from, to }
@@ -783,7 +789,6 @@ export default function ManagerPeriodReport() {
     () => operatorIssuesFromData(filteredReports, filteredFailures, machines),
     [filteredFailures, filteredReports, machines]
   )
-  const aiPrepared = useMemo(() => preparePeriodAiEvidence(operatorIssues), [operatorIssues])
   const recurringIssues = useMemo(() => recurringIssuesFrom(operatorIssues), [operatorIssues])
   const systemAlerts = useMemo(() => filteredFailures.filter(failure => failure.auto_generated), [filteredFailures])
   const manualFailures = useMemo(() => filteredFailures.filter(failure => !failure.auto_generated), [filteredFailures])
@@ -834,51 +839,6 @@ export default function ManagerPeriodReport() {
     return [...map.values()].sort((a, b) => a.date.localeCompare(b.date))
   }, [groups])
 
-  const aiMetrics = useMemo<PeriodAiMetrics>(() => ({
-    range: { from: range.from, to: range.to, machineLabel },
-    totals: {
-      production: totals.good,
-      target: totals.target,
-      realizationPct: totals.realization,
-      reject: totals.reject,
-      rejectPct: totals.rejectPct,
-      runtimeMin: totals.runtime,
-      lossMin: totals.alarmLoss,
-      hourlyReports: totals.reports,
-      manualFailures: manualFailures.length,
-      systemAlerts: systemAlerts.length
-    },
-    machines: byMachine.map(machine => ({
-      id: machine.machineId,
-      name: machine.name,
-      production: machine.good,
-      target: machine.target,
-      realizationPct: pct(machine.good, machine.target),
-      rejectPct: rejectPct(machine.good, machine.reject),
-      runtimeMin: machine.runtime
-    })),
-    days: byDay.map(day => ({
-      date: day.date,
-      production: day.good,
-      target: day.target,
-      realizationPct: pct(day.good, day.target),
-      rejectPct: rejectPct(day.good, day.reject)
-    }))
-  }), [byDay, byMachine, machineLabel, manualFailures.length, range.from, range.to, systemAlerts.length, totals])
-
-  const aiDataSignature = useMemo(() => [
-    range.from,
-    range.to,
-    selectedMachineId,
-    ...filteredReports.map(report => `${report.id}:${report.updated_at}`),
-    ...filteredFailures.map(failure => `${failure.id}:${failure.updated_at}`)
-  ].join('|'), [filteredFailures, filteredReports, range.from, range.to, selectedMachineId])
-
-  useEffect(() => {
-    setAiAnalysis(null)
-    setAiError('')
-  }, [aiDataSignature])
-
   const conclusions = useMemo(() => {
     const list: string[] = []
     if (!groups.length) return ['Brak danych produkcyjnych dla wybranego okresu.']
@@ -912,10 +872,8 @@ export default function ManagerPeriodReport() {
     reports: filteredReports,
     operatorIssues,
     recurringIssues,
-    conclusions,
-    aiAnalysis,
-    aiPrepared
-  }), [aiAnalysis, aiPrepared, conclusions, filteredReports, groups, machineLabel, operatorIssues, range.from, range.to, recurringIssues])
+    conclusions
+  }), [conclusions, filteredReports, groups, machineLabel, operatorIssues, range.from, range.to, recurringIssues])
 
   const chartData = useMemo(() => ({
     labels: byDay.map(day => formatDate(day.date).slice(0, 5)),
@@ -926,19 +884,29 @@ export default function ManagerPeriodReport() {
     ]
   }), [byDay])
 
-  async function generateAiAnalysis() {
-    if (aiLoading) return
-    setAiLoading(true)
-    setAiError('')
+  const aiExportText = useMemo(() => buildAiExportText({
+    from: range.from,
+    to: range.to,
+    machineLabel,
+    groups,
+    reports: filteredReports,
+    shifts: filteredShifts,
+    operatorIssues
+  }), [filteredReports, filteredShifts, groups, machineLabel, operatorIssues, range.from, range.to])
+
+  async function copyAiExport() {
     try {
-      const result = await requestPeriodAiAnalysis({ metrics: aiMetrics, prepared: aiPrepared })
-      setAiAnalysis(result)
-    } catch (error) {
-      setAiAnalysis(null)
-      setAiError(error instanceof Error ? error.message : 'Nie udało się wygenerować analizy AI.')
-    } finally {
-      setAiLoading(false)
+      await navigator.clipboard.writeText(aiExportText)
+    } catch {
+      const el = document.createElement('textarea')
+      el.value = aiExportText
+      document.body.appendChild(el)
+      el.select()
+      document.execCommand('copy')
+      document.body.removeChild(el)
     }
+    setCopiedAi(true)
+    window.setTimeout(() => setCopiedAi(false), 2500)
   }
 
   async function copyReport() {
@@ -983,12 +951,11 @@ export default function ManagerPeriodReport() {
         </div>
         <div className="flex flex-wrap gap-2">
           <button
-            onClick={generateAiAnalysis}
-            disabled={aiLoading || loading || aiPrepared.evidence.length === 0}
+            onClick={copyAiExport}
+            disabled={loading || !operatorIssues.length && !groups.length}
             className="btn-primary flex items-center gap-2 px-5 py-3 disabled:cursor-not-allowed disabled:opacity-50"
           >
-            <span className="rounded-md border border-current/30 px-1.5 py-0.5 text-[10px] font-black">AI</span>
-            {aiLoading ? 'Analizuję wpisy...' : aiAnalysis ? 'Odśwież analizę AI' : 'Wygeneruj analizę AI'}
+            {copiedAi ? 'Skopiowano dane' : 'Kopiuj dane dla AI'}
           </button>
           <button onClick={copyReport} className="btn-secondary px-5 py-3">
             {copied ? 'Skopiowano raport' : 'Kopiuj raport do maila'}
@@ -1058,14 +1025,21 @@ export default function ManagerPeriodReport() {
             <Kpi label="Zdarzenia" value={operatorIssues.length} sub={`${manualFailures.length} awarii / ${systemAlerts.length} alertów systemu`} tone={operatorIssues.length ? 'text-amber-400' : 'text-green-400'} />
           </div>
 
-          <AiAnalysisPanel
-            analysis={aiAnalysis}
-            prepared={aiPrepared}
-            loading={aiLoading}
-            error={aiError}
-            machineLabel={machineLabel}
-            onGenerate={generateAiAnalysis}
-          />
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Dane dla AI</div>
+                <div className="card-sub">Zwykły tekst — wklej w dowolnym czacie AI, żeby dostać własną analizę</div>
+              </div>
+              <button onClick={copyAiExport} className="btn-secondary px-4 py-2 text-sm">{copiedAi ? 'Skopiowano' : 'Kopiuj'}</button>
+            </div>
+            <textarea
+              readOnly
+              value={aiExportText}
+              onFocus={event => event.target.select()}
+              className="h-64 w-full resize-y rounded-xl border border-navy-700 bg-navy-900 p-3 font-mono text-xs text-navy-200"
+            />
+          </div>
 
           <div className="grid gap-5 xl:grid-cols-[1.4fr_1fr]">
             <div className="card">
@@ -1262,353 +1236,6 @@ export default function ManagerPeriodReport() {
         </>
       )}
     </div>
-  )
-}
-
-const AI_SEVERITY = {
-  critical: { label: 'Krytyczne', className: 'border-red-500/40 bg-red-500/10 text-red-300' },
-  high: { label: 'Wysokie', className: 'border-orange-500/40 bg-orange-500/10 text-orange-300' },
-  medium: { label: 'Do kontroli', className: 'border-amber-500/40 bg-amber-500/10 text-amber-300' },
-  positive: { label: 'Pozytywne', className: 'border-green-500/40 bg-green-500/10 text-green-300' }
-} as const
-
-const AI_TREND_LABELS = {
-  recurring: 'Powtarzalny',
-  isolated: 'Jednorazowy',
-  growing: 'Narastający',
-  stable: 'Stabilny',
-  unknown: 'Nieustalony'
-} as const
-
-function displayAiOwner(owner: string) {
-  return owner === 'Jakosc' ? 'Jakość' : owner
-}
-
-function AiAnalysisPanel({
-  analysis,
-  prepared,
-  loading,
-  error,
-  machineLabel,
-  onGenerate
-}: {
-  analysis: PeriodAiAnalysis | null
-  prepared: PreparedPeriodAiData
-  loading: boolean
-  error: string
-  machineLabel: string
-  onGenerate: () => void
-}) {
-  return (
-    <section className="card overflow-hidden border-blue-500/35">
-      <div className="card-header">
-        <div>
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="card-title">Analiza zarządcza AI</div>
-            <span className="rounded-md border border-blue-400/40 bg-blue-500/10 px-2 py-1 text-[10px] font-black uppercase text-blue-300">Źródła kontrolowane</span>
-          </div>
-          <div className="card-sub mt-1">
-            Klasyfikacja problemów, zależności i plan działań dla: {machineLabel}
-          </div>
-        </div>
-        {analysis && (
-          <div className="text-right text-xs text-navy-400">
-            <div>{new Date(analysis.generatedAt).toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })}</div>
-            <div className="mt-1">Model: {analysis.model}</div>
-          </div>
-        )}
-      </div>
-
-      <div className="mb-5 flex flex-wrap gap-2 text-xs">
-        <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
-          Do analizy: <strong className="text-white">{prepared.evidence.length}</strong>
-        </span>
-        <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
-          Stacje w danych: <strong className="text-white">{prepared.stationStats.length}</strong>
-        </span>
-        <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
-          Połączone duplikaty: <strong className="text-white">{prepared.duplicatesRemoved}</strong>
-        </span>
-        <span className="rounded-lg border border-navy-700 bg-navy-900 px-3 py-2 text-navy-300">
-          Pominięte wpisy bez treści: <strong className="text-white">{prepared.lowValueRemoved}</strong>
-        </span>
-        {prepared.truncated > 0 && (
-          <span className="rounded-lg border border-amber-500/35 bg-amber-500/10 px-3 py-2 text-amber-300">
-            Poza limitem analizy: <strong>{prepared.truncated}</strong>
-          </span>
-        )}
-      </div>
-
-      {error && (
-        <div className="mb-5 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-red-500/40 bg-red-500/10 p-4">
-          <div>
-            <div className="font-bold text-red-300">Nie udało się wygenerować analizy</div>
-            <div className="mt-1 text-sm text-red-200/80">{error}</div>
-          </div>
-          <button onClick={onGenerate} className="btn-secondary px-4 py-2 text-sm">Spróbuj ponownie</button>
-        </div>
-      )}
-
-      {loading && (
-        <div className="py-8">
-          <div className="mx-auto max-w-2xl text-center">
-            <div className="text-base font-bold text-white">AI porządkuje wpisy operatorów</div>
-            <div className="mt-2 text-sm text-navy-400">Łączenie powtarzalnych zdarzeń, oddzielanie objawów od przyczyn i budowanie planu działań.</div>
-            <div className="mx-auto mt-5 h-2 max-w-md overflow-hidden rounded-full bg-navy-800">
-              <div className="h-full w-2/3 animate-pulse rounded-full bg-blue-500" />
-            </div>
-          </div>
-        </div>
-      )}
-
-      {!loading && !analysis && !error && (
-        <div className="flex flex-col items-center justify-center rounded-xl border border-dashed border-blue-500/35 bg-blue-500/5 px-5 py-10 text-center">
-          <div className="max-w-2xl text-lg font-bold text-white">Zamień wpisy z całego okresu w raport decyzyjny</div>
-          <div className="mt-2 max-w-2xl text-sm leading-relaxed text-navy-300">
-            Analiza wskaże problemy powtarzalne, oddzieli awarie od problemów jakościowych i organizacyjnych oraz przygotuje działania dla produkcji, UR, jakości i technologa.
-          </div>
-          <button
-            onClick={onGenerate}
-            disabled={!prepared.evidence.length}
-            className="btn-primary mt-5 px-6 py-3 disabled:cursor-not-allowed disabled:opacity-50"
-          >
-            Wygeneruj pełną analizę AI
-          </button>
-        </div>
-      )}
-
-      {!loading && analysis && (
-        <div className="space-y-7">
-          <div className="grid gap-4 lg:grid-cols-[1.25fr_1fr]">
-            <div className="border-l-4 border-blue-400 bg-blue-500/10 px-5 py-4">
-              <div className="text-xs font-bold uppercase text-blue-300">Podsumowanie zarządcze</div>
-              <div className="mt-2 text-base font-semibold leading-relaxed text-white">
-                {analysis.executiveSummary || 'Brak podsumowania posiadającego wystarczające potwierdzenie w danych.'}
-              </div>
-              <div className="mt-2 text-xs text-navy-500">Potwierdzone przez {analysis.executiveEvidenceIds.length} źródeł</div>
-            </div>
-            <div className="border-l-4 border-brand bg-brand/10 px-5 py-4">
-              <div className="text-xs font-bold uppercase text-brand">Ocena sytuacji</div>
-              <div className="mt-2 text-sm leading-relaxed text-navy-100">
-                {analysis.managementAssessment || 'Brak oceny zarządczej posiadającej wystarczające potwierdzenie w danych.'}
-              </div>
-              <div className="mt-2 text-xs text-navy-500">Potwierdzone przez {analysis.managementEvidenceIds.length} źródeł</div>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-1 text-base font-bold text-white">Stacje generujące problemy</div>
-            <div className="mb-3 text-sm text-navy-400">
-              Ranking i skala pochodzą z danych operatorów; AI opisuje dominujący problem i zalecane działanie.
-            </div>
-            <div className="overflow-x-auto border-y border-navy-700">
-              <table className="w-full text-sm">
-                <thead className="bg-navy-900 text-xs uppercase text-navy-400">
-                  <tr>
-                    <th className="px-3 py-3 text-left">Stacja</th>
-                    <th className="px-3 py-3 text-left">Skala i automat</th>
-                    <th className="px-3 py-3 text-left">Ocena AI</th>
-                    <th className="px-3 py-3 text-left">Zalecenie</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {analysis.stationFindings.map(station => (
-                    <tr key={station.stationKey} className="border-t border-navy-700 bg-navy-950/40 align-top">
-                      <td className="px-3 py-3">
-                        <div className="font-bold text-white">{station.stationLabel}</div>
-                        <div className="mt-1 text-xs text-navy-500">{station.evidenceIds.length} źródeł reprezentatywnych</div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="font-mono font-bold text-brand">{station.mentions} wpisów</div>
-                        <div className="mt-1 text-xs text-navy-400">
-                          Udział ważony: {station.weightedMentions.toLocaleString('pl-PL')}
-                        </div>
-                        <div className="mt-1 text-xs text-navy-300">{station.machines.join(', ')}</div>
-                        <div className="mt-1 text-xs leading-relaxed text-navy-500">
-                          {stationKindBreakdown(station.byKind)}
-                        </div>
-                      </td>
-                      <td className="px-3 py-3">
-                        <div className="font-semibold text-white">{station.dominantIssue}</div>
-                        <div className="mt-1 max-w-xl text-xs leading-relaxed text-navy-300">{station.assessment}</div>
-                      </td>
-                      <td className="px-3 py-3 text-navy-100">{station.recommendation}</td>
-                    </tr>
-                  ))}
-                  {!analysis.stationFindings.length && (
-                    <tr className="border-t border-navy-700 bg-navy-950/40">
-                      <td colSpan={4} className="px-3 py-5 text-center text-navy-400">
-                        Brak wpisów z przypisaną stacją pozwalających na wiarygodną analizę.
-                      </td>
-                    </tr>
-                  )}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-3 text-base font-bold text-white">Kluczowe ustalenia</div>
-            <div className="grid gap-3 xl:grid-cols-2">
-              {analysis.findings.map((finding, index) => {
-                const severity = AI_SEVERITY[finding.severity]
-                return (
-                  <article key={`${finding.title}-${index}`} className="rounded-xl border border-navy-700 bg-navy-900 p-4">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div className="min-w-0">
-                        <span className={cn('inline-flex rounded-md border px-2 py-1 text-[10px] font-bold uppercase', severity.className)}>
-                          {severity.label}
-                        </span>
-                        <div className="mt-2 text-base font-bold text-white">{finding.title}</div>
-                      </div>
-                      <div className="text-right text-xs text-navy-400">
-                        <div>{finding.machines.join(', ')}</div>
-                        <div className="mt-1">{finding.evidenceCount} wpisów źródłowych</div>
-                      </div>
-                    </div>
-                    <p className="mt-3 text-sm leading-relaxed text-navy-200">{finding.analysis}</p>
-                    {finding.businessImpact && (
-                      <div className="mt-3 text-sm">
-                        <span className="font-semibold text-navy-400">Wpływ:</span>{' '}
-                        <span className="text-navy-100">{finding.businessImpact}</span>
-                      </div>
-                    )}
-                    <div className="mt-3 border-t border-navy-700 pt-3 text-sm">
-                      <span className="font-semibold text-blue-300">Rekomendacja:</span>{' '}
-                      <span className="text-white">{finding.recommendation}</span>
-                    </div>
-                  </article>
-                )
-              })}
-              {!analysis.findings.length && <Empty text="AI nie znalazło ustaleń posiadających potwierdzenie we wpisach" />}
-            </div>
-          </div>
-
-          <div className="grid gap-5 xl:grid-cols-[1.1fr_0.9fr]">
-            <div className="overflow-hidden">
-              <div className="mb-3 text-base font-bold text-white">Klasyfikacja problemów</div>
-              <div className="overflow-x-auto rounded-xl border border-navy-700">
-                <table className="w-full text-sm">
-                  <thead className="bg-navy-900 text-xs uppercase text-navy-400">
-                    <tr>
-                      <th className="px-3 py-3 text-left">Grupa</th>
-                      <th className="px-3 py-3 text-left">Automat</th>
-                      <th className="px-3 py-3 text-left">Trend</th>
-                      <th className="px-3 py-3 text-right">Wpisy</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {analysis.problemGroups.map(group => (
-                      <tr key={`${group.category}-${group.label}`} className="border-t border-navy-700 bg-navy-950/40">
-                        <td className="px-3 py-3">
-                          <div className="font-bold text-white">{group.label}</div>
-                          <div className="mt-1 max-w-xl text-xs leading-relaxed text-navy-400">{group.summary}</div>
-                        </td>
-                        <td className="px-3 py-3 text-navy-200">{group.machines.join(', ')}</td>
-                        <td className="px-3 py-3 text-navy-200">{AI_TREND_LABELS[group.trend]}</td>
-                        <td className="px-3 py-3 text-right font-mono font-bold text-brand">{group.occurrences}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-
-            <div>
-              <div className="mb-3 text-base font-bold text-white">Przyczyny i hipotezy</div>
-              <div className="space-y-3">
-                {analysis.rootCauses.map((cause, index) => (
-                  <div key={`${cause.cause}-${index}`} className="rounded-xl border border-navy-700 bg-navy-900 p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="font-bold text-white">{cause.cause}</div>
-                      <span className={cn(
-                        'rounded-md border px-2 py-1 text-[10px] font-bold uppercase',
-                        cause.confidence === 'high'
-                          ? 'border-green-500/40 text-green-300'
-                          : cause.confidence === 'medium'
-                            ? 'border-amber-500/40 text-amber-300'
-                            : 'border-navy-600 text-navy-400'
-                      )}>
-                        Pewność: {cause.confidence === 'high' ? 'wysoka' : cause.confidence === 'medium' ? 'średnia' : 'niska'}
-                      </span>
-                    </div>
-                    <div className="mt-2 text-sm leading-relaxed text-navy-300">{cause.reasoning}</div>
-                    <div className="mt-2 text-xs text-navy-500">{cause.machines.join(', ')}</div>
-                  </div>
-                ))}
-                {!analysis.rootCauses.length && (
-                  <div className="rounded-xl border border-navy-700 bg-navy-900 p-4 text-sm text-navy-400">
-                    Wpisy nie pozwalają wiarygodnie określić przyczyn źródłowych. System nie będzie ich zgadywał.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div>
-            <div className="mb-3 text-base font-bold text-white">Plan działań</div>
-            <div className="overflow-x-auto rounded-xl border border-navy-700">
-              <table className="w-full text-sm">
-                <thead className="bg-navy-900 text-xs uppercase text-navy-400">
-                  <tr>
-                    <th className="w-20 px-3 py-3 text-center">Priorytet</th>
-                    <th className="px-3 py-3 text-left">Odpowiedzialność</th>
-                    <th className="px-3 py-3 text-left">Działanie</th>
-                    <th className="px-3 py-3 text-left">Uzasadnienie</th>
-                    <th className="px-3 py-3 text-left">Zakres</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {analysis.actions.map((action, index) => (
-                    <tr key={`${action.action}-${index}`} className="border-t border-navy-700 bg-navy-950/40">
-                      <td className="px-3 py-3 text-center">
-                        <span className={cn(
-                          'inline-flex h-8 w-8 items-center justify-center rounded-full border font-mono font-bold',
-                          action.priority === 1
-                            ? 'border-red-500/50 bg-red-500/10 text-red-300'
-                            : action.priority === 2
-                              ? 'border-amber-500/50 bg-amber-500/10 text-amber-300'
-                              : 'border-blue-500/50 bg-blue-500/10 text-blue-300'
-                        )}>
-                          {action.priority}
-                        </span>
-                      </td>
-                      <td className="px-3 py-3 font-bold text-white">{displayAiOwner(action.owner)}</td>
-                      <td className="px-3 py-3 text-navy-100">{action.action}</td>
-                      <td className="px-3 py-3 text-navy-300">{action.why}</td>
-                      <td className="px-3 py-3 text-navy-300">{action.machines.join(', ')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-
-          <div className="grid gap-3 border-t border-navy-700 pt-5 md:grid-cols-[auto_1fr]">
-            <div className={cn(
-              'rounded-lg border px-4 py-3 text-sm font-bold',
-              analysis.dataQuality.level === 'high'
-                ? 'border-green-500/40 bg-green-500/10 text-green-300'
-                : analysis.dataQuality.level === 'medium'
-                  ? 'border-amber-500/40 bg-amber-500/10 text-amber-300'
-                  : 'border-red-500/40 bg-red-500/10 text-red-300'
-            )}>
-              Jakość danych: {analysis.dataQuality.level === 'high' ? 'wysoka' : analysis.dataQuality.level === 'medium' ? 'średnia' : 'niska'}
-            </div>
-            <div className="text-sm leading-relaxed text-navy-300">
-              <div>{analysis.dataQuality.assessment}</div>
-              {analysis.dataQuality.gaps.length > 0 && (
-                <div className="mt-2 text-xs text-navy-400">Luki: {analysis.dataQuality.gaps.join(' · ')}</div>
-              )}
-            </div>
-          </div>
-
-          <div className="text-xs text-navy-500">
-            AI porządkuje i klasyfikuje informacje. Wskaźniki, liczby, daty, czasy oraz powiązania z automatami pochodzą bezpośrednio z MargoLine.
-          </div>
-        </div>
-      )}
-    </section>
   )
 }
 
