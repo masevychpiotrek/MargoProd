@@ -431,7 +431,11 @@ ${input}`
       usedModel = candidate
       const isHaiku = candidate.includes('haiku')
       const controller = new AbortController()
-      const timeout = setTimeout(() => controller.abort(), isHaiku ? 150_000 : 170_000)
+      // Supabase Edge Functions maja twardy "request idle timeout" 150s narzucony przez
+      // platforme - jesli go przekroczymy, gateway zwraca surowy 504 z pominieciem naszego
+      // kodu (uzytkownik widzi "non-2xx status code" zamiast przyjaznego komunikatu). Timeout
+      // musi zostac wyraznie ponizej tej granicy, zeby nasz AbortController zdazyl pierwszy.
+      const timeout = setTimeout(() => controller.abort(), isHaiku ? 110_000 : 135_000)
       try {
         response = await fetch('https://api.anthropic.com/v1/messages', {
           method: 'POST',
@@ -442,7 +446,7 @@ ${input}`
           },
           body: JSON.stringify({
             model: candidate,
-            max_tokens: isHaiku ? 14000 : 16000,
+            max_tokens: isHaiku ? 10000 : 12000,
             output_config: {
               format: {
                 type: 'json_schema',

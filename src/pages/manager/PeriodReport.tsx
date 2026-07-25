@@ -453,14 +453,14 @@ function buildEmailHtml(params: {
   to: string
   machineLabel: string
   groups: Group[]
-  failures: FailureRow[]
+  reports: ReportRow[]
   operatorIssues: OperatorIssue[]
   recurringIssues: RecurringIssue[]
   conclusions: string[]
   aiAnalysis: PeriodAiAnalysis | null
   aiPrepared: PreparedPeriodAiData
 }) {
-  const { from, to, machineLabel, groups, failures, operatorIssues, recurringIssues, conclusions, aiAnalysis, aiPrepared } = params
+  const { from, to, machineLabel, groups, reports, operatorIssues, recurringIssues, conclusions, aiAnalysis, aiPrepared } = params
   const totalGood = groups.reduce((sum, group) => sum + group.good, 0)
   const totalReject = groups.reduce((sum, group) => sum + group.reject, 0)
   const totalTarget = groups.reduce((sum, group) => sum + group.target, 0)
@@ -499,10 +499,44 @@ function buildEmailHtml(params: {
     </tr>
   `).join('')
 
-  const failureRows = failures.filter(failure => failure.auto_generated).slice(0, 12).map(failure => {
-    const machine = one(failure.machine)
-    return `<li style="margin:0 0 8px"><strong>${esc(machine?.name ?? 'Maszyna')}</strong>: ${esc(failure.description ?? '')}</li>`
-  }).join('')
+  const dayMap = new Map<string, { date: string; good: number; reject: number; target: number }>()
+  groups.forEach(group => {
+    const row = dayMap.get(group.date) ?? { date: group.date, good: 0, reject: 0, target: 0 }
+    row.good += group.good
+    row.reject += group.reject
+    row.target += group.target
+    dayMap.set(group.date, row)
+  })
+  const dayStats = [...dayMap.values()].sort((a, b) => a.date.localeCompare(b.date))
+  const dayRows = dayStats.map(day => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(formatDate(day.date))}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${pieces(day.good)} szt</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${pct(day.good, day.target)}%</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;color:${rejectPct(day.good, day.reject) > 5 ? '#dc2626' : '#166534'}">${rejectPct(day.good, day.reject)}%</td>
+    </tr>
+  `).join('')
+
+  const hourMap = new Map<string, { hourBlock: string; hourStart: number; good: number; reject: number; entries: number }>()
+  reports.forEach(report => {
+    const hourStart = report.hour_start ?? 0
+    const hourBlock = report.hour_block || `Godz. ${hourStart}`
+    const row = hourMap.get(hourBlock) ?? { hourBlock, hourStart, good: 0, reject: 0, entries: 0 }
+    row.good += report.good_count ?? 0
+    row.reject += report.reject_count ?? 0
+    row.entries += 1
+    hourMap.set(hourBlock, row)
+  })
+  const hourStats = [...hourMap.values()].sort((a, b) => a.hourStart - b.hourStart)
+  const hourRows = hourStats.map(hour => `
+    <tr>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb">${esc(hour.hourBlock)}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${hour.entries}</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${pieces(hour.good)} szt</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right">${pieces(Math.round(hour.good / hour.entries))} szt</td>
+      <td style="padding:8px;border-bottom:1px solid #e5e7eb;text-align:right;color:${rejectPct(hour.good, hour.reject) > 5 ? '#dc2626' : '#166534'}">${rejectPct(hour.good, hour.reject)}%</td>
+    </tr>
+  `).join('')
 
   const recurringRows = recurringIssues.slice(0, 10).map(issue => `
     <tr>
@@ -629,7 +663,20 @@ function buildEmailHtml(params: {
             ${operatorIssueRows}
           </table>
         ` : ''}
-        ${failureRows ? `<h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Automatyczne alerty systemowe</h3><ul>${failureRows}</ul>` : ''}
+        ${dayRows ? `
+          <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Wydajność dzień po dniu</h3>
+          <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
+            <tr style="background:#eaf1fb"><th align="left" style="padding:8px">Data</th><th align="right" style="padding:8px">Produkcja</th><th align="right" style="padding:8px">Realizacja</th><th align="right" style="padding:8px">Odrzut</th></tr>
+            ${dayRows}
+          </table>
+        ` : ''}
+        ${hourRows ? `
+          <h3 style="font-size:16px;border-bottom:2px solid #2563eb;padding-bottom:6px;margin-top:22px">Wydajność godzina po godzinie</h3>
+          <table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font-size:12px">
+            <tr style="background:#eaf1fb"><th align="left" style="padding:8px">Godzina</th><th align="right" style="padding:8px">Wpisów</th><th align="right" style="padding:8px">Suma dobrych</th><th align="right" style="padding:8px">Śr. na wpis</th><th align="right" style="padding:8px">Odrzut</th></tr>
+            ${hourRows}
+          </table>
+        ` : ''}
         <div style="margin-top:24px;padding:12px;background:#eff6ff;color:#1e3a8a;font-size:12px;text-align:right">Dane pochodzą z systemu <strong>MargoLine</strong></div>
       </div>
     </div>
@@ -862,13 +909,13 @@ export default function ManagerPeriodReport() {
     to: range.to,
     machineLabel,
     groups,
-    failures: filteredFailures,
+    reports: filteredReports,
     operatorIssues,
     recurringIssues,
     conclusions,
     aiAnalysis,
     aiPrepared
-  }), [aiAnalysis, aiPrepared, conclusions, filteredFailures, groups, machineLabel, operatorIssues, range.from, range.to, recurringIssues])
+  }), [aiAnalysis, aiPrepared, conclusions, filteredReports, groups, machineLabel, operatorIssues, range.from, range.to, recurringIssues])
 
   const chartData = useMemo(() => ({
     labels: byDay.map(day => formatDate(day.date).slice(0, 5)),
