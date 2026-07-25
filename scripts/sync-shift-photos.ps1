@@ -47,7 +47,12 @@ if (-not (Test-Path $configPath)) {
 }
 
 try {
-    $config = Get-Content $configPath -Raw | ConvertFrom-Json
+    # WAZNE: Windows PowerShell 5.1 domyslnie czyta pliki w kodowaniu ANSI, a
+    # sync-config.json jest zapisany w UTF-8 (polskie znaki, myslnik "—" itp.)
+    # - bez jawnego -Encoding UTF8 sciezka folderu docelowego zostaje
+    # znieksztalcona i skrypt tworzy zupelnie INNY folder zamiast trafic do
+    # prawdziwego, zsynchronizowanego z SharePoint.
+    $config = Get-Content $configPath -Raw -Encoding UTF8 | ConvertFrom-Json
     $supabaseUrl = $config.supabaseUrl.TrimEnd('/')
     $anonKey = $config.anonKey
     $email = $config.email

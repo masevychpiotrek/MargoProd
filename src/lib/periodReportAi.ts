@@ -332,9 +332,9 @@ function narrativeText(value: unknown, maxLength = 1200) {
     .trim()
 }
 
-function narrativeArray(value: unknown, maxItems = 12) {
+function narrativeArray(value: unknown, maxItems = 40) {
   if (!Array.isArray(value)) return []
-  return value.map(item => narrativeText(item, 300)).filter(Boolean).slice(0, maxItems)
+  return value.map(item => narrativeText(item, 400)).filter(Boolean).slice(0, maxItems)
 }
 
 function normalizeAnalysis(
@@ -349,7 +349,7 @@ function normalizeAnalysis(
 
   const refs = (value: unknown) => {
     if (!Array.isArray(value)) return []
-    return [...new Set(value.map(item => String(item)).filter(id => evidenceMap.has(id)))].slice(0, 30)
+    return [...new Set(value.map(item => String(item)).filter(id => evidenceMap.has(id)))].slice(0, 60)
   }
   const machinesFor = (ids: string[]) => [...new Set(ids.map(id => evidenceMap.get(id)?.machineName).filter((name): name is string => Boolean(name)))]
   const occurrencesFor = (ids: string[]) => ids.reduce((sum, id) => sum + (evidenceMap.get(id)?.occurrences ?? 0), 0)
@@ -366,16 +366,16 @@ function normalizeAnalysis(
     return [{
       stationKey,
       stationLabel: station.label,
-      assessment: narrativeText(row.assessment, 700),
-      dominantIssue: narrativeText(row.dominantIssue, 300),
-      recommendation: narrativeText(row.recommendation, 700),
+      assessment: narrativeText(row.assessment, 2000),
+      dominantIssue: narrativeText(row.dominantIssue, 800),
+      recommendation: narrativeText(row.recommendation, 2000),
       evidenceIds,
       machines: station.machines,
       mentions: station.mentions,
       weightedMentions: station.weightedMentions,
       byKind: station.byKind
     }].filter(entry => entry.assessment && entry.dominantIssue && entry.recommendation)
-  }).slice(0, 8)
+  })
 
   const findings = (Array.isArray(source.findings) ? source.findings : []).flatMap(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -386,15 +386,15 @@ function normalizeAnalysis(
       : 'medium'
     return [{
       severity,
-      title: narrativeText(row.title, 180),
-      analysis: narrativeText(row.analysis),
-      businessImpact: narrativeText(row.businessImpact, 600),
-      recommendation: narrativeText(row.recommendation, 700),
+      title: narrativeText(row.title, 300),
+      analysis: narrativeText(row.analysis, 2500),
+      businessImpact: narrativeText(row.businessImpact, 1500),
+      recommendation: narrativeText(row.recommendation, 2000),
       evidenceIds,
       machines: machinesFor(evidenceIds),
       evidenceCount: occurrencesFor(evidenceIds)
     }].filter(entry => entry.title && entry.analysis)
-  }).slice(0, 8)
+  })
 
   const problemGroups = (Array.isArray(source.problemGroups) ? source.problemGroups : []).flatMap(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -406,14 +406,14 @@ function normalizeAnalysis(
       : 'unknown'
     return [{
       category: plainText(row.category, 80) || 'other',
-      label: narrativeText(row.label, 160) || 'Inne',
-      summary: narrativeText(row.summary, 800),
+      label: narrativeText(row.label, 300) || 'Inne',
+      summary: narrativeText(row.summary, 2000),
       trend,
       evidenceIds,
       machines: machinesFor(evidenceIds),
       occurrences: occurrencesFor(evidenceIds)
     }]
-  }).slice(0, 12)
+  })
 
   const rootCauses = (Array.isArray(source.rootCauses) ? source.rootCauses : []).flatMap(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -424,13 +424,13 @@ function normalizeAnalysis(
       ? confidenceValue as PeriodAiRootCause['confidence']
       : 'low'
     return [{
-      cause: narrativeText(row.cause, 220),
-      reasoning: narrativeText(row.reasoning, 800),
+      cause: narrativeText(row.cause, 500),
+      reasoning: narrativeText(row.reasoning, 2000),
       confidence,
       evidenceIds,
       machines: machinesFor(evidenceIds)
     }].filter(entry => entry.cause && entry.reasoning)
-  }).slice(0, 6)
+  })
 
   const actions = (Array.isArray(source.actions) ? source.actions : []).flatMap(item => {
     const row = item && typeof item === 'object' ? item as Record<string, unknown> : {}
@@ -445,12 +445,12 @@ function normalizeAnalysis(
     return [{
       priority,
       owner,
-      action: narrativeText(row.action, 700),
-      why: narrativeText(row.why, 600),
+      action: narrativeText(row.action, 2000),
+      why: narrativeText(row.why, 1500),
       evidenceIds,
       machines: machinesFor(evidenceIds)
     }].filter(entry => entry.action && entry.why)
-  }).sort((a, b) => a.priority - b.priority).slice(0, 10)
+  }).sort((a, b) => a.priority - b.priority)
 
   const qualityRaw = source.dataQuality && typeof source.dataQuality === 'object'
     ? source.dataQuality as Record<string, unknown>
@@ -460,9 +460,9 @@ function normalizeAnalysis(
   const managementEvidenceIds = refs(source.managementEvidenceIds)
 
   return {
-    executiveSummary: executiveEvidenceIds.length ? narrativeText(source.executiveSummary, 1800) : '',
+    executiveSummary: executiveEvidenceIds.length ? narrativeText(source.executiveSummary, 4000) : '',
     executiveEvidenceIds,
-    managementAssessment: managementEvidenceIds.length ? narrativeText(source.managementAssessment, 1600) : '',
+    managementAssessment: managementEvidenceIds.length ? narrativeText(source.managementAssessment, 3500) : '',
     managementEvidenceIds,
     stationFindings,
     findings,
@@ -471,8 +471,8 @@ function normalizeAnalysis(
     actions,
     dataQuality: {
       level: ['high', 'medium', 'low'].includes(qualityLevel) ? qualityLevel as 'high' | 'medium' | 'low' : 'low',
-      assessment: narrativeText(qualityRaw.assessment, 800),
-      gaps: narrativeArray(qualityRaw.gaps, 8)
+      assessment: narrativeText(qualityRaw.assessment, 1500),
+      gaps: narrativeArray(qualityRaw.gaps, 20)
     },
     generatedAt: new Date().toISOString(),
     model
