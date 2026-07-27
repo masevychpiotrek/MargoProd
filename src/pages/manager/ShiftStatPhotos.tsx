@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
-import type { ShiftStatPhoto, ShiftStatReading } from '@/types/database'
+import { SHIFT_STAT_MODULES, shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
+import type { Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
+
+const SHIFT_TYPES: ShiftType[] = ['I', 'II', 'III']
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JSZipLib = any
@@ -102,13 +104,34 @@ function one<T>(value: T | T[] | null | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value ?? undefined
 }
 
-async function fetchPhotos() {
-  const { data } = await supabase
+type PhotoFilters = {
+  machineId: string
+  moduleKey: string
+  shiftType: string
+  ocrStatus: string
+  dateFrom: string
+  dateTo: string
+}
+
+async function fetchPhotos(filters: PhotoFilters) {
+  let query = supabase
     .from('shift_stat_photos')
     .select('*, machine:machines(name), operator:profiles!operator_id(full_name)')
     .order('captured_at', { ascending: false })
-    .limit(150)
+    .limit(300)
+  if (filters.machineId) query = query.eq('machine_id', filters.machineId)
+  if (filters.moduleKey) query = query.eq('module_key', filters.moduleKey)
+  if (filters.shiftType) query = query.eq('shift_type', filters.shiftType)
+  if (filters.ocrStatus) query = query.eq('ocr_status', filters.ocrStatus)
+  if (filters.dateFrom) query = query.gte('shift_date', filters.dateFrom)
+  if (filters.dateTo) query = query.lte('shift_date', filters.dateTo)
+  const { data } = await query
   return (data ?? []) as PhotoRow[]
+}
+
+async function fetchMachines() {
+  const { data } = await supabase.from('machines').select('*').is('deleted_at', null).order('name')
+  return (data ?? []) as Machine[]
 }
 
 async function fetchReadings(photoId: string) {
@@ -137,9 +160,20 @@ async function getSignedUrl(path: string) {
 
 export default function ManagerShiftStatPhotos() {
   const [photos, setPhotos] = useState<PhotoRow[]>([])
+  const [machines, setMachines] = useState<Machine[]>([])
   const [signedUrls, setSignedUrls] = useState<Record<string, string>>({})
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+
+  // Filtry pobierane wprost z bazy (nie tylko dofiltrowanie tego co juz zaladowane) -
+  // dzieki temu wybor automatu/modulu/zakresu dat obejmuje realnie wszystkie pasujace
+  // zdjecia, a nie tylko te z ostatnich 300 zaladowanych rekordow.
+  const [filterMachineId, setFilterMachineId] = useState('')
+  const [filterModule, setFilterModule] = useState('')
+  const [filterShift, setFilterShift] = useState('')
+  const [filterOcrStatus, setFilterOcrStatus] = useState('')
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
 
   const [selected, setSelected] = useState<PhotoRow | null>(null)
   const [readings, setReadings] = useState<ShiftStatReading[]>([])
@@ -178,12 +212,21 @@ export default function ManagerShiftStatPhotos() {
     })
   }
 
-  useEffect(() => { load() }, [])
+  useEffect(() => { fetchMachines().then(setMachines) }, [])
+  useEffect(() => { load() }, [filterMachineId, filterModule, filterShift, filterOcrStatus, dateFrom, dateTo])
 
   const load = async () => {
     setLoading(true)
-    const list = await fetchPhotos()
+    const list = await fetchPhotos({
+      machineId: filterMachineId,
+      moduleKey: filterModule,
+      shiftType: filterShift,
+      ocrStatus: filterOcrStatus,
+      dateFrom,
+      dateTo
+    })
     setPhotos(list)
+    setSelectedIds(new Set())
     const urls: Record<string, string> = {}
     await Promise.all(list.map(async p => {
       const url = await getSignedUrl(p.photo_path)
@@ -372,17 +415,76 @@ export default function ManagerShiftStatPhotos() {
   const exportTargets = selectedIds.size > 0 ? filtered.filter(p => selectedIds.has(p.id)) : filtered
   const activeColumns = columnOrder.filter(key => enabledColumns.has(key))
 
+  const filtersActive = filterMachineId || filterModule || filterShift || filterOcrStatus || dateFrom || dateTo
+  const clearFilters = () => {
+    setFilterMachineId('')
+    setFilterModule('')
+    setFilterShift('')
+    setFilterOcrStatus('')
+    setDateFrom('')
+    setDateTo('')
+  }
+
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-white">Zdjęcia statystyk zmianowych</h1>
-        <p className="text-navy-400 mt-1">{photos.length} zdjęć</p>
+        <p className="text-navy-400 mt-1">{filtered.length} z {photos.length} załadowanych zdjęć</p>
+      </div>
+
+      <div className="card">
+        <div className="card-header">
+          <div className="card-title">Filtry</div>
+          {!!filtersActive && (
+            <button onClick={clearFilters} className="text-xs font-bold text-navy-400 hover:text-brand">✕ Wyczyść filtry</button>
+          )}
+        </div>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          <div>
+            <label className="label">Automat</label>
+            <select value={filterMachineId} onChange={e => setFilterMachineId(e.target.value)} className="input">
+              <option value="">Wszystkie automaty</option>
+              {machines.map(m => <option key={m.id} value={m.id}>{m.name}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Moduł</label>
+            <select value={filterModule} onChange={e => setFilterModule(e.target.value)} className="input">
+              <option value="">Wszystkie moduły</option>
+              {SHIFT_STAT_MODULES.map(m => <option key={m.key} value={m.key}>{m.label}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Zmiana</label>
+            <select value={filterShift} onChange={e => setFilterShift(e.target.value)} className="input">
+              <option value="">Wszystkie zmiany</option>
+              {SHIFT_TYPES.map(s => <option key={s} value={s}>Zmiana {s}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="label">Status OCR</label>
+            <select value={filterOcrStatus} onChange={e => setFilterOcrStatus(e.target.value)} className="input">
+              <option value="">Wszystkie statusy</option>
+              <option value="done">Odczytane</option>
+              <option value="failed">Błąd odczytu</option>
+              <option value="pending">W trakcie</option>
+            </select>
+          </div>
+          <div>
+            <label className="label">Data od</label>
+            <input type="date" value={dateFrom} onChange={e => setDateFrom(e.target.value)} className="input" />
+          </div>
+          <div>
+            <label className="label">Data do</label>
+            <input type="date" value={dateTo} onChange={e => setDateTo(e.target.value)} className="input" />
+          </div>
+        </div>
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
         <input
           value={search} onChange={e => setSearch(e.target.value)}
-          placeholder="Szukaj po automacie, operatorze, dacie (RRRR-MM-DD)..."
+          placeholder="Szukaj w załadowanych po automacie, operatorze, dacie..."
           className="input w-full max-w-md"
         />
         <button
