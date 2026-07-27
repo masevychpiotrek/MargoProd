@@ -6,7 +6,17 @@ import type { ShiftStatPhoto, ShiftStatReading } from '@/types/database'
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type JSZipLib = any
-declare global { interface Window { JSZip?: JSZipLib } }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EJS = any
+declare global {
+  interface Window {
+    JSZip?: JSZipLib
+    ExcelJS?: EJS
+  }
+}
+
+const NAVY = 'FF1A2744'
+const GOLD = 'FFC9A84C'
 
 type PhotoRow = ShiftStatPhoto & {
   machine?: { name: string } | { name: string }[] | null
@@ -34,6 +44,17 @@ function loadJSZip(): Promise<JSZipLib> {
   })
 }
 
+function loadExcelJS(): Promise<EJS> {
+  return new Promise((resolve, reject) => {
+    if (window.ExcelJS) { resolve(window.ExcelJS); return }
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'
+    s.onload = () => resolve(window.ExcelJS!)
+    s.onerror = () => reject(new Error('Nie udało się załadować ExcelJS'))
+    document.head.appendChild(s)
+  })
+}
+
 function one<T>(value: T | T[] | null | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value ?? undefined
 }
@@ -52,6 +73,16 @@ async function fetchReadings(photoId: string) {
     .from('shift_stat_readings')
     .select('*')
     .eq('photo_id', photoId)
+    .order('sort_order')
+  return (data ?? []) as ShiftStatReading[]
+}
+
+async function fetchReadingsForPhotos(photoIds: string[]) {
+  if (!photoIds.length) return [] as ShiftStatReading[]
+  const { data } = await supabase
+    .from('shift_stat_readings')
+    .select('*')
+    .in('photo_id', photoIds)
     .order('sort_order')
   return (data ?? []) as ShiftStatReading[]
 }
@@ -168,6 +199,118 @@ export default function ManagerShiftStatPhotos() {
     }
   }
 
+  // Eksport odczytow (nie samych zdjec) do Excela - jeden wiersz na kazdy odczytany
+  // parametr, zeby dane dalo sie dalej filtrowac/analizowac poza aplikacja.
+  const [exportingExcel, setExportingExcel] = useState(false)
+  const [exportError, setExportError] = useState('')
+  const handleExportExcel = async (list: PhotoRow[]) => {
+    if (list.length === 0) return
+    setExportingExcel(true)
+    setExportError('')
+    try {
+      const [ExcelJS, allReadings] = await Promise.all([
+        loadExcelJS(),
+        fetchReadingsForPhotos(list.map(p => p.id))
+      ])
+      const readingsByPhoto = new Map<string, ShiftStatReading[]>()
+      allReadings.forEach(r => {
+        const arr = readingsByPhoto.get(r.photo_id) ?? []
+        arr.push(r)
+        readingsByPhoto.set(r.photo_id, arr)
+      })
+
+      const wb = new ExcelJS.Workbook()
+      wb.creator = 'MargoLine MES'
+      wb.created = new Date()
+      const ws = wb.addWorksheet('Odczyty statystyk zmianowych')
+
+      ws.mergeCells(1, 1, 1, 10)
+      const title = ws.getCell(1, 1)
+      title.value = 'Odczyty statystyk zmianowych'
+      title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+      title.alignment = { horizontal: 'center', vertical: 'middle' }
+      ws.getRow(1).height = 26
+
+      const headerRow = 3
+      const columns = [
+        { label: 'Data', width: 13 },
+        { label: 'Zmiana', width: 9 },
+        { label: 'Automat', width: 20 },
+        { label: 'Moduł', width: 22 },
+        { label: 'Operator', width: 20 },
+        { label: 'Godzina zdjęcia', width: 16 },
+        { label: 'Status OCR', width: 12 },
+        { label: 'Etykieta odczytu', width: 24 },
+        { label: 'Wartość', width: 16 },
+        { label: 'Wartość liczbowa', width: 16 }
+      ]
+      columns.forEach((col, ci) => {
+        const cell = ws.getCell(headerRow, ci + 1)
+        cell.value = col.label
+        cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        ws.getColumn(ci + 1).width = col.width
+      })
+
+      let row = headerRow + 1
+      list
+        .slice()
+        .sort((a, b) => (b.captured_at ?? '').localeCompare(a.captured_at ?? ''))
+        .forEach(photo => {
+          const machineName = one(photo.machine)?.name ?? '—'
+          const operatorName = one(photo.operator)?.full_name ?? '—'
+          const moduleLabel = shiftStatModuleLabel(photo.module_key) ?? '—'
+          const captured = new Date(photo.captured_at)
+          const ocrStatusLabel = photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'
+          const readings = readingsByPhoto.get(photo.id) ?? []
+          const values = readings.length ? readings : [null]
+          values.forEach(reading => {
+            const cells = [
+              photo.shift_date ?? '',
+              photo.shift_type ?? '',
+              machineName,
+              moduleLabel,
+              operatorName,
+              captured.toLocaleString('pl-PL'),
+              ocrStatusLabel,
+              reading?.metric_label ?? '—',
+              reading ? (reading.corrected_value ?? reading.metric_value) : '',
+              reading?.numeric_value ?? ''
+            ]
+            cells.forEach((value, ci) => {
+              const cell = ws.getCell(row, ci + 1)
+              cell.value = value
+              cell.font = { name: 'Arial', size: 9 }
+              cell.border = {
+                top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+              }
+            })
+            row += 1
+          })
+        })
+
+      const buffer = await wb.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Statystyki-zmianowe_${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Nie udało się przygotować pliku Excel.')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const filtered = photos.filter(p => {
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -198,10 +341,20 @@ export default function ManagerShiftStatPhotos() {
             ? `⤓ Pobieranie ${downloadAllProgress.done}/${downloadAllProgress.total}...`
             : `⤓ Pobierz wszystkie (${filtered.length})`}
         </button>
+        <button
+          onClick={() => handleExportExcel(filtered)}
+          disabled={exportingExcel || filtered.length === 0}
+          className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
+        >
+          {exportingExcel ? '⏳ Generowanie...' : '📊 Eksportuj do Excela'}
+        </button>
       </div>
 
       {downloadAllError && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{downloadAllError}</div>
+      )}
+      {exportError && (
+        <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{exportError}</div>
       )}
 
       {loading ? (
