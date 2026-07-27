@@ -23,6 +23,49 @@ type PhotoRow = ShiftStatPhoto & {
   operator?: { full_name: string } | { full_name: string }[] | null
 }
 
+type ExportColumnKey =
+  | 'date' | 'shift' | 'machine' | 'module' | 'operator' | 'capturedAt'
+  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed'
+
+const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; width: number }> = {
+  date: { label: 'Data', width: 13 },
+  shift: { label: 'Zmiana', width: 9 },
+  machine: { label: 'Automat', width: 20 },
+  module: { label: 'Moduł', width: 22 },
+  operator: { label: 'Operator', width: 20 },
+  capturedAt: { label: 'Godzina zdjęcia', width: 16 },
+  ocrStatus: { label: 'Status OCR', width: 12 },
+  metricLabel: { label: 'Etykieta odczytu', width: 24 },
+  value: { label: 'Wartość', width: 16 },
+  numericValue: { label: 'Wartość liczbowa', width: 16 },
+  stationKey: { label: 'Stacja', width: 14 },
+  confirmed: { label: 'Potwierdzone', width: 14 }
+}
+
+const DEFAULT_EXPORT_COLUMNS: ExportColumnKey[] = [
+  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue'
+]
+const DEFAULT_EXPORT_COLUMN_SET = new Set<ExportColumnKey>(DEFAULT_EXPORT_COLUMNS)
+const ALL_EXPORT_COLUMNS: ExportColumnKey[] = [...DEFAULT_EXPORT_COLUMNS, 'stationKey', 'confirmed']
+
+function exportColumnValue(key: ExportColumnKey, photo: PhotoRow, reading: ShiftStatReading | null): string | number {
+  switch (key) {
+    case 'date': return photo.shift_date ?? ''
+    case 'shift': return photo.shift_type ?? ''
+    case 'machine': return one(photo.machine)?.name ?? '—'
+    case 'module': return shiftStatModuleLabel(photo.module_key) ?? '—'
+    case 'operator': return one(photo.operator)?.full_name ?? '—'
+    case 'capturedAt': return new Date(photo.captured_at).toLocaleString('pl-PL')
+    case 'ocrStatus': return photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'
+    case 'metricLabel': return reading?.metric_label ?? '—'
+    case 'value': return reading ? (reading.corrected_value ?? reading.metric_value) : ''
+    case 'numericValue': return reading?.numeric_value ?? ''
+    case 'stationKey': return reading?.station_key ?? ''
+    case 'confirmed': return reading ? (reading.confirmed ? 'Tak' : 'Nie') : ''
+    default: return ''
+  }
+}
+
 // Wspolna z pojedynczym pobraniem nazwa pliku: 2026-07-21_Zmiana-I_IS-PRO-1_08-57.jpg
 function photoFileName(photo: PhotoRow): string {
   const captured = new Date(photo.captured_at)
@@ -101,6 +144,39 @@ export default function ManagerShiftStatPhotos() {
   const [selected, setSelected] = useState<PhotoRow | null>(null)
   const [readings, setReadings] = useState<ShiftStatReading[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+
+  // Zaznaczenie konkretnych zdjec do eksportu/pobrania - pusty zbior oznacza
+  // "wszystkie aktualnie widoczne po filtrze" (dotychczasowe zachowanie).
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const toggleSelected = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id); else next.add(id)
+      return next
+    })
+  }
+
+  // Konfiguracja kolumn eksportu do Excela - kolejnosc pelnej listy + zbior wlaczonych.
+  const [showColumnConfig, setShowColumnConfig] = useState(false)
+  const [columnOrder, setColumnOrder] = useState<ExportColumnKey[]>(ALL_EXPORT_COLUMNS)
+  const [enabledColumns, setEnabledColumns] = useState<Set<ExportColumnKey>>(new Set(DEFAULT_EXPORT_COLUMN_SET))
+  const toggleColumn = (key: ExportColumnKey) => {
+    setEnabledColumns(prev => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key); else next.add(key)
+      return next
+    })
+  }
+  const moveColumn = (key: ExportColumnKey, direction: -1 | 1) => {
+    setColumnOrder(prev => {
+      const index = prev.indexOf(key)
+      const target = index + direction
+      if (target < 0 || target >= prev.length) return prev
+      const next = prev.slice()
+      ;[next[index], next[target]] = [next[target], next[index]]
+      return next
+    })
+  }
 
   useEffect(() => { load() }, [])
 
@@ -203,8 +279,8 @@ export default function ManagerShiftStatPhotos() {
   // parametr, zeby dane dalo sie dalej filtrowac/analizowac poza aplikacja.
   const [exportingExcel, setExportingExcel] = useState(false)
   const [exportError, setExportError] = useState('')
-  const handleExportExcel = async (list: PhotoRow[]) => {
-    if (list.length === 0) return
+  const handleExportExcel = async (list: PhotoRow[], columns: ExportColumnKey[]) => {
+    if (list.length === 0 || columns.length === 0) return
     setExportingExcel(true)
     setExportError('')
     try {
@@ -224,7 +300,7 @@ export default function ManagerShiftStatPhotos() {
       wb.created = new Date()
       const ws = wb.addWorksheet('Odczyty statystyk zmianowych')
 
-      ws.mergeCells(1, 1, 1, 10)
+      ws.mergeCells(1, 1, 1, columns.length)
       const title = ws.getCell(1, 1)
       title.value = 'Odczyty statystyk zmianowych'
       title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
@@ -233,25 +309,14 @@ export default function ManagerShiftStatPhotos() {
       ws.getRow(1).height = 26
 
       const headerRow = 3
-      const columns = [
-        { label: 'Data', width: 13 },
-        { label: 'Zmiana', width: 9 },
-        { label: 'Automat', width: 20 },
-        { label: 'Moduł', width: 22 },
-        { label: 'Operator', width: 20 },
-        { label: 'Godzina zdjęcia', width: 16 },
-        { label: 'Status OCR', width: 12 },
-        { label: 'Etykieta odczytu', width: 24 },
-        { label: 'Wartość', width: 16 },
-        { label: 'Wartość liczbowa', width: 16 }
-      ]
-      columns.forEach((col, ci) => {
+      columns.forEach((key, ci) => {
+        const def = EXPORT_COLUMN_DEFS[key]
         const cell = ws.getCell(headerRow, ci + 1)
-        cell.value = col.label
+        cell.value = def.label
         cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
         cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
         cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-        ws.getColumn(ci + 1).width = col.width
+        ws.getColumn(ci + 1).width = def.width
       })
 
       let row = headerRow + 1
@@ -259,29 +324,12 @@ export default function ManagerShiftStatPhotos() {
         .slice()
         .sort((a, b) => (b.captured_at ?? '').localeCompare(a.captured_at ?? ''))
         .forEach(photo => {
-          const machineName = one(photo.machine)?.name ?? '—'
-          const operatorName = one(photo.operator)?.full_name ?? '—'
-          const moduleLabel = shiftStatModuleLabel(photo.module_key) ?? '—'
-          const captured = new Date(photo.captured_at)
-          const ocrStatusLabel = photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'
-          const readings = readingsByPhoto.get(photo.id) ?? []
-          const values = readings.length ? readings : [null]
+          const photoReadings = readingsByPhoto.get(photo.id) ?? []
+          const values = photoReadings.length ? photoReadings : [null]
           values.forEach(reading => {
-            const cells = [
-              photo.shift_date ?? '',
-              photo.shift_type ?? '',
-              machineName,
-              moduleLabel,
-              operatorName,
-              captured.toLocaleString('pl-PL'),
-              ocrStatusLabel,
-              reading?.metric_label ?? '—',
-              reading ? (reading.corrected_value ?? reading.metric_value) : '',
-              reading?.numeric_value ?? ''
-            ]
-            cells.forEach((value, ci) => {
+            columns.forEach((key, ci) => {
               const cell = ws.getCell(row, ci + 1)
-              cell.value = value
+              cell.value = exportColumnValue(key, photo, reading)
               cell.font = { name: 'Arial', size: 9 }
               cell.border = {
                 top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
@@ -319,6 +367,11 @@ export default function ManagerShiftStatPhotos() {
       (p.shift_date ?? '').includes(q)
   })
 
+  // Pusty wybor = dzialaj na wszystkim co widoczne po filtrze (jak dotychczas);
+  // zaznaczenie konkretnych zdjec zawezalo dzialanie tylko do nich.
+  const exportTargets = selectedIds.size > 0 ? filtered.filter(p => selectedIds.has(p.id)) : filtered
+  const activeColumns = columnOrder.filter(key => enabledColumns.has(key))
+
   return (
     <div className="space-y-5">
       <div>
@@ -333,22 +386,63 @@ export default function ManagerShiftStatPhotos() {
           className="input w-full max-w-md"
         />
         <button
-          onClick={() => handleDownloadAll(filtered)}
-          disabled={downloadingAll || filtered.length === 0}
+          onClick={() => setSelectedIds(selectedIds.size > 0 ? new Set() : new Set(filtered.map(p => p.id)))}
+          className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all"
+        >
+          {selectedIds.size > 0 ? `✕ Wyczyść zaznaczenie (${selectedIds.size})` : '☑ Zaznacz wszystkie widoczne'}
+        </button>
+        <button
+          onClick={() => setShowColumnConfig(v => !v)}
+          className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all"
+        >
+          ⚙ Kolumny eksportu ({activeColumns.length})
+        </button>
+        <button
+          onClick={() => handleDownloadAll(exportTargets)}
+          disabled={downloadingAll || exportTargets.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
         >
           {downloadingAll
             ? `⤓ Pobieranie ${downloadAllProgress.done}/${downloadAllProgress.total}...`
-            : `⤓ Pobierz wszystkie (${filtered.length})`}
+            : `⤓ Pobierz ${selectedIds.size > 0 ? 'zaznaczone' : 'wszystkie'} (${exportTargets.length})`}
         </button>
         <button
-          onClick={() => handleExportExcel(filtered)}
-          disabled={exportingExcel || filtered.length === 0}
+          onClick={() => handleExportExcel(exportTargets, activeColumns)}
+          disabled={exportingExcel || exportTargets.length === 0 || activeColumns.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
         >
-          {exportingExcel ? '⏳ Generowanie...' : '📊 Eksportuj do Excela'}
+          {exportingExcel ? '⏳ Generowanie...' : `📊 Eksportuj do Excela (${exportTargets.length})`}
         </button>
       </div>
+
+      {showColumnConfig && (
+        <div className="card space-y-2">
+          <div className="card-title text-sm">Kolumny w pliku Excel</div>
+          <div className="card-sub mb-2">Zaznacz kolumny do uwzględnienia i ustaw ich kolejność strzałkami</div>
+          <div className="space-y-1">
+            {columnOrder.map((key, index) => (
+              <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-900 px-3 py-2">
+                <label className="flex items-center gap-2 text-sm text-navy-200">
+                  <input type="checkbox" checked={enabledColumns.has(key)} onChange={() => toggleColumn(key)} />
+                  {EXPORT_COLUMN_DEFS[key].label}
+                </label>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => moveColumn(key, -1)}
+                    disabled={index === 0}
+                    className="rounded-md border border-navy-700 px-2 py-1 text-xs text-navy-300 hover:border-brand/40 hover:text-brand disabled:opacity-30"
+                  >↑</button>
+                  <button
+                    onClick={() => moveColumn(key, 1)}
+                    disabled={index === columnOrder.length - 1}
+                    className="rounded-md border border-navy-700 px-2 py-1 text-xs text-navy-300 hover:border-brand/40 hover:text-brand disabled:opacity-30"
+                  >↓</button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {downloadAllError && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{downloadAllError}</div>
@@ -364,26 +458,33 @@ export default function ManagerShiftStatPhotos() {
       ) : (
         <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
           {filtered.map(photo => (
-            <button key={photo.id} onClick={() => openDetail(photo)}
-              className="card p-3 text-left hover:border-brand/40 transition-all">
-              {signedUrls[photo.id] && (
-                <img src={signedUrls[photo.id]} alt="Miniatura" className="w-full h-32 object-cover rounded-lg border border-navy-700 mb-2" />
-              )}
-              <div className="text-xs font-bold text-white">{one(photo.machine)?.name ?? '—'}</div>
-              {shiftStatModuleLabel(photo.module_key) && (
-                <div className="text-xs text-brand">{shiftStatModuleLabel(photo.module_key)}</div>
-              )}
-              <div className="text-xs text-navy-400">Zmiana {photo.shift_type} · {photo.shift_date}</div>
-              <div className="text-xs text-navy-500 mt-1">{one(photo.operator)?.full_name ?? '—'}</div>
-              <span className={cn(
-                'inline-block mt-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border',
-                photo.ocr_status === 'done' ? 'border-green-500/30 bg-green-500/10 text-green-400'
-                  : photo.ocr_status === 'failed' ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                    : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
-              )}>
-                {photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'}
-              </span>
-            </button>
+            <div key={photo.id} className="card relative p-3 hover:border-brand/40 transition-all">
+              <label
+                className="absolute right-2 top-2 z-10 flex h-6 w-6 items-center justify-center rounded-md border border-navy-600 bg-navy-900/90"
+                onClick={e => e.stopPropagation()}
+              >
+                <input type="checkbox" checked={selectedIds.has(photo.id)} onChange={() => toggleSelected(photo.id)} />
+              </label>
+              <button onClick={() => openDetail(photo)} className="block w-full text-left">
+                {signedUrls[photo.id] && (
+                  <img src={signedUrls[photo.id]} alt="Miniatura" className="w-full h-32 object-cover rounded-lg border border-navy-700 mb-2" />
+                )}
+                <div className="text-xs font-bold text-white">{one(photo.machine)?.name ?? '—'}</div>
+                {shiftStatModuleLabel(photo.module_key) && (
+                  <div className="text-xs text-brand">{shiftStatModuleLabel(photo.module_key)}</div>
+                )}
+                <div className="text-xs text-navy-400">Zmiana {photo.shift_type} · {photo.shift_date}</div>
+                <div className="text-xs text-navy-500 mt-1">{one(photo.operator)?.full_name ?? '—'}</div>
+                <span className={cn(
+                  'inline-block mt-2 text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border',
+                  photo.ocr_status === 'done' ? 'border-green-500/30 bg-green-500/10 text-green-400'
+                    : photo.ocr_status === 'failed' ? 'border-red-500/30 bg-red-500/10 text-red-300'
+                      : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                )}>
+                  {photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'}
+                </span>
+              </button>
+            </div>
           ))}
         </div>
       )}
