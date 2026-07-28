@@ -3,6 +3,7 @@ import { Chart, BarController, BarElement, LineController, LineElement, PointEle
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { SHIFT_STAT_MODULES, shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
+import { problemCategoryLabel, type ReportIssueType } from '@/lib/issueReports'
 import type { Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Title)
@@ -32,7 +33,7 @@ type ExportLang = 'pl' | 'en'
 
 type ExportColumnKey =
   | 'date' | 'shift' | 'machine' | 'module' | 'operator' | 'capturedAt'
-  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed' | 'description'
+  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed'
 
 const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; labelEn: string; width: number }> = {
   date: { label: 'Data', labelEn: 'Date', width: 13 },
@@ -46,12 +47,11 @@ const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; labelEn: stri
   value: { label: 'Wartość', labelEn: 'Value', width: 16 },
   numericValue: { label: 'Wartość liczbowa', labelEn: 'Numeric value', width: 16 },
   stationKey: { label: 'Stacja', labelEn: 'Station', width: 14 },
-  confirmed: { label: 'Potwierdzone', labelEn: 'Confirmed', width: 14 },
-  description: { label: 'Opis', labelEn: 'Description', width: 45 }
+  confirmed: { label: 'Potwierdzone', labelEn: 'Confirmed', width: 14 }
 }
 
 const DEFAULT_EXPORT_COLUMNS: ExportColumnKey[] = [
-  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue', 'description'
+  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue'
 ]
 const DEFAULT_EXPORT_COLUMN_SET = new Set<ExportColumnKey>(DEFAULT_EXPORT_COLUMNS)
 const ALL_EXPORT_COLUMNS: ExportColumnKey[] = [...DEFAULT_EXPORT_COLUMNS, 'stationKey', 'confirmed']
@@ -73,12 +73,66 @@ function moduleLabelFor(key: string | null | undefined, lang: ExportLang): strin
   return shiftStatModuleLabel(key) ?? key
 }
 
+// Angielskie tlumaczenia kategorii problemow - odpowiadaja 1:1 wartosciom w
+// DOWNTIME_PROBLEM_CATEGORIES / REJECT_PROBLEM_CATEGORIES (src/lib/issueReports.ts).
+// Polskie etykiety bierzemy z problemCategoryLabel(), zeby nie duplikowac tresci -
+// tu trzymamy tylko wersje EN, ktorej nigdzie indziej w apce nie ma.
+const DOWNTIME_CATEGORY_EN: Record<string, string> = {
+  awaria_mechaniczna: 'Mechanical failure',
+  awaria_elektryczna_czujnik: 'Electrical failure / sensor',
+  problem_pneumatyczny: 'Pneumatic problem',
+  problem_z_robotem: 'Robot problem',
+  problem_z_kamera: 'Camera / vision problem',
+  problem_z_podaniem_komponentu: 'Component feeding problem',
+  problem_z_transportem: 'Transport / belt problem',
+  problem_ze_zgrzewaniem: 'Welding problem',
+  problem_z_cieciem: 'Cutting problem',
+  problem_z_nawijaniem_drenu: 'Tube winding problem',
+  problem_z_ustawieniami_procesu: 'Process settings problem',
+  regulacja: 'Adjustment',
+  przezbrojenie: 'Changeover',
+  brak_materialu: 'Material shortage',
+  brak_obsady: 'No operator',
+  oczekiwanie_na_ur: 'Waiting for maintenance',
+  oczekiwanie_na_decyzje_jakosc_technolog: 'Waiting for decision / quality / process engineer',
+  inna_przyczyna: 'Other reason'
+}
+
+const REJECT_CATEGORY_EN: Record<string, string> = {
+  odrzut_jakosciowy: 'Quality reject',
+  falszywy_odrzut: 'False reject',
+  problem_z_kamera: 'Camera problem',
+  problem_z_czujnikiem: 'Sensor problem',
+  nieprawidlowe_podanie_komponentu: 'Incorrect component feed',
+  brak_komponentu: 'Missing component',
+  nieprawidlowy_montaz_komponentu: 'Incorrect component assembly',
+  problem_ze_zgrzewem: 'Weld problem',
+  problem_z_dlugoscia_drenu: 'Tube length problem',
+  problem_z_pozycjonowaniem_komponentu: 'Component positioning problem',
+  problem_z_filtrem_odpowietrznika: 'Air vent filter problem',
+  problem_z_oslonka_igly: 'Needle sheath problem',
+  problem_z_komora: 'Drip chamber problem',
+  problem_z_luer_lockiem: 'Luer lock problem',
+  problem_z_rolka: 'Roller clamp problem',
+  uszkodzenie_mechaniczne_wyrobu: 'Product mechanical damage',
+  zabrudzenie_cialo_obce: 'Contamination / foreign object',
+  problem_materialowy: 'Material problem',
+  problem_po_regulacji: 'Problem after adjustment',
+  problem_po_przezbrojeniu: 'Problem after changeover',
+  inna_przyczyna: 'Other reason'
+}
+
+function classificationLabel(type: ReportIssueType, category: string, lang: ExportLang): string {
+  if (lang === 'pl') return problemCategoryLabel(type, category)
+  const map = type === 'downtime' ? DOWNTIME_CATEGORY_EN : REJECT_CATEGORY_EN
+  return map[category] ?? category
+}
+
 function exportColumnValue(
   key: ExportColumnKey,
   photo: PhotoRow,
   reading: ShiftStatReading | null,
-  lang: ExportLang,
-  descriptionByShift: Map<string, ShiftProblemInfo>
+  lang: ExportLang
 ): string | number {
   switch (key) {
     case 'date': return photo.shift_date ?? ''
@@ -93,7 +147,6 @@ function exportColumnValue(
     case 'numericValue': return reading?.numeric_value ?? ''
     case 'stationKey': return reading?.station_key ?? ''
     case 'confirmed': return reading ? (reading.confirmed ? (lang === 'en' ? 'Yes' : 'Tak') : (lang === 'en' ? 'No' : 'Nie')) : ''
-    case 'description': return photo.shift_id ? (descriptionByShift.get(photo.shift_id)?.text ?? '') : ''
     default: return ''
   }
 }
@@ -241,22 +294,22 @@ function formatMinutes(value: number): string {
 }
 
 type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; avgGoodCount: number; entries: number }
-type MachineNote = { date: string; hourBlock: string; hourStart: number; reason: string }
+type MachineClassification = { type: ReportIssueType; category: string; count: number }
 
 // Wydajnosc godzinowa bierzemy z hourly_reports.efficiency_pct/good_count - to jedyne
 // realnie godzinowe dane produkcyjne w systemie (odczyty z ekranu PLC sa robione raz na
 // zmiane, nie co godzine). Uśredniamy po godzinie-dnia (0-23) w calym eksportowanym
 // zakresie dat, zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni. Przy
-// okazji tego samego zapytania zbieramy tez chronologiczna liste opisow postojow
-// (downtime_reason) per automat - do pokazania obok wykresu.
+// okazji tego samego zapytania liczymy tez wystapienia kazdej kategorii problemu
+// (downtime_category / reject_category) per automat - do klasyfikacji obok wykresu.
 async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, dateTo: string) {
   const stats = new Map<string, MachineHourStat[]>()
-  const notes = new Map<string, MachineNote[]>()
-  if (!machineIds.length || !dateFrom || !dateTo) return { stats, notes }
+  const classifications = new Map<string, MachineClassification[]>()
+  if (!machineIds.length || !dateFrom || !dateTo) return { stats, classifications }
 
   const { data } = await supabase
     .from('hourly_reports')
-    .select('machine_id, hour_start, hour_block, report_date, efficiency_pct, good_count, downtime_reason')
+    .select('machine_id, hour_start, hour_block, report_date, efficiency_pct, good_count, downtime_reason, downtime_category, reject_reason, reject_category')
     .in('machine_id', machineIds)
     .gte('report_date', dateFrom)
     .lte('report_date', dateTo)
@@ -265,6 +318,14 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
     .order('hour_start')
 
   const byMachine = new Map<string, Map<number, { hourBlock: string; effSum: number; goodSum: number; count: number }>>()
+  const classificationCounts = new Map<string, Map<string, number>>()
+  const bumpClassification = (machineId: string, type: ReportIssueType, category: string) => {
+    const key = `${type}|${category}`
+    const machineCounts = classificationCounts.get(machineId) ?? new Map<string, number>()
+    machineCounts.set(key, (machineCounts.get(key) ?? 0) + 1)
+    classificationCounts.set(machineId, machineCounts)
+  }
+
   ;(data ?? []).forEach(r => {
     const machineMap = byMachine.get(r.machine_id) ?? new Map<number, { hourBlock: string; effSum: number; goodSum: number; count: number }>()
     const hourEntry = machineMap.get(r.hour_start) ?? { hourBlock: r.hour_block, effSum: 0, goodSum: 0, count: 0 }
@@ -274,11 +335,18 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
     machineMap.set(r.hour_start, hourEntry)
     byMachine.set(r.machine_id, machineMap)
 
-    if (r.downtime_reason?.trim()) {
-      const arr = notes.get(r.machine_id) ?? []
-      arr.push({ date: r.report_date, hourBlock: r.hour_block, hourStart: r.hour_start, reason: r.downtime_reason.trim() })
-      notes.set(r.machine_id, arr)
-    }
+    if (r.downtime_reason?.trim()) bumpClassification(r.machine_id, 'downtime', r.downtime_category || 'inna_przyczyna')
+    if (r.reject_reason?.trim()) bumpClassification(r.machine_id, 'reject', r.reject_category || 'inna_przyczyna')
+  })
+
+  classificationCounts.forEach((counts, machineId) => {
+    const rows = [...counts.entries()]
+      .map(([key, count]) => {
+        const [type, category] = key.split('|') as [ReportIssueType, string]
+        return { type, category, count }
+      })
+      .sort((a, b) => b.count - a.count)
+    classifications.set(machineId, rows)
   })
 
   byMachine.forEach((hourMap, machineId) => {
@@ -294,7 +362,7 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
     stats.set(machineId, machineStats)
   })
 
-  return { stats, notes }
+  return { stats, classifications }
 }
 
 function sanitizeSheetName(name: string): string {
@@ -304,7 +372,13 @@ function sanitizeSheetName(name: string): string {
 // Renderuje wykres na oderwanym (nie dolaczonym do DOM) canvasie i zwraca PNG jako
 // base64 - Chart.js rysuje synchronicznie przy animation:false, wiec nie trzeba czekac
 // na zaden async callback przed odczytaniem obrazu.
-function renderHourlyPerformanceChart(machineName: string, stats: MachineHourStat[]): string {
+const HOURLY_CHART_LABELS: Record<ExportLang, { title: string; pieces: string; efficiency: string; piecesAxis: string; effAxis: string }> = {
+  en: { title: 'Hourly performance', pieces: 'Pieces (avg)', efficiency: 'Efficiency %', piecesAxis: 'Pieces', effAxis: 'Efficiency %' },
+  pl: { title: 'Wydajność godzinowa', pieces: 'Sztuki (śr.)', efficiency: 'Wydajność %', piecesAxis: 'Sztuki', effAxis: 'Wydajność %' }
+}
+
+function renderHourlyPerformanceChart(machineName: string, stats: MachineHourStat[], lang: ExportLang): string {
+  const labels = HOURLY_CHART_LABELS[lang]
   const canvas = document.createElement('canvas')
   canvas.width = 900
   canvas.height = 420
@@ -314,14 +388,14 @@ function renderHourlyPerformanceChart(machineName: string, stats: MachineHourSta
       datasets: [
         {
           type: 'bar',
-          label: 'Pieces (avg)',
+          label: labels.pieces,
           data: stats.map(s => s.avgGoodCount),
           backgroundColor: '#93c5fd',
           yAxisID: 'y'
         },
         {
           type: 'line',
-          label: 'Efficiency %',
+          label: labels.efficiency,
           data: stats.map(s => s.avgEfficiency),
           borderColor: '#2563eb',
           backgroundColor: '#2563eb',
@@ -335,11 +409,11 @@ function renderHourlyPerformanceChart(machineName: string, stats: MachineHourSta
       animation: false,
       plugins: {
         legend: { display: true, position: 'bottom' },
-        title: { display: true, text: `${machineName} - Hourly performance`, font: { size: 16 } }
+        title: { display: true, text: `${machineName} - ${labels.title}`, font: { size: 16 } }
       },
       scales: {
-        y: { beginAtZero: true, position: 'left', title: { display: true, text: 'Pieces' } },
-        y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'Efficiency %' }, ticks: { callback: value => `${value}%` } }
+        y: { beginAtZero: true, position: 'left', title: { display: true, text: labels.piecesAxis } },
+        y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: labels.effAxis }, ticks: { callback: value => `${value}%` } }
       }
     }
   })
@@ -523,7 +597,7 @@ export default function ManagerShiftStatPhotos() {
       const hourlyDateFrom = shiftDates.length ? shiftDates.reduce((a, b) => (a < b ? a : b)) : ''
       const hourlyDateTo = shiftDates.length ? shiftDates.reduce((a, b) => (a > b ? a : b)) : ''
 
-      const [ExcelJS, allReadings, descriptionByShift, { stats: hourlyStatsByMachine, notes: hourlyNotesByMachine }] = await Promise.all([
+      const [ExcelJS, allReadings, descriptionByShift, { stats: hourlyStatsByMachine, classifications: hourlyStatsClassifications }] = await Promise.all([
         loadExcelJS(),
         fetchReadingsForPhotos(list.map(p => p.id)),
         fetchShiftProblems(shiftIds),
@@ -572,9 +646,8 @@ export default function ManagerShiftStatPhotos() {
             values.forEach(reading => {
               columns.forEach((key, ci) => {
                 const cell = ws.getCell(row, ci + 1)
-                cell.value = exportColumnValue(key, photo, reading, lang, descriptionByShift)
+                cell.value = exportColumnValue(key, photo, reading, lang)
                 cell.font = { name: 'Arial', size: 9 }
-                cell.alignment = { wrapText: key === 'description' }
                 cell.border = {
                   top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
                   bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
@@ -589,34 +662,8 @@ export default function ManagerShiftStatPhotos() {
 
       // Shift Summary - GLOWNY, czytelny przeglad: jeden wiersz na zmiane (nie na odczyt),
       // z tym samym polaczonym opisem "co sie dzialo" co kolumna Opis w arkuszach ponizej.
-      // Dodawany jako pierwszy arkusz, wiec to on sie pokazuje po otwarciu pliku.
-      const summaryWs = wb.addWorksheet('Shift Summary')
-      summaryWs.mergeCells(1, 1, 1, 6)
-      const summaryTitle = summaryWs.getCell(1, 1)
-      summaryTitle.value = 'Shift Summary - what happened, what was the problem'
-      summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
-      summaryTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-      summaryTitle.alignment = { horizontal: 'center', vertical: 'middle' }
-      summaryWs.getRow(1).height = 26
-
-      const summaryHeaderRow = 3
-      const summaryColumns = [
-        { label: 'Date', width: 13 },
-        { label: 'Shift', width: 9 },
-        { label: 'Machine', width: 20 },
-        { label: 'Downtime', width: 12 },
-        { label: 'Modules', width: 22 },
-        { label: 'Problem summary', width: 100 }
-      ]
-      summaryColumns.forEach((col, ci) => {
-        const cell = summaryWs.getCell(summaryHeaderRow, ci + 1)
-        cell.value = col.label
-        cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-        summaryWs.getColumn(ci + 1).width = col.width
-      })
-
+      // Budowany raz per jezyk (EN i PL na osobnych arkuszach), EN dodawany jako pierwszy
+      // arkusz, wiec to on sie pokazuje po otwarciu pliku.
       const photosByShift = new Map<string, PhotoRow[]>()
       list.forEach(photo => {
         if (!photo.shift_id) return
@@ -624,41 +671,81 @@ export default function ManagerShiftStatPhotos() {
         arr.push(photo)
         photosByShift.set(photo.shift_id, arr)
       })
-      const summaryRows = [...photosByShift.entries()]
-        .map(([shiftId, shiftPhotos]) => {
-          const first = shiftPhotos[0]
-          const problem = descriptionByShift.get(shiftId)
-          return {
-            date: first.shift_date ?? '',
-            shiftType: first.shift_type ?? '',
-            machineName: one(first.machine)?.name ?? '—',
-            downtimeMin: problem?.downtimeMin ?? 0,
-            modules: [...new Set(shiftPhotos.map(p => p.module_key).filter((k): k is string => !!k))]
-              .map(k => moduleLabelFor(k, 'en')).join(', '),
-            problemSummary: problem?.text || 'No issues reported'
-          }
-        })
-        .sort((a, b) => a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || a.shiftType.localeCompare(b.shiftType))
 
-      let summaryRow = summaryHeaderRow + 1
-      summaryRows.forEach(r => {
-        const cells = [r.date, r.shiftType, r.machineName, formatMinutes(r.downtimeMin), r.modules, r.problemSummary]
-        cells.forEach((value, ci) => {
-          const cell = summaryWs.getCell(summaryRow, ci + 1)
-          cell.value = value
-          cell.font = ci === 3 && r.downtimeMin > 120
-            ? { name: 'Arial', size: 9, bold: true, color: { argb: 'FFDC2626' } }
-            : { name: 'Arial', size: 9 }
-          cell.alignment = { wrapText: ci === 5, vertical: 'top' }
-          cell.border = {
-            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
-          }
+      const SHIFT_SUMMARY_LABELS: Record<ExportLang, { title: string; columns: string[]; noIssues: string }> = {
+        en: {
+          title: 'Shift Summary - what happened, what was the problem',
+          columns: ['Date', 'Shift', 'Machine', 'Downtime', 'Modules', 'Problem summary'],
+          noIssues: 'No issues reported'
+        },
+        pl: {
+          title: 'Podsumowanie zmiany - co się działo, co było problemem',
+          columns: ['Data', 'Zmiana', 'Automat', 'Postój', 'Moduły', 'Podsumowanie problemu'],
+          noIssues: 'Brak zgłoszonych problemów'
+        }
+      }
+
+      const buildShiftSummarySheet = (sheetName: string, lang: ExportLang) => {
+        const labels = SHIFT_SUMMARY_LABELS[lang]
+        const summaryWs = wb.addWorksheet(sheetName)
+        summaryWs.mergeCells(1, 1, 1, 6)
+        const summaryTitle = summaryWs.getCell(1, 1)
+        summaryTitle.value = labels.title
+        summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+        summaryTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        summaryTitle.alignment = { horizontal: 'center', vertical: 'middle' }
+        summaryWs.getRow(1).height = 26
+
+        const summaryHeaderRow = 3
+        const summaryColumnWidths = [13, 9, 20, 12, 22, 100]
+        labels.columns.forEach((label, ci) => {
+          const cell = summaryWs.getCell(summaryHeaderRow, ci + 1)
+          cell.value = label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+          summaryWs.getColumn(ci + 1).width = summaryColumnWidths[ci]
         })
-        summaryRow += 1
-      })
+
+        const summaryRows = [...photosByShift.entries()]
+          .map(([shiftId, shiftPhotos]) => {
+            const first = shiftPhotos[0]
+            const problem = descriptionByShift.get(shiftId)
+            return {
+              date: first.shift_date ?? '',
+              shiftType: first.shift_type ?? '',
+              machineName: one(first.machine)?.name ?? '—',
+              downtimeMin: problem?.downtimeMin ?? 0,
+              modules: [...new Set(shiftPhotos.map(p => p.module_key).filter((k): k is string => !!k))]
+                .map(k => moduleLabelFor(k, lang)).join(', '),
+              problemSummary: problem?.text || labels.noIssues
+            }
+          })
+          .sort((a, b) => a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || a.shiftType.localeCompare(b.shiftType))
+
+        let summaryRow = summaryHeaderRow + 1
+        summaryRows.forEach(r => {
+          const cells = [r.date, r.shiftType, r.machineName, formatMinutes(r.downtimeMin), r.modules, r.problemSummary]
+          cells.forEach((value, ci) => {
+            const cell = summaryWs.getCell(summaryRow, ci + 1)
+            cell.value = value
+            cell.font = ci === 3 && r.downtimeMin > 120
+              ? { name: 'Arial', size: 9, bold: true, color: { argb: 'FFDC2626' } }
+              : { name: 'Arial', size: 9 }
+            cell.alignment = { wrapText: ci === 5, vertical: 'top' }
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+            }
+          })
+          summaryRow += 1
+        })
+      }
+
+      buildShiftSummarySheet('Shift Summary', 'en')
+      buildShiftSummarySheet('Podsumowanie zmiany', 'pl')
 
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
@@ -668,60 +755,70 @@ export default function ManagerShiftStatPhotos() {
       buildSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
       buildSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
-      // Wykresy wydajnosci godzinowej - jeden arkusz na kazdy automat obecny w eksporcie,
-      // nazwy arkuszy po angielsku. Pod wykresem - chronologiczna lista opisow postojow
-      // dla tego automatu, zeby spadki na wykresie mialy od razu wytlumaczenie obok.
+      // Wykresy wydajnosci godzinowej - para arkuszy (EN + PL) na kazdy automat obecny
+      // w eksporcie. Pod wykresem - klasyfikacja WSZYSTKICH odnotowanych problemow
+      // (kategoria z downtime_category/reject_category, nie surowy tekst), posortowana
+      // malejaco wg liczby wystapien - zeby od razu bylo widac najczestszy typ problemu.
+      const CLASSIFICATION_LABELS: Record<ExportLang, { header: string[]; typeDowntime: string; typeReject: string; empty: string }> = {
+        en: { header: ['Type', 'Category', 'Occurrences'], typeDowntime: 'Downtime', typeReject: 'Reject', empty: 'No classified problems recorded for this range.' },
+        pl: { header: ['Typ', 'Kategoria', 'Liczba wystąpień'], typeDowntime: 'Postój', typeReject: 'Odrzut', empty: 'Brak sklasyfikowanych problemów w tym zakresie.' }
+      }
+
       machineIds.forEach(machineId => {
         const stats = hourlyStatsByMachine.get(machineId) ?? []
         if (!stats.length) return
         const machineName = machines.find(m => m.id === machineId)?.name
           ?? one(list.find(p => p.machine_id === machineId)?.machine)?.name
           ?? 'Machine'
-        const base64 = renderHourlyPerformanceChart(machineName, stats)
-        const imageId = wb.addImage({ base64, extension: 'png' })
-        const chartWs = wb.addWorksheet(sanitizeSheetName(`${machineName} - Hourly Performance`))
-        chartWs.addImage(imageId, 'A1:L24')
+        const classificationRows = hourlyStatsClassifications.get(machineId) ?? []
 
-        const notesHeaderRow = 26
-        const noteColumns = [
-          { label: 'Date', width: 13 },
-          { label: 'Hour', width: 16 },
-          { label: 'Downtime description', width: 90 }
-        ]
-        noteColumns.forEach((col, ci) => {
-          const cell = chartWs.getCell(notesHeaderRow, ci + 1)
-          cell.value = col.label
-          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-          cell.alignment = { horizontal: 'center', vertical: 'middle' }
-          chartWs.getColumn(ci + 1).width = col.width
-        })
+        ;(['en', 'pl'] as ExportLang[]).forEach(lang => {
+          const labels = CLASSIFICATION_LABELS[lang]
+          const sheetSuffix = lang === 'en' ? 'Hourly Performance' : 'Wydajność godzinowa'
+          const base64 = renderHourlyPerformanceChart(machineName, stats, lang)
+          const imageId = wb.addImage({ base64, extension: 'png' })
+          const chartWs = wb.addWorksheet(sanitizeSheetName(`${machineName} - ${sheetSuffix}`))
+          chartWs.addImage(imageId, 'A1:L24')
 
-        const notes = (hourlyNotesByMachine.get(machineId) ?? [])
-          .sort((a, b) => a.date.localeCompare(b.date) || a.hourStart - b.hourStart)
-        let noteRow = notesHeaderRow + 1
-        if (notes.length) {
-          notes.forEach(note => {
-            const cells = [note.date, note.hourBlock, note.reason]
-            cells.forEach((value, ci) => {
-              const cell = chartWs.getCell(noteRow, ci + 1)
-              cell.value = value
-              cell.font = { name: 'Arial', size: 9 }
-              cell.alignment = { wrapText: ci === 2, vertical: 'top' }
-              cell.border = {
-                top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
-              }
-            })
-            noteRow += 1
+          const tableHeaderRow = 26
+          const colWidths = [14, 40, 16]
+          labels.header.forEach((label, ci) => {
+            const cell = chartWs.getCell(tableHeaderRow, ci + 1)
+            cell.value = label
+            cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+            cell.alignment = { horizontal: 'center', vertical: 'middle' }
+            chartWs.getColumn(ci + 1).width = colWidths[ci]
           })
-        } else {
-          const cell = chartWs.getCell(noteRow, 1)
-          cell.value = 'No downtime descriptions recorded for this range.'
-          cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
-        }
+
+          let tableRow = tableHeaderRow + 1
+          if (classificationRows.length) {
+            classificationRows.forEach(row => {
+              const cells = [
+                row.type === 'downtime' ? labels.typeDowntime : labels.typeReject,
+                classificationLabel(row.type, row.category, lang),
+                row.count
+              ]
+              cells.forEach((value, ci) => {
+                const cell = chartWs.getCell(tableRow, ci + 1)
+                cell.value = value
+                cell.font = { name: 'Arial', size: 9 }
+                cell.alignment = { vertical: 'top' }
+                cell.border = {
+                  top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+                }
+              })
+              tableRow += 1
+            })
+          } else {
+            const cell = chartWs.getCell(tableRow, 1)
+            cell.value = labels.empty
+            cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
+          }
+        })
       })
 
       const buffer = await wb.xlsx.writeBuffer()
