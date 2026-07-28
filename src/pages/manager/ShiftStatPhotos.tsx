@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
+import { Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend, Title } from 'chart.js'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { SHIFT_STAT_MODULES, shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
 import type { Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
+
+Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend, Title)
 
 const SHIFT_TYPES: ShiftType[] = ['I', 'II', 'III']
 
@@ -229,6 +232,87 @@ async function fetchShiftDescriptions(shiftIds: string[]) {
   return result
 }
 
+type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; entries: number }
+
+// Wydajnosc godzinowa bierzemy z hourly_reports.efficiency_pct - to jedyne realnie
+// godzinowe dane produkcyjne w systemie (odczyty z ekranu PLC sa robione raz na zmiane,
+// nie co godzine). Uśredniamy po godzinie-dnia (0-23) w calym eksportowanym zakresie dat,
+// zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni.
+async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, dateTo: string) {
+  const result = new Map<string, MachineHourStat[]>()
+  if (!machineIds.length || !dateFrom || !dateTo) return result
+
+  const { data } = await supabase
+    .from('hourly_reports')
+    .select('machine_id, hour_start, hour_block, efficiency_pct')
+    .in('machine_id', machineIds)
+    .gte('report_date', dateFrom)
+    .lte('report_date', dateTo)
+    .is('deleted_at', null)
+
+  const byMachine = new Map<string, Map<number, { hourBlock: string; sum: number; count: number }>>()
+  ;(data ?? []).forEach(r => {
+    const machineMap = byMachine.get(r.machine_id) ?? new Map<number, { hourBlock: string; sum: number; count: number }>()
+    const hourEntry = machineMap.get(r.hour_start) ?? { hourBlock: r.hour_block, sum: 0, count: 0 }
+    hourEntry.sum += Number(r.efficiency_pct) || 0
+    hourEntry.count += 1
+    machineMap.set(r.hour_start, hourEntry)
+    byMachine.set(r.machine_id, machineMap)
+  })
+
+  byMachine.forEach((hourMap, machineId) => {
+    const stats = [...hourMap.entries()]
+      .map(([hourStart, e]) => ({
+        hourStart,
+        hourBlock: e.hourBlock,
+        avgEfficiency: Math.round((e.sum / e.count) * 10) / 10,
+        entries: e.count
+      }))
+      .sort((a, b) => a.hourStart - b.hourStart)
+    result.set(machineId, stats)
+  })
+
+  return result
+}
+
+function sanitizeSheetName(name: string): string {
+  return name.replace(/[:\\/?*[\]]/g, '-').slice(0, 31)
+}
+
+// Renderuje wykres na oderwanym (nie dolaczonym do DOM) canvasie i zwraca PNG jako
+// base64 - Chart.js rysuje synchronicznie przy animation:false, wiec nie trzeba czekac
+// na zaden async callback przed odczytaniem obrazu.
+function renderHourlyPerformanceChart(machineName: string, stats: MachineHourStat[]): string {
+  const canvas = document.createElement('canvas')
+  canvas.width = 900
+  canvas.height = 420
+  const chart = new Chart(canvas, {
+    type: 'bar',
+    data: {
+      labels: stats.map(s => s.hourBlock),
+      datasets: [{
+        label: 'Efficiency %',
+        data: stats.map(s => s.avgEfficiency),
+        backgroundColor: '#2563eb'
+      }]
+    },
+    options: {
+      responsive: false,
+      animation: false,
+      plugins: {
+        legend: { display: false },
+        title: { display: true, text: `${machineName} - Hourly performance`, font: { size: 16 } }
+      },
+      scales: {
+        y: { beginAtZero: true, ticks: { callback: value => `${value}%` } }
+      }
+    }
+  })
+  const base64 = chart.toBase64Image()
+  chart.destroy()
+  return base64.replace(/^data:image\/png;base64,/, '')
+}
+
 export default function ManagerShiftStatPhotos() {
   const [photos, setPhotos] = useState<PhotoRow[]>([])
   const [machines, setMachines] = useState<Machine[]>([])
@@ -399,10 +483,16 @@ export default function ManagerShiftStatPhotos() {
     setExportError('')
     try {
       const shiftIds = list.map(p => p.shift_id).filter((id): id is string => !!id)
-      const [ExcelJS, allReadings, descriptionByShift] = await Promise.all([
+      const machineIds = [...new Set(list.map(p => p.machine_id))]
+      const shiftDates = list.map(p => p.shift_date).filter((d): d is string => !!d)
+      const hourlyDateFrom = shiftDates.length ? shiftDates.reduce((a, b) => (a < b ? a : b)) : ''
+      const hourlyDateTo = shiftDates.length ? shiftDates.reduce((a, b) => (a > b ? a : b)) : ''
+
+      const [ExcelJS, allReadings, descriptionByShift, hourlyStatsByMachine] = await Promise.all([
         loadExcelJS(),
         fetchReadingsForPhotos(list.map(p => p.id)),
-        fetchShiftDescriptions(shiftIds)
+        fetchShiftDescriptions(shiftIds),
+        fetchMachineHourlyStats(machineIds, hourlyDateFrom, hourlyDateTo)
       ])
       const readingsByPhoto = new Map<string, ShiftStatReading[]>()
       allReadings.forEach(r => {
@@ -469,6 +559,20 @@ export default function ManagerShiftStatPhotos() {
       buildSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
       buildSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
       buildSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
+
+      // Wykresy wydajnosci godzinowej - jeden arkusz na kazdy automat obecny w eksporcie,
+      // nazwy arkuszy po angielsku.
+      machineIds.forEach(machineId => {
+        const stats = hourlyStatsByMachine.get(machineId) ?? []
+        if (!stats.length) return
+        const machineName = machines.find(m => m.id === machineId)?.name
+          ?? one(list.find(p => p.machine_id === machineId)?.machine)?.name
+          ?? 'Machine'
+        const base64 = renderHourlyPerformanceChart(machineName, stats)
+        const imageId = wb.addImage({ base64, extension: 'png' })
+        const chartWs = wb.addWorksheet(sanitizeSheetName(`${machineName} - Hourly Performance`))
+        chartWs.addImage(imageId, 'A1:L24')
+      })
 
       const buffer = await wb.xlsx.writeBuffer()
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
