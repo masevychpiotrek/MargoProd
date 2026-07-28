@@ -25,45 +25,72 @@ type PhotoRow = ShiftStatPhoto & {
   operator?: { full_name: string } | { full_name: string }[] | null
 }
 
+type ExportLang = 'pl' | 'en'
+
 type ExportColumnKey =
   | 'date' | 'shift' | 'machine' | 'module' | 'operator' | 'capturedAt'
-  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed'
+  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed' | 'description'
 
-const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; width: number }> = {
-  date: { label: 'Data', width: 13 },
-  shift: { label: 'Zmiana', width: 9 },
-  machine: { label: 'Automat', width: 20 },
-  module: { label: 'Moduł', width: 22 },
-  operator: { label: 'Operator', width: 20 },
-  capturedAt: { label: 'Godzina zdjęcia', width: 16 },
-  ocrStatus: { label: 'Status OCR', width: 12 },
-  metricLabel: { label: 'Etykieta odczytu', width: 24 },
-  value: { label: 'Wartość', width: 16 },
-  numericValue: { label: 'Wartość liczbowa', width: 16 },
-  stationKey: { label: 'Stacja', width: 14 },
-  confirmed: { label: 'Potwierdzone', width: 14 }
+const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; labelEn: string; width: number }> = {
+  date: { label: 'Data', labelEn: 'Date', width: 13 },
+  shift: { label: 'Zmiana', labelEn: 'Shift', width: 9 },
+  machine: { label: 'Automat', labelEn: 'Machine', width: 20 },
+  module: { label: 'Moduł', labelEn: 'Module', width: 22 },
+  operator: { label: 'Operator', labelEn: 'Operator', width: 20 },
+  capturedAt: { label: 'Godzina zdjęcia', labelEn: 'Photo time', width: 16 },
+  ocrStatus: { label: 'Status OCR', labelEn: 'OCR status', width: 12 },
+  metricLabel: { label: 'Etykieta odczytu', labelEn: 'Reading label', width: 24 },
+  value: { label: 'Wartość', labelEn: 'Value', width: 16 },
+  numericValue: { label: 'Wartość liczbowa', labelEn: 'Numeric value', width: 16 },
+  stationKey: { label: 'Stacja', labelEn: 'Station', width: 14 },
+  confirmed: { label: 'Potwierdzone', labelEn: 'Confirmed', width: 14 },
+  description: { label: 'Opis (postój > 2h)', labelEn: 'Description (downtime > 2h)', width: 45 }
 }
 
 const DEFAULT_EXPORT_COLUMNS: ExportColumnKey[] = [
-  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue'
+  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue', 'description'
 ]
 const DEFAULT_EXPORT_COLUMN_SET = new Set<ExportColumnKey>(DEFAULT_EXPORT_COLUMNS)
 const ALL_EXPORT_COLUMNS: ExportColumnKey[] = [...DEFAULT_EXPORT_COLUMNS, 'stationKey', 'confirmed']
 
-function exportColumnValue(key: ExportColumnKey, photo: PhotoRow, reading: ShiftStatReading | null): string | number {
+const OCR_STATUS_LABELS: Record<ExportLang, Record<'done' | 'failed' | 'pending', string>> = {
+  pl: { done: 'Odczytane', failed: 'Błąd odczytu', pending: 'W trakcie' },
+  en: { done: 'Read', failed: 'Read error', pending: 'Pending' }
+}
+
+// "Zestaw"/"Komora" to nazwy modulow uzywane wewnetrznie (patrz SHIFT_STAT_MODULES) -
+// producent/A1TEC zna je jako "Infusion Set"/"Drip Chamber", stad osobne etykiety EN.
+function moduleLabelFor(key: string | null | undefined, lang: ExportLang): string {
+  if (!key) return '—'
+  if (lang === 'en') {
+    if (key === 'zestaw') return 'Infusion Set'
+    if (key === 'komora') return 'Drip Chamber'
+    return key
+  }
+  return shiftStatModuleLabel(key) ?? key
+}
+
+function exportColumnValue(
+  key: ExportColumnKey,
+  photo: PhotoRow,
+  reading: ShiftStatReading | null,
+  lang: ExportLang,
+  descriptionByShift: Map<string, string>
+): string | number {
   switch (key) {
     case 'date': return photo.shift_date ?? ''
     case 'shift': return photo.shift_type ?? ''
     case 'machine': return one(photo.machine)?.name ?? '—'
-    case 'module': return shiftStatModuleLabel(photo.module_key) ?? '—'
+    case 'module': return moduleLabelFor(photo.module_key, lang)
     case 'operator': return one(photo.operator)?.full_name ?? '—'
-    case 'capturedAt': return new Date(photo.captured_at).toLocaleString('pl-PL')
-    case 'ocrStatus': return photo.ocr_status === 'done' ? 'Odczytane' : photo.ocr_status === 'failed' ? 'Błąd odczytu' : 'W trakcie'
+    case 'capturedAt': return new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL')
+    case 'ocrStatus': return OCR_STATUS_LABELS[lang][photo.ocr_status]
     case 'metricLabel': return reading?.metric_label ?? '—'
     case 'value': return reading ? (reading.corrected_value ?? reading.metric_value) : ''
     case 'numericValue': return reading?.numeric_value ?? ''
     case 'stationKey': return reading?.station_key ?? ''
-    case 'confirmed': return reading ? (reading.confirmed ? 'Tak' : 'Nie') : ''
+    case 'confirmed': return reading ? (reading.confirmed ? (lang === 'en' ? 'Yes' : 'Tak') : (lang === 'en' ? 'No' : 'Nie')) : ''
+    case 'description': return photo.shift_id ? (descriptionByShift.get(photo.shift_id) ?? '') : ''
     default: return ''
   }
 }
@@ -156,6 +183,50 @@ async function fetchReadingsForPhotos(photoIds: string[]) {
 async function getSignedUrl(path: string) {
   const { data } = await supabase.storage.from('shift-stats-photos').createSignedUrl(path, 3600)
   return data?.signedUrl ?? null
+}
+
+const LONG_DOWNTIME_THRESHOLD_MIN = 120
+
+// Opis "co sie dzialo" dla eksportu - budowany WYLACZNIE z tego, co operatorzy juz
+// wpisali co godzine (downtime_reason), bez AI i bez zmiany tresci. Pokazywany tylko
+// dla zmian, gdzie sumaryczny postoj z podsumowania zmiany przekroczyl 2h - to samo
+// zrodlo czasu, co reszta raportow w aplikacji (summary_downtime_min, nie suma godzinowa).
+async function fetchShiftDescriptions(shiftIds: string[]) {
+  const uniqueIds = [...new Set(shiftIds)]
+  const result = new Map<string, string>()
+  if (!uniqueIds.length) return result
+
+  const [{ data: shiftsData }, { data: reportsData }] = await Promise.all([
+    supabase.from('shifts').select('id, summary_downtime_min').in('id', uniqueIds),
+    supabase
+      .from('hourly_reports')
+      .select('shift_id, hour_block, hour_start, downtime_reason')
+      .in('shift_id', uniqueIds)
+      .is('deleted_at', null)
+      .order('hour_start')
+  ])
+
+  const longDowntimeShiftIds = new Set(
+    (shiftsData ?? []).filter(s => (s.summary_downtime_min ?? 0) > LONG_DOWNTIME_THRESHOLD_MIN).map(s => s.id)
+  )
+
+  const byShift = new Map<string, { hourStart: number; hourBlock: string; reason: string }[]>()
+  ;(reportsData ?? []).forEach(r => {
+    if (!r.downtime_reason?.trim() || !longDowntimeShiftIds.has(r.shift_id)) return
+    const arr = byShift.get(r.shift_id) ?? []
+    arr.push({ hourStart: r.hour_start, hourBlock: r.hour_block, reason: r.downtime_reason.trim() })
+    byShift.set(r.shift_id, arr)
+  })
+
+  byShift.forEach((entries, shiftId) => {
+    const text = entries
+      .sort((a, b) => a.hourStart - b.hourStart)
+      .map(e => `${e.hourBlock}: ${e.reason}`)
+      .join(' | ')
+    result.set(shiftId, text)
+  })
+
+  return result
 }
 
 export default function ManagerShiftStatPhotos() {
@@ -327,9 +398,11 @@ export default function ManagerShiftStatPhotos() {
     setExportingExcel(true)
     setExportError('')
     try {
-      const [ExcelJS, allReadings] = await Promise.all([
+      const shiftIds = list.map(p => p.shift_id).filter((id): id is string => !!id)
+      const [ExcelJS, allReadings, descriptionByShift] = await Promise.all([
         loadExcelJS(),
-        fetchReadingsForPhotos(list.map(p => p.id))
+        fetchReadingsForPhotos(list.map(p => p.id)),
+        fetchShiftDescriptions(shiftIds)
       ])
       const readingsByPhoto = new Map<string, ShiftStatReading[]>()
       allReadings.forEach(r => {
@@ -341,49 +414,61 @@ export default function ManagerShiftStatPhotos() {
       const wb = new ExcelJS.Workbook()
       wb.creator = 'MargoLine MES'
       wb.created = new Date()
-      const ws = wb.addWorksheet('Odczyty statystyk zmianowych')
 
-      ws.mergeCells(1, 1, 1, columns.length)
-      const title = ws.getCell(1, 1)
-      title.value = 'Odczyty statystyk zmianowych'
-      title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
-      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-      title.alignment = { horizontal: 'center', vertical: 'middle' }
-      ws.getRow(1).height = 26
+      const buildSheet = (sheetName: string, titleText: string, photos: PhotoRow[], lang: ExportLang) => {
+        const ws = wb.addWorksheet(sheetName)
 
-      const headerRow = 3
-      columns.forEach((key, ci) => {
-        const def = EXPORT_COLUMN_DEFS[key]
-        const cell = ws.getCell(headerRow, ci + 1)
-        cell.value = def.label
-        cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
-        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-        ws.getColumn(ci + 1).width = def.width
-      })
+        ws.mergeCells(1, 1, 1, columns.length)
+        const title = ws.getCell(1, 1)
+        title.value = titleText
+        title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+        title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        title.alignment = { horizontal: 'center', vertical: 'middle' }
+        ws.getRow(1).height = 26
 
-      let row = headerRow + 1
-      list
-        .slice()
-        .sort((a, b) => (b.captured_at ?? '').localeCompare(a.captured_at ?? ''))
-        .forEach(photo => {
-          const photoReadings = readingsByPhoto.get(photo.id) ?? []
-          const values = photoReadings.length ? photoReadings : [null]
-          values.forEach(reading => {
-            columns.forEach((key, ci) => {
-              const cell = ws.getCell(row, ci + 1)
-              cell.value = exportColumnValue(key, photo, reading)
-              cell.font = { name: 'Arial', size: 9 }
-              cell.border = {
-                top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
-              }
-            })
-            row += 1
-          })
+        const headerRow = 3
+        columns.forEach((key, ci) => {
+          const def = EXPORT_COLUMN_DEFS[key]
+          const cell = ws.getCell(headerRow, ci + 1)
+          cell.value = lang === 'en' ? def.labelEn : def.label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+          ws.getColumn(ci + 1).width = def.width
         })
+
+        let row = headerRow + 1
+        photos
+          .slice()
+          .sort((a, b) => (b.captured_at ?? '').localeCompare(a.captured_at ?? ''))
+          .forEach(photo => {
+            const photoReadings = readingsByPhoto.get(photo.id) ?? []
+            const values = photoReadings.length ? photoReadings : [null]
+            values.forEach(reading => {
+              columns.forEach((key, ci) => {
+                const cell = ws.getCell(row, ci + 1)
+                cell.value = exportColumnValue(key, photo, reading, lang, descriptionByShift)
+                cell.font = { name: 'Arial', size: 9 }
+                cell.alignment = { wrapText: key === 'description' }
+                cell.border = {
+                  top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                  right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+                }
+              })
+              row += 1
+            })
+          })
+      }
+
+      const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
+      const komoraPhotos = list.filter(p => p.module_key === 'komora')
+
+      buildSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
+      buildSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
+      buildSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
+      buildSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
       const buffer = await wb.xlsx.writeBuffer()
       const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
