@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Chart, BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend, Title } from 'chart.js'
+import { Chart, BarController, BarElement, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Title } from 'chart.js'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { SHIFT_STAT_MODULES, shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
 import type { Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
 
-Chart.register(BarController, BarElement, CategoryScale, LinearScale, Tooltip, Legend, Title)
+Chart.register(BarController, BarElement, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Title)
 
 const SHIFT_TYPES: ShiftType[] = ['I', 'II', 'III']
 
@@ -240,15 +240,15 @@ function formatMinutes(value: number): string {
   return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
-type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; entries: number }
+type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; avgGoodCount: number; entries: number }
 type MachineNote = { date: string; hourBlock: string; hourStart: number; reason: string }
 
-// Wydajnosc godzinowa bierzemy z hourly_reports.efficiency_pct - to jedyne realnie
-// godzinowe dane produkcyjne w systemie (odczyty z ekranu PLC sa robione raz na zmiane,
-// nie co godzine). Uśredniamy po godzinie-dnia (0-23) w calym eksportowanym zakresie dat,
-// zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni. Przy okazji tego
-// samego zapytania zbieramy tez chronologiczna liste opisow postojow (downtime_reason)
-// per automat - do pokazania obok wykresu.
+// Wydajnosc godzinowa bierzemy z hourly_reports.efficiency_pct/good_count - to jedyne
+// realnie godzinowe dane produkcyjne w systemie (odczyty z ekranu PLC sa robione raz na
+// zmiane, nie co godzine). Uśredniamy po godzinie-dnia (0-23) w calym eksportowanym
+// zakresie dat, zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni. Przy
+// okazji tego samego zapytania zbieramy tez chronologiczna liste opisow postojow
+// (downtime_reason) per automat - do pokazania obok wykresu.
 async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, dateTo: string) {
   const stats = new Map<string, MachineHourStat[]>()
   const notes = new Map<string, MachineNote[]>()
@@ -256,7 +256,7 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
 
   const { data } = await supabase
     .from('hourly_reports')
-    .select('machine_id, hour_start, hour_block, report_date, efficiency_pct, downtime_reason')
+    .select('machine_id, hour_start, hour_block, report_date, efficiency_pct, good_count, downtime_reason')
     .in('machine_id', machineIds)
     .gte('report_date', dateFrom)
     .lte('report_date', dateTo)
@@ -264,11 +264,12 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
     .order('report_date')
     .order('hour_start')
 
-  const byMachine = new Map<string, Map<number, { hourBlock: string; sum: number; count: number }>>()
+  const byMachine = new Map<string, Map<number, { hourBlock: string; effSum: number; goodSum: number; count: number }>>()
   ;(data ?? []).forEach(r => {
-    const machineMap = byMachine.get(r.machine_id) ?? new Map<number, { hourBlock: string; sum: number; count: number }>()
-    const hourEntry = machineMap.get(r.hour_start) ?? { hourBlock: r.hour_block, sum: 0, count: 0 }
-    hourEntry.sum += Number(r.efficiency_pct) || 0
+    const machineMap = byMachine.get(r.machine_id) ?? new Map<number, { hourBlock: string; effSum: number; goodSum: number; count: number }>()
+    const hourEntry = machineMap.get(r.hour_start) ?? { hourBlock: r.hour_block, effSum: 0, goodSum: 0, count: 0 }
+    hourEntry.effSum += Number(r.efficiency_pct) || 0
+    hourEntry.goodSum += Number(r.good_count) || 0
     hourEntry.count += 1
     machineMap.set(r.hour_start, hourEntry)
     byMachine.set(r.machine_id, machineMap)
@@ -285,7 +286,8 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
       .map(([hourStart, e]) => ({
         hourStart,
         hourBlock: e.hourBlock,
-        avgEfficiency: Math.round((e.sum / e.count) * 10) / 10,
+        avgEfficiency: Math.round((e.effSum / e.count) * 10) / 10,
+        avgGoodCount: Math.round(e.goodSum / e.count),
         entries: e.count
       }))
       .sort((a, b) => a.hourStart - b.hourStart)
@@ -307,24 +309,37 @@ function renderHourlyPerformanceChart(machineName: string, stats: MachineHourSta
   canvas.width = 900
   canvas.height = 420
   const chart = new Chart(canvas, {
-    type: 'bar',
     data: {
       labels: stats.map(s => s.hourBlock),
-      datasets: [{
-        label: 'Efficiency %',
-        data: stats.map(s => s.avgEfficiency),
-        backgroundColor: '#2563eb'
-      }]
+      datasets: [
+        {
+          type: 'bar',
+          label: 'Pieces (avg)',
+          data: stats.map(s => s.avgGoodCount),
+          backgroundColor: '#93c5fd',
+          yAxisID: 'y'
+        },
+        {
+          type: 'line',
+          label: 'Efficiency %',
+          data: stats.map(s => s.avgEfficiency),
+          borderColor: '#2563eb',
+          backgroundColor: '#2563eb',
+          yAxisID: 'y1',
+          tension: 0.3
+        }
+      ]
     },
     options: {
       responsive: false,
       animation: false,
       plugins: {
-        legend: { display: false },
+        legend: { display: true, position: 'bottom' },
         title: { display: true, text: `${machineName} - Hourly performance`, font: { size: 16 } }
       },
       scales: {
-        y: { beginAtZero: true, ticks: { callback: value => `${value}%` } }
+        y: { beginAtZero: true, position: 'left', title: { display: true, text: 'Pieces' } },
+        y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: 'Efficiency %' }, ticks: { callback: value => `${value}%` } }
       }
     }
   })
