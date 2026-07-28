@@ -57,7 +57,7 @@ export default function ShiftStatPhotosCard() {
   const [uploadingModule, setUploadingModule] = useState<string | null>(null)
   const [error, setError] = useState('')
   const [editValues, setEditValues] = useState<Record<string, string>>({})
-  const [savingReading, setSavingReading] = useState<string | null>(null)
+  const [confirmingPhoto, setConfirmingPhoto] = useState<string | null>(null)
   const [deletingPhoto, setDeletingPhoto] = useState<string | null>(null)
 
   const load = async () => {
@@ -170,22 +170,26 @@ export default function ShiftStatPhotosCard() {
     }
   }
 
-  const handleConfirmReading = async (reading: ShiftStatReading) => {
-    const corrected = editValues[reading.id]
-    setSavingReading(reading.id)
-    const { error: updateError } = await supabase.from('shift_stat_readings').update({
-      confirmed: true,
-      corrected_value: corrected && corrected !== reading.metric_value ? corrected : null
-    }).eq('id', reading.id)
-    if (!updateError) {
-      setReadingsByPhoto(prev => ({
-        ...prev,
-        [reading.photo_id]: (prev[reading.photo_id] ?? []).map(r => r.id === reading.id
-          ? { ...r, confirmed: true, corrected_value: corrected && corrected !== reading.metric_value ? corrected : null }
-          : r)
-      }))
-    }
-    setSavingReading(null)
+  // Jeden przycisk na CALE zdjecie zamiast osobnego "potwierdz" dla kazdej odczytanej
+  // pozycji (zdjecie zwykle ma kilkanascie-kilkadziesiat pozycji - klikanie kazdej po
+  // kolei bylo meczace). Operator moze wciaz poprawic pojedyncze wartosci w polach
+  // tekstowych przed potwierdzeniem - to tylko sam akt potwierdzenia jest zbiorczy.
+  const handleConfirmAll = async (photoId: string) => {
+    const readings = readingsByPhoto[photoId] ?? []
+    const unconfirmed = readings.filter(r => !r.confirmed)
+    if (!unconfirmed.length) return
+    setConfirmingPhoto(photoId)
+    await Promise.all(unconfirmed.map(reading => {
+      const corrected = editValues[reading.id]
+      const correctedValue = corrected && corrected !== reading.metric_value ? corrected : null
+      return supabase.from('shift_stat_readings').update({
+        confirmed: true,
+        corrected_value: correctedValue
+      }).eq('id', reading.id)
+    }))
+    const fresh = await fetchReadings(photoId)
+    setReadingsByPhoto(prev => ({ ...prev, [photoId]: fresh }))
+    setConfirmingPhoto(null)
   }
 
   if (!activeShift || !activeMachine) return null
@@ -193,6 +197,7 @@ export default function ShiftStatPhotosCard() {
   const renderPhoto = (photo: ShiftStatPhoto) => {
     const readings = readingsByPhoto[photo.id] ?? []
     const confirmedCount = readings.filter(r => r.confirmed).length
+    const unconfirmedCount = readings.length - confirmedCount
     return (
       <div key={photo.id} className="rounded-xl border border-navy-700 bg-navy-900 overflow-hidden">
         <div className="w-full flex items-center gap-3 p-3">
@@ -236,23 +241,23 @@ export default function ShiftStatPhotosCard() {
                 {reading.confirmed ? (
                   <span className="font-mono text-white">{reading.corrected_value ?? reading.metric_value}</span>
                 ) : (
-                  <>
-                    <input
-                      value={editValues[reading.id] ?? reading.metric_value}
-                      onChange={e => setEditValues(prev => ({ ...prev, [reading.id]: e.target.value }))}
-                      className="w-20 bg-navy-900 border border-navy-600 rounded-lg px-2 py-1 font-mono text-white text-right"
-                    />
-                    <button
-                      onClick={() => handleConfirmReading(reading)}
-                      disabled={savingReading === reading.id}
-                      className="rounded-lg bg-brand/20 text-brand px-2 py-1 font-bold hover:bg-brand/30 disabled:opacity-40"
-                    >
-                      ✓
-                    </button>
-                  </>
+                  <input
+                    value={editValues[reading.id] ?? reading.metric_value}
+                    onChange={e => setEditValues(prev => ({ ...prev, [reading.id]: e.target.value }))}
+                    className="w-20 bg-navy-900 border border-navy-600 rounded-lg px-2 py-1 font-mono text-white text-right"
+                  />
                 )}
               </div>
             ))}
+            {readings.length > 0 && unconfirmedCount > 0 && (
+              <button
+                onClick={() => handleConfirmAll(photo.id)}
+                disabled={confirmingPhoto === photo.id}
+                className="w-full rounded-lg bg-brand/20 text-brand px-3 py-2 text-xs font-bold hover:bg-brand/30 disabled:opacity-40"
+              >
+                {confirmingPhoto === photo.id ? 'Potwierdzanie...' : `✓ Potwierdź wszystkie (${unconfirmedCount})`}
+              </button>
+            )}
           </div>
         )}
       </div>
