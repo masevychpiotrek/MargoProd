@@ -78,7 +78,7 @@ function exportColumnValue(
   photo: PhotoRow,
   reading: ShiftStatReading | null,
   lang: ExportLang,
-  descriptionByShift: Map<string, string>
+  descriptionByShift: Map<string, ShiftProblemInfo>
 ): string | number {
   switch (key) {
     case 'date': return photo.shift_date ?? ''
@@ -93,7 +93,7 @@ function exportColumnValue(
     case 'numericValue': return reading?.numeric_value ?? ''
     case 'stationKey': return reading?.station_key ?? ''
     case 'confirmed': return reading ? (reading.confirmed ? (lang === 'en' ? 'Yes' : 'Tak') : (lang === 'en' ? 'No' : 'Nie')) : ''
-    case 'description': return photo.shift_id ? (descriptionByShift.get(photo.shift_id) ?? '') : ''
+    case 'description': return photo.shift_id ? (descriptionByShift.get(photo.shift_id)?.text ?? '') : ''
     default: return ''
   }
 }
@@ -188,39 +188,56 @@ async function getSignedUrl(path: string) {
   return data?.signedUrl ?? null
 }
 
-// Opis "co sie dzialo" dla eksportu - budowany WYLACZNIE z tego, co operatorzy juz
-// wpisali co godzine (downtime_reason), bez AI i bez zmiany tresci. Pokazuje sie dla
-// KAZDEJ zmiany, w ktorej padl choc jeden taki wpis - bez progu czasowego, zeby opis
-// byl obecny zawsze, gdy jest cokolwiek do pokazania.
-async function fetchShiftDescriptions(shiftIds: string[]) {
+type ShiftProblemInfo = { downtimeMin: number; text: string }
+
+// Jedno, wspolne zrodlo "co sie dzialo" dla calego eksportu (kolumna Opis, arkusz
+// Shift Summary) - laczy WYLACZNIE to, co operatorzy juz wpisali (downtime_reason,
+// reject_reason, notes co godzine + notatka zamkniecia zmiany), bez AI i bez zmiany
+// tresci. Pokazuje sie dla KAZDEJ zmiany, w ktorej padl choc jeden taki wpis.
+async function fetchShiftProblems(shiftIds: string[]) {
   const uniqueIds = [...new Set(shiftIds)]
-  const result = new Map<string, string>()
+  const result = new Map<string, ShiftProblemInfo>()
   if (!uniqueIds.length) return result
 
-  const { data: reportsData } = await supabase
-    .from('hourly_reports')
-    .select('shift_id, hour_block, hour_start, downtime_reason')
-    .in('shift_id', uniqueIds)
-    .is('deleted_at', null)
-    .order('hour_start')
+  const [{ data: shiftsData }, { data: reportsData }] = await Promise.all([
+    supabase.from('shifts').select('id, summary_downtime_min, summary_notes').in('id', uniqueIds),
+    supabase
+      .from('hourly_reports')
+      .select('shift_id, hour_block, hour_start, downtime_reason, reject_reason, notes')
+      .in('shift_id', uniqueIds)
+      .is('deleted_at', null)
+      .order('hour_start')
+  ])
 
-  const byShift = new Map<string, { hourStart: number; hourBlock: string; reason: string }[]>()
+  const shiftInfoById = new Map((shiftsData ?? []).map(s => [s.id, s]))
+
+  const segmentsByShift = new Map<string, { hourStart: number; text: string }[]>()
   ;(reportsData ?? []).forEach(r => {
-    if (!r.downtime_reason?.trim()) return
-    const arr = byShift.get(r.shift_id) ?? []
-    arr.push({ hourStart: r.hour_start, hourBlock: r.hour_block, reason: r.downtime_reason.trim() })
-    byShift.set(r.shift_id, arr)
+    const segs = segmentsByShift.get(r.shift_id) ?? []
+    if (r.downtime_reason?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Downtime]: ${r.downtime_reason.trim()}` })
+    if (r.reject_reason?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Reject]: ${r.reject_reason.trim()}` })
+    if (r.notes?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Note]: ${r.notes.trim()}` })
+    segmentsByShift.set(r.shift_id, segs)
   })
 
-  byShift.forEach((entries, shiftId) => {
-    const text = entries
-      .sort((a, b) => a.hourStart - b.hourStart)
-      .map(e => `${e.hourBlock}: ${e.reason}`)
-      .join(' | ')
-    result.set(shiftId, text)
+  uniqueIds.forEach(shiftId => {
+    const shiftInfo = shiftInfoById.get(shiftId)
+    const segs = (segmentsByShift.get(shiftId) ?? []).sort((a, b) => a.hourStart - b.hourStart).map(s => s.text)
+    if (shiftInfo?.summary_notes?.trim()) segs.push(`Shift-end note: ${shiftInfo.summary_notes.trim()}`)
+    result.set(shiftId, {
+      downtimeMin: shiftInfo?.summary_downtime_min ?? 0,
+      text: segs.join(' | ')
+    })
   })
 
   return result
+}
+
+function formatMinutes(value: number): string {
+  const total = Math.max(0, Math.round(value || 0))
+  const h = Math.floor(total / 60)
+  const m = total % 60
+  return `${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`
 }
 
 type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; entries: number }
@@ -494,7 +511,7 @@ export default function ManagerShiftStatPhotos() {
       const [ExcelJS, allReadings, descriptionByShift, { stats: hourlyStatsByMachine, notes: hourlyNotesByMachine }] = await Promise.all([
         loadExcelJS(),
         fetchReadingsForPhotos(list.map(p => p.id)),
-        fetchShiftDescriptions(shiftIds),
+        fetchShiftProblems(shiftIds),
         fetchMachineHourlyStats(machineIds, hourlyDateFrom, hourlyDateTo)
       ])
       const readingsByPhoto = new Map<string, ShiftStatReading[]>()
@@ -554,6 +571,79 @@ export default function ManagerShiftStatPhotos() {
             })
           })
       }
+
+      // Shift Summary - GLOWNY, czytelny przeglad: jeden wiersz na zmiane (nie na odczyt),
+      // z tym samym polaczonym opisem "co sie dzialo" co kolumna Opis w arkuszach ponizej.
+      // Dodawany jako pierwszy arkusz, wiec to on sie pokazuje po otwarciu pliku.
+      const summaryWs = wb.addWorksheet('Shift Summary')
+      summaryWs.mergeCells(1, 1, 1, 6)
+      const summaryTitle = summaryWs.getCell(1, 1)
+      summaryTitle.value = 'Shift Summary - what happened, what was the problem'
+      summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+      summaryTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+      summaryTitle.alignment = { horizontal: 'center', vertical: 'middle' }
+      summaryWs.getRow(1).height = 26
+
+      const summaryHeaderRow = 3
+      const summaryColumns = [
+        { label: 'Date', width: 13 },
+        { label: 'Shift', width: 9 },
+        { label: 'Machine', width: 20 },
+        { label: 'Downtime', width: 12 },
+        { label: 'Modules', width: 22 },
+        { label: 'Problem summary', width: 100 }
+      ]
+      summaryColumns.forEach((col, ci) => {
+        const cell = summaryWs.getCell(summaryHeaderRow, ci + 1)
+        cell.value = col.label
+        cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        summaryWs.getColumn(ci + 1).width = col.width
+      })
+
+      const photosByShift = new Map<string, PhotoRow[]>()
+      list.forEach(photo => {
+        if (!photo.shift_id) return
+        const arr = photosByShift.get(photo.shift_id) ?? []
+        arr.push(photo)
+        photosByShift.set(photo.shift_id, arr)
+      })
+      const summaryRows = [...photosByShift.entries()]
+        .map(([shiftId, shiftPhotos]) => {
+          const first = shiftPhotos[0]
+          const problem = descriptionByShift.get(shiftId)
+          return {
+            date: first.shift_date ?? '',
+            shiftType: first.shift_type ?? '',
+            machineName: one(first.machine)?.name ?? '—',
+            downtimeMin: problem?.downtimeMin ?? 0,
+            modules: [...new Set(shiftPhotos.map(p => p.module_key).filter((k): k is string => !!k))]
+              .map(k => moduleLabelFor(k, 'en')).join(', '),
+            problemSummary: problem?.text || 'No issues reported'
+          }
+        })
+        .sort((a, b) => a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || a.shiftType.localeCompare(b.shiftType))
+
+      let summaryRow = summaryHeaderRow + 1
+      summaryRows.forEach(r => {
+        const cells = [r.date, r.shiftType, r.machineName, formatMinutes(r.downtimeMin), r.modules, r.problemSummary]
+        cells.forEach((value, ci) => {
+          const cell = summaryWs.getCell(summaryRow, ci + 1)
+          cell.value = value
+          cell.font = ci === 3 && r.downtimeMin > 120
+            ? { name: 'Arial', size: 9, bold: true, color: { argb: 'FFDC2626' } }
+            : { name: 'Arial', size: 9 }
+          cell.alignment = { wrapText: ci === 5, vertical: 'top' }
+          cell.border = {
+            top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+            right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+          }
+        })
+        summaryRow += 1
+      })
 
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
