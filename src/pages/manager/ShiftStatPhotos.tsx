@@ -286,6 +286,24 @@ async function fetchShiftProblems(shiftIds: string[]) {
   return result
 }
 
+// Tlumaczenie tresci "Problem summary" na potrzeby arkusza EN - to jedyne miejsce w
+// eksporcie, gdzie surowy tekst operatora trafia na arkusz jezykowy inny niz polski,
+// wiec bez tego arkusz EN bylby bezuzyteczny dla odbiorcy nie znajacego polskiego.
+// Nie krytyczne dla reszty eksportu - w razie bledu arkusz EN spada na oryginalny tekst.
+async function translateShiftSummaries(items: { id: string; text: string }[]): Promise<Map<string, string>> {
+  const result = new Map<string, string>()
+  if (!items.length) return result
+  try {
+    const { data, error } = await supabase.functions.invoke('translate-shift-summaries', { body: { items } })
+    if (error) return result
+    const translations = (data?.translations ?? []) as { id: string; text: string }[]
+    translations.forEach(t => result.set(t.id, t.text))
+  } catch {
+    // brak tlumaczenia nie blokuje eksportu
+  }
+  return result
+}
+
 function formatMinutes(value: number): string {
   const total = Math.max(0, Math.round(value || 0))
   const h = Math.floor(total / 60)
@@ -610,6 +628,11 @@ export default function ManagerShiftStatPhotos() {
         readingsByPhoto.set(r.photo_id, arr)
       })
 
+      const translationItems = [...descriptionByShift.entries()]
+        .filter(([, info]) => info.text)
+        .map(([shiftId, info]) => ({ id: shiftId, text: info.text }))
+      const translatedTextByShift = await translateShiftSummaries(translationItems)
+
       const wb = new ExcelJS.Workbook()
       wb.creator = 'MargoLine MES'
       wb.created = new Date()
@@ -718,7 +741,7 @@ export default function ManagerShiftStatPhotos() {
               downtimeMin: problem?.downtimeMin ?? 0,
               modules: [...new Set(shiftPhotos.map(p => p.module_key).filter((k): k is string => !!k))]
                 .map(k => moduleLabelFor(k, lang)).join(', '),
-              problemSummary: problem?.text || labels.noIssues
+              problemSummary: (lang === 'en' ? translatedTextByShift.get(shiftId) : undefined) || problem?.text || labels.noIssues
             }
           })
           .sort((a, b) => a.date.localeCompare(b.date) || a.machineName.localeCompare(b.machineName) || a.shiftType.localeCompare(b.shiftType))
