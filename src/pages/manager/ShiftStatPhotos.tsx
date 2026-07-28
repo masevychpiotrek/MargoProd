@@ -47,7 +47,7 @@ const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; labelEn: stri
   numericValue: { label: 'Wartość liczbowa', labelEn: 'Numeric value', width: 16 },
   stationKey: { label: 'Stacja', labelEn: 'Station', width: 14 },
   confirmed: { label: 'Potwierdzone', labelEn: 'Confirmed', width: 14 },
-  description: { label: 'Opis (postój > 2h)', labelEn: 'Description (downtime > 2h)', width: 45 }
+  description: { label: 'Opis', labelEn: 'Description', width: 45 }
 }
 
 const DEFAULT_EXPORT_COLUMNS: ExportColumnKey[] = [
@@ -188,34 +188,25 @@ async function getSignedUrl(path: string) {
   return data?.signedUrl ?? null
 }
 
-const LONG_DOWNTIME_THRESHOLD_MIN = 120
-
 // Opis "co sie dzialo" dla eksportu - budowany WYLACZNIE z tego, co operatorzy juz
-// wpisali co godzine (downtime_reason), bez AI i bez zmiany tresci. Pokazywany tylko
-// dla zmian, gdzie sumaryczny postoj z podsumowania zmiany przekroczyl 2h - to samo
-// zrodlo czasu, co reszta raportow w aplikacji (summary_downtime_min, nie suma godzinowa).
+// wpisali co godzine (downtime_reason), bez AI i bez zmiany tresci. Pokazuje sie dla
+// KAZDEJ zmiany, w ktorej padl choc jeden taki wpis - bez progu czasowego, zeby opis
+// byl obecny zawsze, gdy jest cokolwiek do pokazania.
 async function fetchShiftDescriptions(shiftIds: string[]) {
   const uniqueIds = [...new Set(shiftIds)]
   const result = new Map<string, string>()
   if (!uniqueIds.length) return result
 
-  const [{ data: shiftsData }, { data: reportsData }] = await Promise.all([
-    supabase.from('shifts').select('id, summary_downtime_min').in('id', uniqueIds),
-    supabase
-      .from('hourly_reports')
-      .select('shift_id, hour_block, hour_start, downtime_reason')
-      .in('shift_id', uniqueIds)
-      .is('deleted_at', null)
-      .order('hour_start')
-  ])
-
-  const longDowntimeShiftIds = new Set(
-    (shiftsData ?? []).filter(s => (s.summary_downtime_min ?? 0) > LONG_DOWNTIME_THRESHOLD_MIN).map(s => s.id)
-  )
+  const { data: reportsData } = await supabase
+    .from('hourly_reports')
+    .select('shift_id, hour_block, hour_start, downtime_reason')
+    .in('shift_id', uniqueIds)
+    .is('deleted_at', null)
+    .order('hour_start')
 
   const byShift = new Map<string, { hourStart: number; hourBlock: string; reason: string }[]>()
   ;(reportsData ?? []).forEach(r => {
-    if (!r.downtime_reason?.trim() || !longDowntimeShiftIds.has(r.shift_id)) return
+    if (!r.downtime_reason?.trim()) return
     const arr = byShift.get(r.shift_id) ?? []
     arr.push({ hourStart: r.hour_start, hourBlock: r.hour_block, reason: r.downtime_reason.trim() })
     byShift.set(r.shift_id, arr)
@@ -233,22 +224,28 @@ async function fetchShiftDescriptions(shiftIds: string[]) {
 }
 
 type MachineHourStat = { hourStart: number; hourBlock: string; avgEfficiency: number; entries: number }
+type MachineNote = { date: string; hourBlock: string; hourStart: number; reason: string }
 
 // Wydajnosc godzinowa bierzemy z hourly_reports.efficiency_pct - to jedyne realnie
 // godzinowe dane produkcyjne w systemie (odczyty z ekranu PLC sa robione raz na zmiane,
 // nie co godzine). Uśredniamy po godzinie-dnia (0-23) w calym eksportowanym zakresie dat,
-// zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni.
+// zeby wykres mial sens rowniez dla eksportu obejmujacego wiele dni. Przy okazji tego
+// samego zapytania zbieramy tez chronologiczna liste opisow postojow (downtime_reason)
+// per automat - do pokazania obok wykresu.
 async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, dateTo: string) {
-  const result = new Map<string, MachineHourStat[]>()
-  if (!machineIds.length || !dateFrom || !dateTo) return result
+  const stats = new Map<string, MachineHourStat[]>()
+  const notes = new Map<string, MachineNote[]>()
+  if (!machineIds.length || !dateFrom || !dateTo) return { stats, notes }
 
   const { data } = await supabase
     .from('hourly_reports')
-    .select('machine_id, hour_start, hour_block, efficiency_pct')
+    .select('machine_id, hour_start, hour_block, report_date, efficiency_pct, downtime_reason')
     .in('machine_id', machineIds)
     .gte('report_date', dateFrom)
     .lte('report_date', dateTo)
     .is('deleted_at', null)
+    .order('report_date')
+    .order('hour_start')
 
   const byMachine = new Map<string, Map<number, { hourBlock: string; sum: number; count: number }>>()
   ;(data ?? []).forEach(r => {
@@ -258,10 +255,16 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
     hourEntry.count += 1
     machineMap.set(r.hour_start, hourEntry)
     byMachine.set(r.machine_id, machineMap)
+
+    if (r.downtime_reason?.trim()) {
+      const arr = notes.get(r.machine_id) ?? []
+      arr.push({ date: r.report_date, hourBlock: r.hour_block, hourStart: r.hour_start, reason: r.downtime_reason.trim() })
+      notes.set(r.machine_id, arr)
+    }
   })
 
   byMachine.forEach((hourMap, machineId) => {
-    const stats = [...hourMap.entries()]
+    const machineStats = [...hourMap.entries()]
       .map(([hourStart, e]) => ({
         hourStart,
         hourBlock: e.hourBlock,
@@ -269,10 +272,10 @@ async function fetchMachineHourlyStats(machineIds: string[], dateFrom: string, d
         entries: e.count
       }))
       .sort((a, b) => a.hourStart - b.hourStart)
-    result.set(machineId, stats)
+    stats.set(machineId, machineStats)
   })
 
-  return result
+  return { stats, notes }
 }
 
 function sanitizeSheetName(name: string): string {
@@ -488,7 +491,7 @@ export default function ManagerShiftStatPhotos() {
       const hourlyDateFrom = shiftDates.length ? shiftDates.reduce((a, b) => (a < b ? a : b)) : ''
       const hourlyDateTo = shiftDates.length ? shiftDates.reduce((a, b) => (a > b ? a : b)) : ''
 
-      const [ExcelJS, allReadings, descriptionByShift, hourlyStatsByMachine] = await Promise.all([
+      const [ExcelJS, allReadings, descriptionByShift, { stats: hourlyStatsByMachine, notes: hourlyNotesByMachine }] = await Promise.all([
         loadExcelJS(),
         fetchReadingsForPhotos(list.map(p => p.id)),
         fetchShiftDescriptions(shiftIds),
@@ -561,7 +564,8 @@ export default function ManagerShiftStatPhotos() {
       buildSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
       // Wykresy wydajnosci godzinowej - jeden arkusz na kazdy automat obecny w eksporcie,
-      // nazwy arkuszy po angielsku.
+      // nazwy arkuszy po angielsku. Pod wykresem - chronologiczna lista opisow postojow
+      // dla tego automatu, zeby spadki na wykresie mialy od razu wytlumaczenie obok.
       machineIds.forEach(machineId => {
         const stats = hourlyStatsByMachine.get(machineId) ?? []
         if (!stats.length) return
@@ -572,6 +576,47 @@ export default function ManagerShiftStatPhotos() {
         const imageId = wb.addImage({ base64, extension: 'png' })
         const chartWs = wb.addWorksheet(sanitizeSheetName(`${machineName} - Hourly Performance`))
         chartWs.addImage(imageId, 'A1:L24')
+
+        const notesHeaderRow = 26
+        const noteColumns = [
+          { label: 'Date', width: 13 },
+          { label: 'Hour', width: 16 },
+          { label: 'Downtime description', width: 90 }
+        ]
+        noteColumns.forEach((col, ci) => {
+          const cell = chartWs.getCell(notesHeaderRow, ci + 1)
+          cell.value = col.label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle' }
+          chartWs.getColumn(ci + 1).width = col.width
+        })
+
+        const notes = (hourlyNotesByMachine.get(machineId) ?? [])
+          .sort((a, b) => a.date.localeCompare(b.date) || a.hourStart - b.hourStart)
+        let noteRow = notesHeaderRow + 1
+        if (notes.length) {
+          notes.forEach(note => {
+            const cells = [note.date, note.hourBlock, note.reason]
+            cells.forEach((value, ci) => {
+              const cell = chartWs.getCell(noteRow, ci + 1)
+              cell.value = value
+              cell.font = { name: 'Arial', size: 9 }
+              cell.alignment = { wrapText: ci === 2, vertical: 'top' }
+              cell.border = {
+                top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+                right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+              }
+            })
+            noteRow += 1
+          })
+        } else {
+          const cell = chartWs.getCell(noteRow, 1)
+          cell.value = 'No downtime descriptions recorded for this range.'
+          cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
+        }
       })
 
       const buffer = await wb.xlsx.writeBuffer()
