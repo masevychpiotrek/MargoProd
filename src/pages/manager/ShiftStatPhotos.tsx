@@ -474,6 +474,10 @@ export default function ManagerShiftStatPhotos() {
   const [readings, setReadings] = useState<ShiftStatReading[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
 
+  // Godzina zdjecia w arkuszach porownania - opcja, ale domyslnie wylaczona
+  // (nie zawsze potrzebna, a zawsze widoczna zabieralaby miejsce).
+  const [showCapturedTime, setShowCapturedTime] = useState(false)
+
   // Zaznaczenie konkretnych zdjec do eksportu/pobrania - pusty zbior oznacza
   // "wszystkie aktualnie widoczne po filtrze" (dotychczasowe zachowanie).
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -596,7 +600,7 @@ export default function ManagerShiftStatPhotos() {
   // parametr, zeby dane dalo sie dalej filtrowac/analizowac poza aplikacja.
   const [exportingExcel, setExportingExcel] = useState(false)
   const [exportError, setExportError] = useState('')
-  const handleExportExcel = async (list: PhotoRow[]) => {
+  const handleExportExcel = async (list: PhotoRow[], showCapturedTime: boolean) => {
     if (list.length === 0) return
     setExportingExcel(true)
     setExportError('')
@@ -633,9 +637,12 @@ export default function ManagerShiftStatPhotos() {
       // parametr to osobny wiersz - zeby porownanie zmiany do zmiany bylo jednym rzutem
       // oka w prawo, zamiast przewijania dlugiej pionowej listy. Kolumny chronologicznie
       // od najstarszej po lewej do najnowszej po prawej.
-      const MODULE_COMPARISON_LABELS: Record<ExportLang, { rowLabels: string[]; noData: string }> = {
-        en: { rowLabels: ['Date', 'Shift', 'Machine', 'Operator', 'Photo time', 'OCR status'], noData: 'No readings for this range.' },
-        pl: { rowLabels: ['Data', 'Zmiana', 'Automat', 'Operator', 'Godzina zdjęcia', 'Status OCR'], noData: 'Brak odczytów w tym zakresie.' }
+      // Operator celowo pominiety - dane trafiajace na zewnatrz (producent/A1TEC) nie
+      // maja pokazywac nazwisk. Godzina zdjecia zostaje, ale jako opcja domyslnie
+      // wylaczona (showCapturedTime) - przydatna czasem, ale nie zawsze potrzebna.
+      const MODULE_COMPARISON_LABELS: Record<ExportLang, { rowLabels: string[]; capturedAtLabel: string; noData: string }> = {
+        en: { rowLabels: ['Date', 'Shift', 'Machine'], capturedAtLabel: 'Photo time', noData: 'No readings for this range.' },
+        pl: { rowLabels: ['Data', 'Zmiana', 'Automat'], capturedAtLabel: 'Godzina zdjęcia', noData: 'Brak odczytów w tym zakresie.' }
       }
       const THIN_BORDER = {
         top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
@@ -646,7 +653,14 @@ export default function ManagerShiftStatPhotos() {
 
       const buildModuleComparisonSheet = (sheetName: string, titleText: string, modulePhotos: PhotoRow[], lang: ExportLang) => {
         const ws = wb.addWorksheet(sheetName)
-        const labels = MODULE_COMPARISON_LABELS[lang]
+        const baseLabels = MODULE_COMPARISON_LABELS[lang]
+        const ocrStatusLabel = lang === 'en' ? 'OCR status' : 'Status OCR'
+        const labels = {
+          rowLabels: showCapturedTime
+            ? [...baseLabels.rowLabels, baseLabels.capturedAtLabel, ocrStatusLabel]
+            : [...baseLabels.rowLabels, ocrStatusLabel],
+          noData: baseLabels.noData
+        }
         const sortedPhotos = modulePhotos.slice().sort((a, b) => (a.captured_at ?? '').localeCompare(b.captured_at ?? ''))
 
         ws.mergeCells(1, 1, 1, Math.max(sortedPhotos.length + 1, 2))
@@ -692,8 +706,7 @@ export default function ManagerShiftStatPhotos() {
             photo.shift_date ?? '',
             photo.shift_type ?? '',
             one(photo.machine)?.name ?? '—',
-            one(photo.operator)?.full_name ?? '—',
-            new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL'),
+            ...(showCapturedTime ? [new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL')] : []),
             OCR_STATUS_LABELS[lang][photo.ocr_status]
           ]
           metaValues.forEach((value, ri) => {
@@ -1045,8 +1058,12 @@ export default function ManagerShiftStatPhotos() {
             ? `⤓ Pobieranie ${downloadAllProgress.done}/${downloadAllProgress.total}...`
             : `⤓ Pobierz ${selectedIds.size > 0 ? 'zaznaczone' : 'wszystkie'} (${exportTargets.length})`}
         </button>
+        <label className="shrink-0 flex items-center gap-2 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-300">
+          <input type="checkbox" checked={showCapturedTime} onChange={e => setShowCapturedTime(e.target.checked)} />
+          Godzina zdjęcia w eksporcie
+        </label>
         <button
-          onClick={() => handleExportExcel(exportTargets)}
+          onClick={() => handleExportExcel(exportTargets, showCapturedTime)}
           disabled={exportingExcel || exportTargets.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
         >
