@@ -3,8 +3,8 @@ import { Chart, BarController, BarElement, LineController, LineElement, PointEle
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { SHIFT_STAT_MODULES, shiftStatModuleLabel } from '@/components/operator/ShiftStatPhotosCard'
-import { problemCategoryLabel, type ReportIssueType } from '@/lib/issueReports'
-import type { Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
+import { problemCategoryLabel, stationLabel, type ReportIssueType } from '@/lib/issueReports'
+import type { IssueStationAllocation, Machine, ShiftStatPhoto, ShiftStatReading, ShiftType } from '@/types/database'
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, CategoryScale, LinearScale, Tooltip, Legend, Title)
 
@@ -31,46 +31,9 @@ type PhotoRow = ShiftStatPhoto & {
 
 type ExportLang = 'pl' | 'en'
 
-type ExportColumnKey =
-  | 'date' | 'shift' | 'machine' | 'module' | 'operator' | 'capturedAt'
-  | 'ocrStatus' | 'metricLabel' | 'value' | 'numericValue' | 'stationKey' | 'confirmed'
-
-const EXPORT_COLUMN_DEFS: Record<ExportColumnKey, { label: string; labelEn: string; width: number }> = {
-  date: { label: 'Data', labelEn: 'Date', width: 13 },
-  shift: { label: 'Zmiana', labelEn: 'Shift', width: 9 },
-  machine: { label: 'Automat', labelEn: 'Machine', width: 20 },
-  module: { label: 'Moduł', labelEn: 'Module', width: 22 },
-  operator: { label: 'Operator', labelEn: 'Operator', width: 20 },
-  capturedAt: { label: 'Godzina zdjęcia', labelEn: 'Photo time', width: 16 },
-  ocrStatus: { label: 'Status OCR', labelEn: 'OCR status', width: 12 },
-  metricLabel: { label: 'Etykieta odczytu', labelEn: 'Reading label', width: 24 },
-  value: { label: 'Wartość', labelEn: 'Value', width: 16 },
-  numericValue: { label: 'Wartość liczbowa', labelEn: 'Numeric value', width: 16 },
-  stationKey: { label: 'Stacja', labelEn: 'Station', width: 14 },
-  confirmed: { label: 'Potwierdzone', labelEn: 'Confirmed', width: 14 }
-}
-
-const DEFAULT_EXPORT_COLUMNS: ExportColumnKey[] = [
-  'date', 'shift', 'machine', 'module', 'operator', 'capturedAt', 'ocrStatus', 'metricLabel', 'value', 'numericValue'
-]
-const DEFAULT_EXPORT_COLUMN_SET = new Set<ExportColumnKey>(DEFAULT_EXPORT_COLUMNS)
-const ALL_EXPORT_COLUMNS: ExportColumnKey[] = [...DEFAULT_EXPORT_COLUMNS, 'stationKey', 'confirmed']
-
 const OCR_STATUS_LABELS: Record<ExportLang, Record<'done' | 'failed' | 'pending', string>> = {
   pl: { done: 'Odczytane', failed: 'Błąd odczytu', pending: 'W trakcie' },
   en: { done: 'Read', failed: 'Read error', pending: 'Pending' }
-}
-
-// "Zestaw"/"Komora" to nazwy modulow uzywane wewnetrznie (patrz SHIFT_STAT_MODULES) -
-// producent/A1TEC zna je jako "Infusion Set"/"Drip Chamber", stad osobne etykiety EN.
-function moduleLabelFor(key: string | null | undefined, lang: ExportLang): string {
-  if (!key) return '—'
-  if (lang === 'en') {
-    if (key === 'zestaw') return 'Infusion Set'
-    if (key === 'komora') return 'Drip Chamber'
-    return key
-  }
-  return shiftStatModuleLabel(key) ?? key
 }
 
 // Angielskie tlumaczenia kategorii problemow - odpowiadaja 1:1 wartosciom w
@@ -128,28 +91,29 @@ function classificationLabel(type: ReportIssueType, category: string, lang: Expo
   return map[category] ?? category
 }
 
-function exportColumnValue(
-  key: ExportColumnKey,
-  photo: PhotoRow,
-  reading: ShiftStatReading | null,
-  lang: ExportLang
-): string | number {
-  switch (key) {
-    case 'date': return photo.shift_date ?? ''
-    case 'shift': return photo.shift_type ?? ''
-    case 'machine': return one(photo.machine)?.name ?? '—'
-    case 'module': return moduleLabelFor(photo.module_key, lang)
-    case 'operator': return one(photo.operator)?.full_name ?? '—'
-    case 'capturedAt': return new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL')
-    case 'ocrStatus': return OCR_STATUS_LABELS[lang][photo.ocr_status]
-    case 'metricLabel': return reading?.metric_label ?? '—'
-    case 'value': return reading ? (reading.corrected_value ?? reading.metric_value) : ''
-    case 'numericValue': return reading?.numeric_value ?? ''
-    case 'stationKey': return reading?.station_key ?? ''
-    case 'confirmed': return reading ? (reading.confirmed ? (lang === 'en' ? 'Yes' : 'Tak') : (lang === 'en' ? 'No' : 'Nie')) : ''
-    default: return ''
-  }
+// EN dla ogolnych przyczyn (GENERAL_CATEGORIES w issueReports.ts) - stacje numeryczne
+// ("Stacja 15") tlumaczymy mechanicznie, bo to tylko numer.
+const GENERAL_CATEGORY_EN: Record<string, string> = {
+  gc_brak_obsady: 'No operator',
+  gc_brak_materialu: 'Material shortage',
+  gc_przezbrojenie: 'Changeover',
+  gc_oczekiwanie_ur: 'Waiting for maintenance',
+  gc_oczekiwanie_decyzje: 'Waiting for decision',
+  gc_oczekiwanie_jakosc: 'Waiting for quality',
+  gc_oczekiwanie_technolog: 'Waiting for process engineer',
+  gc_testy_proby: 'Tests / trials',
+  gc_czyszczenie: 'Machine cleaning',
+  gc_planowany_postoj: 'Planned downtime',
+  gc_inny: 'Other reason / needs clarification'
 }
+
+function stationLabelFor(value: string | null | undefined, lang: ExportLang): string {
+  if (!value) return '—'
+  if (lang === 'pl') return stationLabel(value)
+  if (value.startsWith('st_')) return `Station ${value.slice(3)}`
+  return GENERAL_CATEGORY_EN[value] ?? stationLabel(value)
+}
+
 
 // Wspolna z pojedynczym pobraniem nazwa pliku: 2026-07-21_Zmiana-I_IS-PRO-1_08-57.jpg
 function photoFileName(photo: PhotoRow): string {
@@ -241,22 +205,40 @@ async function getSignedUrl(path: string) {
   return data?.signedUrl ?? null
 }
 
-type ShiftProblemInfo = { downtimeMin: number; text: string }
+type ShiftProblemInfo = {
+  runtimeMin: number
+  alarmMin: number
+  downtimeMin: number
+  goodCount: number
+  rejectCount: number
+  topStations: string[]
+  text: string
+}
 
-// Jedno, wspolne zrodlo "co sie dzialo" dla calego eksportu (kolumna Opis, arkusz
-// Shift Summary) - laczy WYLACZNIE to, co operatorzy juz wpisali (downtime_reason,
-// reject_reason, notes co godzine + notatka zamkniecia zmiany), bez AI i bez zmiany
-// tresci. Pokazuje sie dla KAZDEJ zmiany, w ktorej padl choc jeden taki wpis.
+// Jedno, wspolne zrodlo danych per zmiana dla arkusza Shift Summary / Podsumowanie
+// zmiany - laczy czas pracy/alarmy/przestoje (WYLACZNIE z podsumowania zmiany, ten sam
+// autorytatywny zapis co reszta raportow w apce), produkcje/odrzut (suma z wpisow
+// godzinowych) i stacje generujace najwieksze straty (wazone udzialem % z wielostacyjnych
+// zgloszen). Opis "co sie dzialo" - WYLACZNIE to, co operatorzy juz wpisali, bez AI.
+function stationWeight(allocations: IssueStationAllocation[] | null | undefined, single: string | null | undefined): { station: string; weight: number }[] {
+  if (allocations && allocations.length) {
+    return allocations
+      .filter(a => a.station)
+      .map(a => ({ station: a.station, weight: Math.max(0, Math.min(100, Number(a.pct) || 0)) / 100 }))
+  }
+  return single ? [{ station: single, weight: 1 }] : []
+}
+
 async function fetchShiftProblems(shiftIds: string[]) {
   const uniqueIds = [...new Set(shiftIds)]
   const result = new Map<string, ShiftProblemInfo>()
   if (!uniqueIds.length) return result
 
   const [{ data: shiftsData }, { data: reportsData }] = await Promise.all([
-    supabase.from('shifts').select('id, summary_downtime_min, summary_notes').in('id', uniqueIds),
+    supabase.from('shifts').select('id, summary_runtime_min, summary_alarm_min, summary_downtime_min, summary_notes').in('id', uniqueIds),
     supabase
       .from('hourly_reports')
-      .select('shift_id, hour_block, hour_start, downtime_reason, reject_reason, notes')
+      .select('shift_id, hour_block, hour_start, downtime_reason, downtime_station, downtime_stations, reject_reason, reject_station, reject_stations, notes, good_count, reject_count')
       .in('shift_id', uniqueIds)
       .is('deleted_at', null)
       .order('hour_start')
@@ -265,20 +247,51 @@ async function fetchShiftProblems(shiftIds: string[]) {
   const shiftInfoById = new Map((shiftsData ?? []).map(s => [s.id, s]))
 
   const segmentsByShift = new Map<string, { hourStart: number; text: string }[]>()
+  const countsByShift = new Map<string, { good: number; reject: number }>()
+  const stationWeightsByShift = new Map<string, Map<string, number>>()
+
+  const bumpStation = (shiftId: string, station: string, weight: number) => {
+    const map = stationWeightsByShift.get(shiftId) ?? new Map<string, number>()
+    map.set(station, (map.get(station) ?? 0) + weight)
+    stationWeightsByShift.set(shiftId, map)
+  }
+
   ;(reportsData ?? []).forEach(r => {
     const segs = segmentsByShift.get(r.shift_id) ?? []
-    if (r.downtime_reason?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Downtime]: ${r.downtime_reason.trim()}` })
-    if (r.reject_reason?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Reject]: ${r.reject_reason.trim()}` })
+    if (r.downtime_reason?.trim()) {
+      segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Downtime]: ${r.downtime_reason.trim()}` })
+      stationWeight(r.downtime_stations, r.downtime_station).forEach(({ station, weight }) => bumpStation(r.shift_id, station, weight))
+    }
+    if (r.reject_reason?.trim()) {
+      segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Reject]: ${r.reject_reason.trim()}` })
+      stationWeight(r.reject_stations, r.reject_station).forEach(({ station, weight }) => bumpStation(r.shift_id, station, weight))
+    }
     if (r.notes?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Note]: ${r.notes.trim()}` })
     segmentsByShift.set(r.shift_id, segs)
+
+    const counts = countsByShift.get(r.shift_id) ?? { good: 0, reject: 0 }
+    counts.good += Number(r.good_count) || 0
+    counts.reject += Number(r.reject_count) || 0
+    countsByShift.set(r.shift_id, counts)
   })
 
   uniqueIds.forEach(shiftId => {
     const shiftInfo = shiftInfoById.get(shiftId)
     const segs = (segmentsByShift.get(shiftId) ?? []).sort((a, b) => a.hourStart - b.hourStart).map(s => s.text)
     if (shiftInfo?.summary_notes?.trim()) segs.push(`Shift-end note: ${shiftInfo.summary_notes.trim()}`)
+    const counts = countsByShift.get(shiftId) ?? { good: 0, reject: 0 }
+    const topStations = [...(stationWeightsByShift.get(shiftId) ?? new Map<string, number>()).entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 2)
+      .map(([station]) => station)
+
     result.set(shiftId, {
+      runtimeMin: shiftInfo?.summary_runtime_min ?? 0,
+      alarmMin: shiftInfo?.summary_alarm_min ?? 0,
       downtimeMin: shiftInfo?.summary_downtime_min ?? 0,
+      goodCount: counts.good,
+      rejectCount: counts.reject,
+      topStations,
       text: segs.join(' | ')
     })
   })
@@ -472,27 +485,6 @@ export default function ManagerShiftStatPhotos() {
     })
   }
 
-  // Konfiguracja kolumn eksportu do Excela - kolejnosc pelnej listy + zbior wlaczonych.
-  const [showColumnConfig, setShowColumnConfig] = useState(false)
-  const [columnOrder, setColumnOrder] = useState<ExportColumnKey[]>(ALL_EXPORT_COLUMNS)
-  const [enabledColumns, setEnabledColumns] = useState<Set<ExportColumnKey>>(new Set(DEFAULT_EXPORT_COLUMN_SET))
-  const toggleColumn = (key: ExportColumnKey) => {
-    setEnabledColumns(prev => {
-      const next = new Set(prev)
-      if (next.has(key)) next.delete(key); else next.add(key)
-      return next
-    })
-  }
-  const moveColumn = (key: ExportColumnKey, direction: -1 | 1) => {
-    setColumnOrder(prev => {
-      const index = prev.indexOf(key)
-      const target = index + direction
-      if (target < 0 || target >= prev.length) return prev
-      const next = prev.slice()
-      ;[next[index], next[target]] = [next[target], next[index]]
-      return next
-    })
-  }
 
   useEffect(() => { fetchMachines().then(setMachines) }, [])
   useEffect(() => { load() }, [filterMachineId, filterModule, filterShift, filterOcrStatus, dateFrom, dateTo])
@@ -604,8 +596,8 @@ export default function ManagerShiftStatPhotos() {
   // parametr, zeby dane dalo sie dalej filtrowac/analizowac poza aplikacja.
   const [exportingExcel, setExportingExcel] = useState(false)
   const [exportError, setExportError] = useState('')
-  const handleExportExcel = async (list: PhotoRow[], columns: ExportColumnKey[]) => {
-    if (list.length === 0 || columns.length === 0) return
+  const handleExportExcel = async (list: PhotoRow[]) => {
+    if (list.length === 0) return
     setExportingExcel(true)
     setExportError('')
     try {
@@ -637,10 +629,27 @@ export default function ManagerShiftStatPhotos() {
       wb.creator = 'MargoLine MES'
       wb.created = new Date()
 
-      const buildSheet = (sheetName: string, titleText: string, photos: PhotoRow[], lang: ExportLang) => {
-        const ws = wb.addWorksheet(sheetName)
+      // Odczyty ulozone POZIOMO: kazda zmiana/zdjecie to osobna kolumna, kazdy odczytany
+      // parametr to osobny wiersz - zeby porownanie zmiany do zmiany bylo jednym rzutem
+      // oka w prawo, zamiast przewijania dlugiej pionowej listy. Kolumny chronologicznie
+      // od najstarszej po lewej do najnowszej po prawej.
+      const MODULE_COMPARISON_LABELS: Record<ExportLang, { rowLabels: string[]; noData: string }> = {
+        en: { rowLabels: ['Date', 'Shift', 'Machine', 'Operator', 'Photo time', 'OCR status'], noData: 'No readings for this range.' },
+        pl: { rowLabels: ['Data', 'Zmiana', 'Automat', 'Operator', 'Godzina zdjęcia', 'Status OCR'], noData: 'Brak odczytów w tym zakresie.' }
+      }
+      const THIN_BORDER = {
+        top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+        bottom: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+        left: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+        right: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } }
+      }
 
-        ws.mergeCells(1, 1, 1, columns.length)
+      const buildModuleComparisonSheet = (sheetName: string, titleText: string, modulePhotos: PhotoRow[], lang: ExportLang) => {
+        const ws = wb.addWorksheet(sheetName)
+        const labels = MODULE_COMPARISON_LABELS[lang]
+        const sortedPhotos = modulePhotos.slice().sort((a, b) => (a.captured_at ?? '').localeCompare(b.captured_at ?? ''))
+
+        ws.mergeCells(1, 1, 1, Math.max(sortedPhotos.length + 1, 2))
         const title = ws.getCell(1, 1)
         title.value = titleText
         title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
@@ -648,39 +657,91 @@ export default function ManagerShiftStatPhotos() {
         title.alignment = { horizontal: 'center', vertical: 'middle' }
         ws.getRow(1).height = 26
 
-        const headerRow = 3
-        columns.forEach((key, ci) => {
-          const def = EXPORT_COLUMN_DEFS[key]
-          const cell = ws.getCell(headerRow, ci + 1)
-          cell.value = lang === 'en' ? def.labelEn : def.label
+        if (!sortedPhotos.length) {
+          const cell = ws.getCell(3, 1)
+          cell.value = labels.noData
+          cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
+          return
+        }
+
+        const firstDataCol = 2
+        const metaHeaderRow = 3
+        const metricsStartRow = metaHeaderRow + labels.rowLabels.length + 1
+
+        ws.getColumn(1).width = 26
+        sortedPhotos.forEach((_, ci) => { ws.getColumn(firstDataCol + ci).width = 18 })
+
+        labels.rowLabels.forEach((label, ri) => {
+          const cell = ws.getCell(metaHeaderRow + ri, 1)
+          cell.value = label
           cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
           cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-          ws.getColumn(ci + 1).width = def.width
+          cell.alignment = { vertical: 'middle' }
         })
 
-        let row = headerRow + 1
-        photos
-          .slice()
-          .sort((a, b) => (b.captured_at ?? '').localeCompare(a.captured_at ?? ''))
-          .forEach(photo => {
-            const photoReadings = readingsByPhoto.get(photo.id) ?? []
-            const values = photoReadings.length ? photoReadings : [null]
-            values.forEach(reading => {
-              columns.forEach((key, ci) => {
-                const cell = ws.getCell(row, ci + 1)
-                cell.value = exportColumnValue(key, photo, reading, lang)
-                cell.font = { name: 'Arial', size: 9 }
-                cell.border = {
-                  top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                  bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                  left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
-                  right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
-                }
-              })
-              row += 1
-            })
+        const readingMapByPhoto = new Map<string, Map<string, ShiftStatReading>>()
+        sortedPhotos.forEach(photo => {
+          const map = new Map<string, ShiftStatReading>()
+          ;(readingsByPhoto.get(photo.id) ?? []).forEach(r => map.set(r.metric_label, r))
+          readingMapByPhoto.set(photo.id, map)
+        })
+
+        sortedPhotos.forEach((photo, ci) => {
+          const col = firstDataCol + ci
+          const metaValues = [
+            photo.shift_date ?? '',
+            photo.shift_type ?? '',
+            one(photo.machine)?.name ?? '—',
+            one(photo.operator)?.full_name ?? '—',
+            new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL'),
+            OCR_STATUS_LABELS[lang][photo.ocr_status]
+          ]
+          metaValues.forEach((value, ri) => {
+            const cell = ws.getCell(metaHeaderRow + ri, col)
+            cell.value = value
+            cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: 'FFE5E9F2' } }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF24345A' } }
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
           })
+        })
+
+        // Kolejnosc wierszy odczytow = kolejnosc na ekranie PLC (najnizszy sort_order
+        // sposrod wszystkich zdjec, w ktorych dana etykieta wystapila).
+        const metricOrder = new Map<string, number>()
+        sortedPhotos.forEach(photo => {
+          (readingsByPhoto.get(photo.id) ?? []).forEach(r => {
+            const current = metricOrder.get(r.metric_label)
+            if (current === undefined || r.sort_order < current) metricOrder.set(r.metric_label, r.sort_order)
+          })
+        })
+        const metricLabels = [...metricOrder.keys()].sort((a, b) => metricOrder.get(a)! - metricOrder.get(b)!)
+
+        metricLabels.forEach((label, ri) => {
+          const row = metricsStartRow + ri
+          const stripeColor = ri % 2 === 0 ? 'FFF3F4F6' : 'FFFFFFFF'
+
+          const labelCell = ws.getCell(row, 1)
+          labelCell.value = label
+          labelCell.font = { name: 'Arial', bold: true, size: 9 }
+          labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+          labelCell.alignment = { vertical: 'middle' }
+          labelCell.border = THIN_BORDER
+
+          sortedPhotos.forEach((photo, ci) => {
+            const col = firstDataCol + ci
+            const reading = readingMapByPhoto.get(photo.id)?.get(label)
+            const cell = ws.getCell(row, col)
+            cell.value = reading ? (reading.corrected_value ?? reading.metric_value) : ''
+            cell.font = { name: 'Arial', size: 9 }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+            cell.alignment = { horizontal: 'right', vertical: 'middle' }
+            cell.border = THIN_BORDER
+          })
+        })
+
+        // Zamrozenie pierwszej kolumny (nazwy odczytow) i wierszy metadanych - przy
+        // przewijaniu w prawo/w dol etykiety i naglowek zmiany zostaja widoczne.
+        ws.views = [{ state: 'frozen', xSplit: 1, ySplit: metricsStartRow - 1 }]
       }
 
       // Shift Summary - GLOWNY, czytelny przeglad: jeden wiersz na zmiane (nie na odczyt),
@@ -695,23 +756,31 @@ export default function ManagerShiftStatPhotos() {
         photosByShift.set(photo.shift_id, arr)
       })
 
-      const SHIFT_SUMMARY_LABELS: Record<ExportLang, { title: string; columns: string[]; noIssues: string }> = {
+      // Uklad wg oceny odbiorcy raportu: jedna zmiana = jeden wiersz, osobne pola dla
+      // czasu pracy / alarmow / przestojow (zamiast jednego zbiorczego pola), odrzut
+      // policzalny obok produkcji, stacja generujaca najwieksze straty widoczna wprost,
+      // a dluzsze alarmy/przestoje wyrozniamy na czerwono - zeby dalo sie od razu
+      // wskazac, ktore zmiany wymagaja uwagi.
+      const LONG_TIME_THRESHOLD_MIN = 120
+      const SHIFT_SUMMARY_LABELS: Record<ExportLang, { title: string; columns: string[]; noIssues: string; noStation: string }> = {
         en: {
-          title: 'Shift Summary - what happened, what was the problem',
-          columns: ['Date', 'Shift', 'Machine', 'Downtime', 'Modules', 'Problem summary'],
-          noIssues: 'No issues reported'
+          title: 'Shift Summary - runtime, alarms, downtime, rejects',
+          columns: ['Date', 'Shift', 'Machine', 'Production', 'Reject %', 'Runtime', 'Alarms', 'Downtime', 'Loss-generating station', 'Cause description'],
+          noIssues: 'No issues reported',
+          noStation: '—'
         },
         pl: {
-          title: 'Podsumowanie zmiany - co się działo, co było problemem',
-          columns: ['Data', 'Zmiana', 'Automat', 'Postój', 'Moduły', 'Podsumowanie problemu'],
-          noIssues: 'Brak zgłoszonych problemów'
+          title: 'Podsumowanie zmiany - czas pracy, alarmy, przestoje, odrzuty',
+          columns: ['Data', 'Zmiana', 'Automat', 'Produkcja', 'Odrzut %', 'Czas pracy', 'Alarmy', 'Przestoje', 'Stacja generująca straty', 'Opis przyczyny'],
+          noIssues: 'Brak zgłoszonych problemów',
+          noStation: '—'
         }
       }
 
       const buildShiftSummarySheet = (sheetName: string, lang: ExportLang) => {
         const labels = SHIFT_SUMMARY_LABELS[lang]
         const summaryWs = wb.addWorksheet(sheetName)
-        summaryWs.mergeCells(1, 1, 1, 6)
+        summaryWs.mergeCells(1, 1, 1, labels.columns.length)
         const summaryTitle = summaryWs.getCell(1, 1)
         summaryTitle.value = labels.title
         summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
@@ -720,7 +789,7 @@ export default function ManagerShiftStatPhotos() {
         summaryWs.getRow(1).height = 26
 
         const summaryHeaderRow = 3
-        const summaryColumnWidths = [13, 9, 20, 12, 22, 100]
+        const summaryColumnWidths = [13, 9, 20, 13, 11, 12, 11, 12, 22, 80]
         labels.columns.forEach((label, ci) => {
           const cell = summaryWs.getCell(summaryHeaderRow, ci + 1)
           cell.value = label
@@ -734,13 +803,19 @@ export default function ManagerShiftStatPhotos() {
           .map(([shiftId, shiftPhotos]) => {
             const first = shiftPhotos[0]
             const problem = descriptionByShift.get(shiftId)
+            const rejectPct = problem && (problem.goodCount + problem.rejectCount) > 0
+              ? Math.round((problem.rejectCount / (problem.goodCount + problem.rejectCount)) * 1000) / 10
+              : 0
             return {
               date: first.shift_date ?? '',
               shiftType: first.shift_type ?? '',
               machineName: one(first.machine)?.name ?? '—',
+              goodCount: problem?.goodCount ?? 0,
+              rejectPct,
+              runtimeMin: problem?.runtimeMin ?? 0,
+              alarmMin: problem?.alarmMin ?? 0,
               downtimeMin: problem?.downtimeMin ?? 0,
-              modules: [...new Set(shiftPhotos.map(p => p.module_key).filter((k): k is string => !!k))]
-                .map(k => moduleLabelFor(k, lang)).join(', '),
+              stationLabel: problem?.topStations.length ? problem.topStations.map(s => stationLabelFor(s, lang)).join(', ') : labels.noStation,
               problemSummary: (lang === 'en' ? translatedTextByShift.get(shiftId) : undefined) || problem?.text || labels.noIssues
             }
           })
@@ -748,14 +823,24 @@ export default function ManagerShiftStatPhotos() {
 
         let summaryRow = summaryHeaderRow + 1
         summaryRows.forEach(r => {
-          const cells = [r.date, r.shiftType, r.machineName, formatMinutes(r.downtimeMin), r.modules, r.problemSummary]
+          const cells: (string | number)[] = [
+            r.date, r.shiftType, r.machineName,
+            Math.round(r.goodCount).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL'),
+            `${r.rejectPct}%`,
+            formatMinutes(r.runtimeMin),
+            formatMinutes(r.alarmMin),
+            formatMinutes(r.downtimeMin),
+            r.stationLabel,
+            r.problemSummary
+          ]
           cells.forEach((value, ci) => {
             const cell = summaryWs.getCell(summaryRow, ci + 1)
             cell.value = value
-            cell.font = ci === 3 && r.downtimeMin > 120
+            const isLongAlarmOrDowntime = (ci === 6 && r.alarmMin > LONG_TIME_THRESHOLD_MIN) || (ci === 7 && r.downtimeMin > LONG_TIME_THRESHOLD_MIN)
+            cell.font = isLongAlarmOrDowntime
               ? { name: 'Arial', size: 9, bold: true, color: { argb: 'FFDC2626' } }
               : { name: 'Arial', size: 9 }
-            cell.alignment = { wrapText: ci === 5, vertical: 'top' }
+            cell.alignment = { wrapText: ci === 9, vertical: 'top' }
             cell.border = {
               top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
               bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
@@ -773,10 +858,10 @@ export default function ManagerShiftStatPhotos() {
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
 
-      buildSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
-      buildSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
-      buildSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
-      buildSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
+      buildModuleComparisonSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
+      buildModuleComparisonSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
+      buildModuleComparisonSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
+      buildModuleComparisonSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
       // Wykresy wydajnosci godzinowej - para arkuszy (EN + PL) na kazdy automat obecny
       // w eksporcie. Pod wykresem - klasyfikacja WSZYSTKICH odnotowanych problemow
@@ -872,7 +957,6 @@ export default function ManagerShiftStatPhotos() {
   // Pusty wybor = dzialaj na wszystkim co widoczne po filtrze (jak dotychczas);
   // zaznaczenie konkretnych zdjec zawezalo dzialanie tylko do nich.
   const exportTargets = selectedIds.size > 0 ? filtered.filter(p => selectedIds.has(p.id)) : filtered
-  const activeColumns = columnOrder.filter(key => enabledColumns.has(key))
 
   const filtersActive = filterMachineId || filterModule || filterShift || filterOcrStatus || dateFrom || dateTo
   const clearFilters = () => {
@@ -953,12 +1037,6 @@ export default function ManagerShiftStatPhotos() {
           {selectedIds.size > 0 ? `✕ Wyczyść zaznaczenie (${selectedIds.size})` : '☑ Zaznacz wszystkie widoczne'}
         </button>
         <button
-          onClick={() => setShowColumnConfig(v => !v)}
-          className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all"
-        >
-          ⚙ Kolumny eksportu ({activeColumns.length})
-        </button>
-        <button
           onClick={() => handleDownloadAll(exportTargets)}
           disabled={downloadingAll || exportTargets.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
@@ -968,42 +1046,13 @@ export default function ManagerShiftStatPhotos() {
             : `⤓ Pobierz ${selectedIds.size > 0 ? 'zaznaczone' : 'wszystkie'} (${exportTargets.length})`}
         </button>
         <button
-          onClick={() => handleExportExcel(exportTargets, activeColumns)}
-          disabled={exportingExcel || exportTargets.length === 0 || activeColumns.length === 0}
+          onClick={() => handleExportExcel(exportTargets)}
+          disabled={exportingExcel || exportTargets.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
         >
           {exportingExcel ? '⏳ Generowanie...' : `📊 Eksportuj do Excela (${exportTargets.length})`}
         </button>
       </div>
-
-      {showColumnConfig && (
-        <div className="card space-y-2">
-          <div className="card-title text-sm">Kolumny w pliku Excel</div>
-          <div className="card-sub mb-2">Zaznacz kolumny do uwzględnienia i ustaw ich kolejność strzałkami</div>
-          <div className="space-y-1">
-            {columnOrder.map((key, index) => (
-              <div key={key} className="flex items-center justify-between gap-3 rounded-lg border border-navy-700 bg-navy-900 px-3 py-2">
-                <label className="flex items-center gap-2 text-sm text-navy-200">
-                  <input type="checkbox" checked={enabledColumns.has(key)} onChange={() => toggleColumn(key)} />
-                  {EXPORT_COLUMN_DEFS[key].label}
-                </label>
-                <div className="flex items-center gap-1">
-                  <button
-                    onClick={() => moveColumn(key, -1)}
-                    disabled={index === 0}
-                    className="rounded-md border border-navy-700 px-2 py-1 text-xs text-navy-300 hover:border-brand/40 hover:text-brand disabled:opacity-30"
-                  >↑</button>
-                  <button
-                    onClick={() => moveColumn(key, 1)}
-                    disabled={index === columnOrder.length - 1}
-                    className="rounded-md border border-navy-700 px-2 py-1 text-xs text-navy-300 hover:border-brand/40 hover:text-brand disabled:opacity-30"
-                  >↓</button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
 
       {downloadAllError && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-300">{downloadAllError}</div>
