@@ -661,7 +661,16 @@ export default function ManagerShiftStatPhotos() {
             : [...baseLabels.rowLabels, ocrStatusLabel],
           noData: baseLabels.noData
         }
-        const sortedPhotos = modulePhotos.slice().sort((a, b) => (a.captured_at ?? '').localeCompare(b.captured_at ?? ''))
+        // Grupowanie po automacie, a dopiero w obrebie automatu chronologicznie - zeby
+        // sasiednie kolumny byly kolejnymi zmianami TEGO SAMEGO automatu (porownanie
+        // zmiana-zmiana), a nie przeplatanka automat-automat wynikajaca z sortowania
+        // czysto po czasie zdjecia.
+        const sortedPhotos = modulePhotos.slice().sort((a, b) => {
+          const machineA = one(a.machine)?.name ?? ''
+          const machineB = one(b.machine)?.name ?? ''
+          if (machineA !== machineB) return machineA.localeCompare(machineB, 'pl', { numeric: true })
+          return (a.captured_at ?? '').localeCompare(b.captured_at ?? '')
+        })
 
         ws.mergeCells(1, 1, 1, Math.max(sortedPhotos.length + 1, 2))
         const title = ws.getCell(1, 1)
@@ -700,6 +709,15 @@ export default function ManagerShiftStatPhotos() {
           readingMapByPhoto.set(photo.id, map)
         })
 
+        // Gruba zlota linia na koncu bloku kolumn kazdego automatu - wizualnie oddziela
+        // "Automat 3, zmiana po zmianie" od "Automat 4, zmiana po zmianie".
+        const groupEndBorder = { style: 'medium' as const, color: { argb: GOLD } }
+        const isLastOfMachineGroup = sortedPhotos.map((photo, ci) => {
+          const next = sortedPhotos[ci + 1]
+          if (!next) return false
+          return (one(photo.machine)?.name ?? '') !== (one(next.machine)?.name ?? '')
+        })
+
         sortedPhotos.forEach((photo, ci) => {
           const col = firstDataCol + ci
           const metaValues = [
@@ -715,6 +733,7 @@ export default function ManagerShiftStatPhotos() {
             cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: 'FFE5E9F2' } }
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF24345A' } }
             cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+            if (isLastOfMachineGroup[ci]) cell.border = { right: groupEndBorder }
           })
         })
 
@@ -748,7 +767,7 @@ export default function ManagerShiftStatPhotos() {
             cell.font = { name: 'Arial', size: 9 }
             cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
             cell.alignment = { horizontal: 'right', vertical: 'middle' }
-            cell.border = THIN_BORDER
+            cell.border = isLastOfMachineGroup[ci] ? { ...THIN_BORDER, right: groupEndBorder } : THIN_BORDER
           })
         })
 
