@@ -170,6 +170,7 @@ type EditState = {
 }
 
 type ShiftEditState = {
+  shiftType: ShiftType
   operator1Id: string
   operator2Id: string
   runtimeMin: string
@@ -1455,6 +1456,7 @@ export default function ManagerDashboard() {
     if (!canEdit) return
     setEditingShift(shift)
     setShiftEditState({
+      shiftType: shift.shift_type,
       operator1Id: shift.operator_1_id,
       operator2Id: shift.operator_2_id ?? '',
       runtimeMin: shift.summary_runtime_min != null ? minsToHHMM(shift.summary_runtime_min) : '',
@@ -1494,7 +1496,29 @@ export default function ManagerDashboard() {
 
     setShiftSaving(true)
     setShiftEditError('')
+
+    const shiftTypeChanged = shiftEditState.shiftType !== editingShift.shift_type
+    if (shiftTypeChanged) {
+      // Ta sama para (automat, data, numer zmiany) nie moze wystapic dwa razy -
+      // sprawdzamy z wyprzedzeniem, zeby pokazac czytelny blad zamiast surowego
+      // naruszenia unikalnosci z bazy (ten sam wzorzec co przy starcie zmiany).
+      const { data: collision } = await supabase
+        .from('shifts')
+        .select('id')
+        .eq('machine_id', editingShift.machine_id)
+        .eq('shift_date', editingShift.shift_date)
+        .eq('shift_type', shiftEditState.shiftType)
+        .neq('id', editingShift.id)
+        .maybeSingle()
+      if (collision) {
+        setShiftEditError(`Zmiana ${shiftEditState.shiftType} juz istnieje na tym automacie w tym dniu. Nie mozna przypisac tego samego numeru zmiany dwa razy.`)
+        setShiftSaving(false)
+        return
+      }
+    }
+
     const payload = {
+      shift_type: shiftEditState.shiftType,
       operator_1_id: shiftEditState.operator1Id,
       operator_2_id: shiftEditState.operator2Id || null,
       summary_runtime_min: runtimeMin,
@@ -1511,7 +1535,18 @@ export default function ManagerDashboard() {
       return
     }
 
+    if (shiftTypeChanged) {
+      // shift_type jest tez zdenormalizowany (kopia, nie referencja) w production_jobs
+      // i shift_stat_photos - bez tego eksporty/raporty oparte na tych tabelach
+      // pokazywalyby stary, bledny numer zmiany mimo poprawionej zmiany nadrzednej.
+      await Promise.all([
+        supabase.from('production_jobs').update({ shift_type: shiftEditState.shiftType }).eq('shift_id', editingShift.id),
+        supabase.from('shift_stat_photos').update({ shift_type: shiftEditState.shiftType }).eq('shift_id', editingShift.id)
+      ])
+    }
+
     await logAudit('shift_manager_correction', 'shifts', editingShift.id, {
+      shift_type: editingShift.shift_type,
       operator_1_id: editingShift.operator_1_id,
       operator_2_id: editingShift.operator_2_id,
       summary_runtime_min: editingShift.summary_runtime_min,
@@ -1521,7 +1556,7 @@ export default function ManagerDashboard() {
       summary_notes: editingShift.summary_notes
     }, {
       ...payload,
-      reason: shiftEditState.reason.trim() || 'korekta czasu pracy przez kierownika'
+      reason: shiftEditState.reason.trim() || 'korekta zmiany przez kierownika'
     })
     setEditingShift(null)
     setShiftEditState(null)
@@ -2607,13 +2642,25 @@ export default function ManagerDashboard() {
               <div>
                 <div className="card-title">Korekta zmiany</div>
                 <div className="card-sub">
-                  {editingShift.shift_date} | Zmiana {editingShift.shift_type} | {machineNameById[editingShift.machine_id] ?? '-'}
+                  {editingShift.shift_date} | Zmiana {shiftEditState.shiftType} | {machineNameById[editingShift.machine_id] ?? '-'}
                 </div>
               </div>
               <button className="btn-secondary text-xs py-1.5 px-3" onClick={() => { setEditingShift(null); setShiftEditError('') }}>Zamknij</button>
             </div>
 
             <div className="grid grid-cols-1 gap-3">
+              <label className="block">
+                <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Numer zmiany</span>
+                <select
+                  className="input mt-1"
+                  value={shiftEditState.shiftType}
+                  onChange={e => setShiftEditState({ ...shiftEditState, shiftType: e.target.value as ShiftType })}
+                >
+                  {SHIFTS.map(shift => <option key={shift} value={shift}>Zmiana {shift}</option>)}
+                </select>
+                <span className="mt-1 block text-xs text-navy-500">Zmieniaj tylko przy pomylce operatora - to zmienia numer zmiany, nie date ani automat.</span>
+              </label>
+
               <label className="block">
                 <span className="text-xs text-navy-400 font-bold uppercase tracking-wider">Operator 1</span>
                 <select
