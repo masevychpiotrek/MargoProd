@@ -633,16 +633,15 @@ export default function ManagerShiftStatPhotos() {
       wb.creator = 'MargoLine MES'
       wb.created = new Date()
 
-      // Odczyty ulozone PIONOWO: jeden wiersz na kazdy odczytany parametr - zeby dalo sie
-      // uzywac natywnego filtrowania/sortowania Excela (AutoFilter, sortowanie po
-      // kolumnie) zamiast szerokiej tabeli z kolumnami-zmianami. Wiersze posortowane
-      // najpierw po automacie, a w jego obrebie chronologicznie - kolejne zmiany tego
-      // samego automatu wciaz sasiaduja, tylko teraz pod soba, nie obok siebie. Operator
-      // celowo pominiety (dane trafiaja na zewnatrz), godzina zdjecia to opcja domyslnie
-      // wylaczona (showCapturedTime).
-      const MODULE_SHEET_LABELS: Record<ExportLang, { columns: string[]; capturedAtLabel: string; noData: string }> = {
-        en: { columns: ['Date', 'Shift', 'Machine'], capturedAtLabel: 'Photo time', noData: 'No readings for this range.' },
-        pl: { columns: ['Data', 'Zmiana', 'Automat'], capturedAtLabel: 'Godzina zdjęcia', noData: 'Brak odczytów w tym zakresie.' }
+      // Odczyty ulozone POZIOMO: kazda zmiana/zdjecie to osobna kolumna, kazdy odczytany
+      // parametr to osobny wiersz - zeby porownanie zmiany do zmiany (i dnia do dnia) bylo
+      // jednym rzutem oka w prawo. Kolumny grupowane po automacie, a w obrebie automatu
+      // chronologicznie (dzien po dniu, zmiana po zmianie). Operator celowo pominiety -
+      // dane trafiajace na zewnatrz (producent/A1TEC) nie maja pokazywac nazwisk. Godzina
+      // zdjecia zostaje jako opcja domyslnie wylaczona (showCapturedTime).
+      const MODULE_COMPARISON_LABELS: Record<ExportLang, { rowLabels: string[]; capturedAtLabel: string; noData: string }> = {
+        en: { rowLabels: ['Date', 'Shift', 'Machine'], capturedAtLabel: 'Photo time', noData: 'No readings for this range.' },
+        pl: { rowLabels: ['Data', 'Zmiana', 'Automat'], capturedAtLabel: 'Godzina zdjęcia', noData: 'Brak odczytów w tym zakresie.' }
       }
       const THIN_BORDER = {
         top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
@@ -651,39 +650,20 @@ export default function ManagerShiftStatPhotos() {
         right: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } }
       }
 
-      const buildModuleSheet = (sheetName: string, titleText: string, modulePhotos: PhotoRow[], lang: ExportLang) => {
+      const buildModuleComparisonSheet = (sheetName: string, titleText: string, modulePhotos: PhotoRow[], lang: ExportLang) => {
         const ws = wb.addWorksheet(sheetName)
-        const baseLabels = MODULE_SHEET_LABELS[lang]
+        const baseLabels = MODULE_COMPARISON_LABELS[lang]
         const ocrStatusLabel = lang === 'en' ? 'OCR status' : 'Status OCR'
-        const metricLabelHeader = lang === 'en' ? 'Reading label' : 'Etykieta odczytu'
-        const valueHeader = lang === 'en' ? 'Value' : 'Wartość'
-        const columns = [
-          ...baseLabels.columns,
-          ...(showCapturedTime ? [baseLabels.capturedAtLabel] : []),
-          ocrStatusLabel,
-          metricLabelHeader,
-          valueHeader
-        ]
-        const columnWidths = [13, 9, 20, ...(showCapturedTime ? [16] : []), 12, 26, 16]
-
-        ws.mergeCells(1, 1, 1, columns.length)
-        const title = ws.getCell(1, 1)
-        title.value = titleText
-        title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
-        title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-        title.alignment = { horizontal: 'center', vertical: 'middle' }
-        ws.getRow(1).height = 26
-
-        const headerRow = 3
-        columns.forEach((label, ci) => {
-          const cell = ws.getCell(headerRow, ci + 1)
-          cell.value = label
-          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
-          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
-          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
-          ws.getColumn(ci + 1).width = columnWidths[ci]
-        })
-
+        const labels = {
+          rowLabels: showCapturedTime
+            ? [...baseLabels.rowLabels, baseLabels.capturedAtLabel, ocrStatusLabel]
+            : [...baseLabels.rowLabels, ocrStatusLabel],
+          noData: baseLabels.noData
+        }
+        // Grupowanie po automacie, a dopiero w obrebie automatu chronologicznie (dzien po
+        // dniu, zmiana po zmianie) - zeby sasiednie kolumny byly kolejnymi zmianami TEGO
+        // SAMEGO automatu, a nie przeplatanka automat-automat wynikajaca z sortowania
+        // czysto po czasie zdjecia.
         const sortedPhotos = modulePhotos.slice().sort((a, b) => {
           const machineA = one(a.machine)?.name ?? ''
           const machineB = one(b.machine)?.name ?? ''
@@ -691,39 +671,127 @@ export default function ManagerShiftStatPhotos() {
           return (a.captured_at ?? '').localeCompare(b.captured_at ?? '')
         })
 
-        let row = headerRow + 1
+        ws.mergeCells(1, 1, 1, Math.max(sortedPhotos.length + 1, 2))
+        const title = ws.getCell(1, 1)
+        title.value = titleText
+        title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+        title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        title.alignment = { horizontal: 'center', vertical: 'middle' }
+        ws.getRow(1).height = 26
+
         if (!sortedPhotos.length) {
-          const cell = ws.getCell(row, 1)
-          cell.value = baseLabels.noData
+          const cell = ws.getCell(3, 1)
+          cell.value = labels.noData
           cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
           return
         }
 
+        const firstDataCol = 2
+        const metaHeaderRow = 3
+        const metricsStartRow = metaHeaderRow + labels.rowLabels.length + 1
+
+        ws.getColumn(1).width = 26
+        sortedPhotos.forEach((_, ci) => { ws.getColumn(firstDataCol + ci).width = 18 })
+
+        labels.rowLabels.forEach((label, ri) => {
+          const cell = ws.getCell(metaHeaderRow + ri, 1)
+          cell.value = label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { vertical: 'middle' }
+        })
+
+        const readingMapByPhoto = new Map<string, Map<string, ShiftStatReading>>()
         sortedPhotos.forEach(photo => {
-          const photoReadings = (readingsByPhoto.get(photo.id) ?? []).slice().sort((a, b) => a.sort_order - b.sort_order)
-          const values = photoReadings.length ? photoReadings : [null]
-          values.forEach(reading => {
-            const cells: (string | number)[] = [
-              photo.shift_date ?? '',
-              photo.shift_type ?? '',
-              one(photo.machine)?.name ?? '—',
-              ...(showCapturedTime ? [new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL')] : []),
-              OCR_STATUS_LABELS[lang][photo.ocr_status],
-              reading?.metric_label ?? '—',
-              reading ? (reading.corrected_value ?? reading.metric_value) : ''
-            ]
-            cells.forEach((value, ci) => {
-              const cell = ws.getCell(row, ci + 1)
-              cell.value = value
-              cell.font = { name: 'Arial', size: 9 }
-              cell.border = THIN_BORDER
-            })
-            row += 1
+          const map = new Map<string, ShiftStatReading>()
+          ;(readingsByPhoto.get(photo.id) ?? []).forEach(r => map.set(r.metric_label, r))
+          readingMapByPhoto.set(photo.id, map)
+        })
+
+        // Gruba zlota linia na koncu bloku kolumn kazdego automatu - wizualnie oddziela
+        // "Automat 3, dzien po dniu, zmiana po zmianie" od "Automat 4, ...".
+        const groupEndBorder = { style: 'medium' as const, color: { argb: GOLD } }
+        const isLastOfMachineGroup = sortedPhotos.map((photo, ci) => {
+          const next = sortedPhotos[ci + 1]
+          if (!next) return false
+          return (one(photo.machine)?.name ?? '') !== (one(next.machine)?.name ?? '')
+        })
+
+        // Niebieska przerywana linia na poczatku bloku kolumn kazdego nowego dnia (w
+        // obrebie tego samego automatu) - odrebna od zlotej granicy automatu, zeby dalo
+        // sie od razu wzrokowo zlapac, gdzie konczy sie jeden dzien a zaczyna kolejny przy
+        // porownywaniu zmiana-po-zmianie.
+        const dayBreakBorder = { style: 'dashed' as const, color: { argb: 'FF3B82F6' } }
+        const isNewDayWithinGroup = sortedPhotos.map((photo, ci) => {
+          if (ci === 0) return false
+          const prev = sortedPhotos[ci - 1]
+          const sameMachine = (one(photo.machine)?.name ?? '') === (one(prev.machine)?.name ?? '')
+          return sameMachine && photo.shift_date !== prev.shift_date
+        })
+
+        sortedPhotos.forEach((photo, ci) => {
+          const col = firstDataCol + ci
+          const metaValues = [
+            photo.shift_date ?? '',
+            photo.shift_type ?? '',
+            one(photo.machine)?.name ?? '—',
+            ...(showCapturedTime ? [new Date(photo.captured_at).toLocaleString(lang === 'en' ? 'en-GB' : 'pl-PL')] : []),
+            OCR_STATUS_LABELS[lang][photo.ocr_status]
+          ]
+          metaValues.forEach((value, ri) => {
+            const cell = ws.getCell(metaHeaderRow + ri, col)
+            cell.value = value
+            cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: 'FFE5E9F2' } }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF24345A' } }
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+            const border: Partial<Record<'left' | 'right', { style: 'medium' | 'dashed'; color: { argb: string } }>> = {}
+            if (isLastOfMachineGroup[ci]) border.right = groupEndBorder
+            if (isNewDayWithinGroup[ci]) border.left = dayBreakBorder
+            if (border.left || border.right) cell.border = border
           })
         })
 
-        // Zamrozenie wiersza naglowka - przy przewijaniu w dol etykiety kolumn zostaja widoczne.
-        ws.views = [{ state: 'frozen', ySplit: headerRow }]
+        // Kolejnosc wierszy odczytow = kolejnosc na ekranie PLC (najnizszy sort_order
+        // sposrod wszystkich zdjec, w ktorych dana etykieta wystapila).
+        const metricOrder = new Map<string, number>()
+        sortedPhotos.forEach(photo => {
+          (readingsByPhoto.get(photo.id) ?? []).forEach(r => {
+            const current = metricOrder.get(r.metric_label)
+            if (current === undefined || r.sort_order < current) metricOrder.set(r.metric_label, r.sort_order)
+          })
+        })
+        const metricLabels = [...metricOrder.keys()].sort((a, b) => metricOrder.get(a)! - metricOrder.get(b)!)
+
+        metricLabels.forEach((label, ri) => {
+          const row = metricsStartRow + ri
+          const stripeColor = ri % 2 === 0 ? 'FFF3F4F6' : 'FFFFFFFF'
+
+          const labelCell = ws.getCell(row, 1)
+          labelCell.value = label
+          labelCell.font = { name: 'Arial', bold: true, size: 9 }
+          labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+          labelCell.alignment = { vertical: 'middle' }
+          labelCell.border = THIN_BORDER
+
+          sortedPhotos.forEach((photo, ci) => {
+            const col = firstDataCol + ci
+            const reading = readingMapByPhoto.get(photo.id)?.get(label)
+            const cell = ws.getCell(row, col)
+            cell.value = reading ? (reading.corrected_value ?? reading.metric_value) : ''
+            cell.font = { name: 'Arial', size: 9 }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+            cell.alignment = { horizontal: 'right', vertical: 'middle' }
+            cell.border = {
+              ...THIN_BORDER,
+              ...(isLastOfMachineGroup[ci] ? { right: groupEndBorder } : {}),
+              ...(isNewDayWithinGroup[ci] ? { left: dayBreakBorder } : {})
+            }
+          })
+        })
+
+        // Zamrozenie pierwszej kolumny (nazwy odczytow) i wierszy metadanych - przy
+        // przewijaniu w prawo/w dol etykiety i naglowek zmiany zostaja widoczne.
+        ws.views = [{ state: 'frozen', xSplit: 1, ySplit: metricsStartRow - 1 }]
       }
 
       // Shift Summary - GLOWNY, czytelny przeglad: jeden wiersz na zmiane (nie na odczyt),
@@ -840,10 +908,10 @@ export default function ManagerShiftStatPhotos() {
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
 
-      buildModuleSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
-      buildModuleSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
-      buildModuleSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
-      buildModuleSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
+      buildModuleComparisonSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
+      buildModuleComparisonSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
+      buildModuleComparisonSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
+      buildModuleComparisonSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
       // Wykresy wydajnosci godzinowej - para arkuszy (EN + PL) na kazdy automat obecny
       // w eksporcie. Pod wykresem - klasyfikacja WSZYSTKICH odnotowanych problemow
