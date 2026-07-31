@@ -908,8 +908,6 @@ export default function ManagerShiftStatPhotos() {
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
 
-      buildModuleComparisonSheet('Zestaw', 'Statystyki zmianowe - Zestaw', zestawPhotos, 'pl')
-      buildModuleComparisonSheet('Komora', 'Statystyki zmianowe - Komora kroplowa', komoraPhotos, 'pl')
       buildModuleComparisonSheet('Infusion Set', 'Shift statistics - Infusion Set', zestawPhotos, 'en')
       buildModuleComparisonSheet('Drip Chamber', 'Shift statistics - Drip Chamber', komoraPhotos, 'en')
 
