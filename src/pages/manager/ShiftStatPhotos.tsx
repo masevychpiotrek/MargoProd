@@ -176,6 +176,56 @@ async function fetchPhotos(filters: PhotoFilters) {
   return (data ?? []) as PhotoRow[]
 }
 
+// Eksport (Excel/ZIP "wszystkie") NIE moze bazowac na tej samej liscie co siatka na
+// ekranie - ta jest celowo ograniczona do 300 najnowszych zdjec (wydajnosc UI). Dla
+// dluzszego okresu/wielu automatow to znaczylo, ze starsze zmiany z wybranego zakresu
+// po cichu znikaly z eksportu ("ucina, myli dane" - dokladnie ten zglaszany objaw).
+// Ta funkcja pobiera KOMPLETNY zbior pasujacy do filtrow, stronami po 1000 wierszy.
+async function fetchAllPhotosForExport(filters: PhotoFilters): Promise<PhotoRow[]> {
+  const pageSize = 1000
+  let from = 0
+  const all: PhotoRow[] = []
+  for (;;) {
+    let query = supabase
+      .from('shift_stat_photos')
+      .select('*, machine:machines(name), operator:profiles!operator_id(full_name)')
+      .order('captured_at', { ascending: false })
+      .range(from, from + pageSize - 1)
+    if (filters.machineId) query = query.eq('machine_id', filters.machineId)
+    if (filters.moduleKey) query = query.eq('module_key', filters.moduleKey)
+    if (filters.shiftType) query = query.eq('shift_type', filters.shiftType)
+    if (filters.ocrStatus) query = query.eq('ocr_status', filters.ocrStatus)
+    if (filters.dateFrom) query = query.gte('shift_date', filters.dateFrom)
+    if (filters.dateTo) query = query.lte('shift_date', filters.dateTo)
+    const { data, error } = await query
+    if (error) throw error
+    const rows = (data ?? []) as PhotoRow[]
+    all.push(...rows)
+    if (rows.length < pageSize) break
+    from += pageSize
+  }
+  return all
+}
+
+// Jedna zmiana potrafi miec wiecej niz jedno zdjecie tego samego modulu (operator
+// powtorzyl zdjecie po nieudanym odczycie/pomylce) - bez odsiania tego w arkuszach
+// porownawczych ta sama zmiana pojawiala sie jako DWIE niemal identyczne kolumny obok
+// siebie ("2026-07-30 II Automat 4" x2), co dokladnie myli porownanie zmiana-do-zmiany.
+// Zostawiamy tylko najnowsze (najpozniej sfotografowane) zdjecie na zmiane/modul -
+// traktujemy je jako poprawke poprzedniego.
+function dedupeByShift(photos: PhotoRow[]): PhotoRow[] {
+  const byShift = new Map<string, PhotoRow>()
+  const withoutShift: PhotoRow[] = []
+  photos.forEach(photo => {
+    if (!photo.shift_id) { withoutShift.push(photo); return }
+    const existing = byShift.get(photo.shift_id)
+    if (!existing || new Date(photo.captured_at).getTime() > new Date(existing.captured_at).getTime()) {
+      byShift.set(photo.shift_id, photo)
+    }
+  })
+  return [...byShift.values(), ...withoutShift]
+}
+
 async function fetchMachines() {
   const { data } = await supabase.from('machines').select('*').is('deleted_at', null).order('name')
   return (data ?? []) as Machine[]
@@ -734,8 +784,10 @@ export default function ManagerShiftStatPhotos() {
         // Grupowanie po automacie, a dopiero w obrebie automatu chronologicznie (dzien po
         // dniu, zmiana po zmianie) - zeby sasiednie kolumny byly kolejnymi zmianami TEGO
         // SAMEGO automatu, a nie przeplatanka automat-automat wynikajaca z sortowania
-        // czysto po czasie zdjecia.
-        const sortedPhotos = modulePhotos.slice().sort((a, b) => {
+        // czysto po czasie zdjecia. dedupeByShift() usuwa duplikaty (dwa zdjecia tego
+        // samego modulu z tej samej zmiany - patrz komentarz przy funkcji), zeby jedna
+        // zmiana = jedna kolumna.
+        const sortedPhotos = dedupeByShift(modulePhotos).sort((a, b) => {
           const machineA = one(a.machine)?.name ?? ''
           const machineB = one(b.machine)?.name ?? ''
           if (machineA !== machineB) return machineA.localeCompare(machineB, 'pl', { numeric: true })
@@ -1166,6 +1218,44 @@ export default function ManagerShiftStatPhotos() {
     }
   }
 
+  // Siatka na ekranie (i przez to `filtered`/`exportTargets`) jest celowo ograniczona do
+  // 300 najnowszych zdjec dla wydajnosci UI. Do eksportu "wszystkie pasujace do filtrow"
+  // (brak recznego zaznaczenia) trzeba pobrac PELNY zbior z bazy, inaczej dluzszy okres
+  // po cichu traci starsze zmiany - to byl zrodlo zgloszonego "ucina, myli dane".
+  // Reczne zaznaczenie zdjec omija to pobranie - operuje na tym, co manager faktycznie
+  // wybral z widocznej listy.
+  const handleExportExcelClick = async () => {
+    if (exportTargets.length === 0) return
+    if (selectedIds.size > 0) {
+      await handleExportExcel(exportTargets, showCapturedTime)
+      return
+    }
+    setExportingExcel(true)
+    setExportError('')
+    try {
+      let full = await fetchAllPhotosForExport({
+        machineId: filterMachineId,
+        moduleKey: filterModule,
+        shiftType: filterShift,
+        ocrStatus: filterOcrStatus,
+        dateFrom,
+        dateTo
+      })
+      const q = search.trim().toLowerCase()
+      if (q) {
+        full = full.filter(p =>
+          (one(p.machine)?.name ?? '').toLowerCase().includes(q) ||
+          (one(p.operator)?.full_name ?? '').toLowerCase().includes(q) ||
+          (p.shift_date ?? '').includes(q)
+        )
+      }
+      await handleExportExcel(full, showCapturedTime)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Nie udało się pobrać pełnej listy zdjęć do eksportu.')
+      setExportingExcel(false)
+    }
+  }
+
   const filtered = photos.filter(p => {
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -1270,11 +1360,13 @@ export default function ManagerShiftStatPhotos() {
           Godzina zdjęcia w eksporcie
         </label>
         <button
-          onClick={() => handleExportExcel(exportTargets, showCapturedTime)}
+          onClick={handleExportExcelClick}
           disabled={exportingExcel || exportTargets.length === 0}
           className="shrink-0 rounded-xl border border-navy-600 bg-navy-900 px-4 py-2 text-sm font-bold text-navy-200 hover:border-brand/40 hover:text-brand transition-all disabled:opacity-40"
         >
-          {exportingExcel ? '⏳ Generowanie...' : `📊 Eksportuj do Excela (${exportTargets.length})`}
+          {exportingExcel
+            ? '⏳ Generowanie...'
+            : `📊 Eksportuj do Excela (${selectedIds.size > 0 ? `zaznaczone: ${exportTargets.length}` : 'wszystkie pasujące'})`}
         </button>
       </div>
 
