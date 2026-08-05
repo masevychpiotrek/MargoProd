@@ -215,6 +215,21 @@ type ShiftProblemInfo = {
   text: string
 }
 
+// Pojedyncze zdarzenie (jeden wpis godzinowy = jeden Downtime i/lub jeden Reject) -
+// zrodlo dla osobnego arkusza "Issue Log"/"Rejestr zdarzeń", zeby nie trzeba bylo
+// upychac wszystkich problemow zmiany w jednej komorce Shift Summary.
+type IssueLogEntry = {
+  id: string
+  shiftId: string
+  hourBlock: string
+  hourStart: number
+  type: ReportIssueType
+  category: string | null
+  stations: IssueStationAllocation[] | null
+  singleStation: string | null
+  reason: string
+}
+
 // Jedno, wspolne zrodlo danych per zmiana dla arkusza Shift Summary / Podsumowanie
 // zmiany - laczy czas pracy/alarmy/przestoje (WYLACZNIE z podsumowania zmiany, ten sam
 // autorytatywny zapis co reszta raportow w apce), produkcje/odrzut (suma z wpisow
@@ -232,13 +247,14 @@ function stationWeight(allocations: IssueStationAllocation[] | null | undefined,
 async function fetchShiftProblems(shiftIds: string[]) {
   const uniqueIds = [...new Set(shiftIds)]
   const result = new Map<string, ShiftProblemInfo>()
-  if (!uniqueIds.length) return result
+  const entries: IssueLogEntry[] = []
+  if (!uniqueIds.length) return { summaries: result, entries }
 
   const [{ data: shiftsData }, { data: reportsData }] = await Promise.all([
     supabase.from('shifts').select('id, summary_runtime_min, summary_alarm_min, summary_downtime_min, summary_notes').in('id', uniqueIds),
     supabase
       .from('hourly_reports')
-      .select('shift_id, hour_block, hour_start, downtime_reason, downtime_station, downtime_stations, reject_reason, reject_station, reject_stations, notes, good_count, reject_count')
+      .select('shift_id, hour_block, hour_start, downtime_reason, downtime_station, downtime_stations, downtime_category, reject_reason, reject_station, reject_stations, reject_category, notes, good_count, reject_count')
       .in('shift_id', uniqueIds)
       .is('deleted_at', null)
       .order('hour_start')
@@ -261,10 +277,32 @@ async function fetchShiftProblems(shiftIds: string[]) {
     if (r.downtime_reason?.trim()) {
       segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Downtime]: ${r.downtime_reason.trim()}` })
       stationWeight(r.downtime_stations, r.downtime_station).forEach(({ station, weight }) => bumpStation(r.shift_id, station, weight))
+      entries.push({
+        id: `${r.shift_id}-d-${r.hour_start}`,
+        shiftId: r.shift_id,
+        hourBlock: r.hour_block,
+        hourStart: r.hour_start,
+        type: 'downtime',
+        category: r.downtime_category ?? null,
+        stations: r.downtime_stations ?? null,
+        singleStation: r.downtime_station ?? null,
+        reason: r.downtime_reason.trim()
+      })
     }
     if (r.reject_reason?.trim()) {
       segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Reject]: ${r.reject_reason.trim()}` })
       stationWeight(r.reject_stations, r.reject_station).forEach(({ station, weight }) => bumpStation(r.shift_id, station, weight))
+      entries.push({
+        id: `${r.shift_id}-r-${r.hour_start}`,
+        shiftId: r.shift_id,
+        hourBlock: r.hour_block,
+        hourStart: r.hour_start,
+        type: 'reject',
+        category: r.reject_category ?? null,
+        stations: r.reject_stations ?? null,
+        singleStation: r.reject_station ?? null,
+        reason: r.reject_reason.trim()
+      })
     }
     if (r.notes?.trim()) segs.push({ hourStart: r.hour_start, text: `${r.hour_block} [Note]: ${r.notes.trim()}` })
     segmentsByShift.set(r.shift_id, segs)
@@ -296,7 +334,7 @@ async function fetchShiftProblems(shiftIds: string[]) {
     })
   })
 
-  return result
+  return { summaries: result, entries }
 }
 
 // Tlumaczenie tresci "Problem summary" na potrzeby arkusza EN - to jedyne miejsce w
@@ -408,6 +446,21 @@ const HOURLY_CHART_LABELS: Record<ExportLang, { title: string; pieces: string; e
   pl: { title: 'Wydajność godzinowa', pieces: 'Sztuki (śr.)', efficiency: 'Wydajność %', piecesAxis: 'Sztuki', effAxis: 'Wydajność %' }
 }
 
+// Biale tlo rysowane recznie PRZED kazda klatka wykresu - potrzebne, bo domyslnie
+// canvas jest przezroczysty, a eksport idzie jako JPEG (bez kanalu alfa; przezroczystosc
+// zamienilaby sie w czarne tlo).
+const whiteBackgroundPlugin = {
+  id: 'whiteBackground',
+  beforeDraw: (chart: Chart) => {
+    const { ctx, width, height } = chart
+    ctx.save()
+    ctx.globalCompositeOperation = 'destination-over'
+    ctx.fillStyle = '#ffffff'
+    ctx.fillRect(0, 0, width, height)
+    ctx.restore()
+  }
+}
+
 function renderHourlyPerformanceChart(machineName: string, stats: MachineHourStat[], lang: ExportLang): string {
   const labels = HOURLY_CHART_LABELS[lang]
   const canvas = document.createElement('canvas')
@@ -435,9 +488,15 @@ function renderHourlyPerformanceChart(machineName: string, stats: MachineHourSta
         }
       ]
     },
+    // devicePixelRatio zablokowany na 1 - bez tego Chart.js skaluje rzeczywisty bitmap
+    // wykresu wg skalowania ekranu managera (np. 150%/200% na laptopie), co przy 10+
+    // wykresach w jednym pliku potrafilo wielokrotnie zwiekszyc wage eksportu (to byl
+    // glowny powod "za ciezkiego"/zawieszajacego Eksplorator pliku przy eksporcie
+    // dluzszego okresu - patrz tez zmiana formatu na JPEG ponizej).
     options: {
       responsive: false,
       animation: false,
+      devicePixelRatio: 1,
       plugins: {
         legend: { display: true, position: 'bottom' },
         title: { display: true, text: `${machineName} - ${labels.title}`, font: { size: 16 } }
@@ -446,11 +505,15 @@ function renderHourlyPerformanceChart(machineName: string, stats: MachineHourSta
         y: { beginAtZero: true, position: 'left', title: { display: true, text: labels.piecesAxis } },
         y1: { beginAtZero: true, position: 'right', grid: { display: false }, title: { display: true, text: labels.effAxis }, ticks: { callback: value => `${value}%` } }
       }
-    }
+    },
+    plugins: [whiteBackgroundPlugin]
   })
-  const base64 = chart.toBase64Image()
+  // JPEG zamiast PNG - dla wykresu z plaskimi kolorami i tekstem PNG bywa kilkukrotnie
+  // ciezszy niz JPEG o jakosci 0.85, ktora dla tego typu grafiki jest wizualnie
+  // nieodrozniona, a znaczaco zmniejsza rozmiar calego pliku przy wielu automatach.
+  const base64 = chart.toBase64Image('image/jpeg', 0.85)
   chart.destroy()
-  return base64.replace(/^data:image\/png;base64,/, '')
+  return base64.replace(/^data:image\/jpeg;base64,/, '')
 }
 
 export default function ManagerShiftStatPhotos() {
@@ -611,12 +674,14 @@ export default function ManagerShiftStatPhotos() {
       const hourlyDateFrom = shiftDates.length ? shiftDates.reduce((a, b) => (a < b ? a : b)) : ''
       const hourlyDateTo = shiftDates.length ? shiftDates.reduce((a, b) => (a > b ? a : b)) : ''
 
-      const [ExcelJS, allReadings, descriptionByShift, { stats: hourlyStatsByMachine, classifications: hourlyStatsClassifications }] = await Promise.all([
+      const [ExcelJS, allReadings, shiftProblems, { stats: hourlyStatsByMachine, classifications: hourlyStatsClassifications }] = await Promise.all([
         loadExcelJS(),
         fetchReadingsForPhotos(list.map(p => p.id)),
         fetchShiftProblems(shiftIds),
         fetchMachineHourlyStats(machineIds, hourlyDateFrom, hourlyDateTo)
       ])
+      const descriptionByShift = shiftProblems.summaries
+      const issueLogEntries = shiftProblems.entries
       const readingsByPhoto = new Map<string, ShiftStatReading[]>()
       allReadings.forEach(r => {
         const arr = readingsByPhoto.get(r.photo_id) ?? []
@@ -624,9 +689,15 @@ export default function ManagerShiftStatPhotos() {
         readingsByPhoto.set(r.photo_id, arr)
       })
 
-      const translationItems = [...descriptionByShift.entries()]
-        .filter(([, info]) => info.text)
-        .map(([shiftId, info]) => ({ id: shiftId, text: info.text }))
+      // Jedno wspolne (batchowe) tlumaczenie PL->EN dla calego eksportu - obejmuje zarowno
+      // zbiorczy opis "co sie dzialo" w Shift Summary, jak i pojedyncze wpisy w Issue Log,
+      // zeby nie odpalac osobnego wywolania AI dla kazdego zdarzenia z osobna.
+      const translationItems = [
+        ...[...descriptionByShift.entries()]
+          .filter(([, info]) => info.text)
+          .map(([shiftId, info]) => ({ id: shiftId, text: info.text })),
+        ...issueLogEntries.map(e => ({ id: e.id, text: e.reason }))
+      ]
       const translatedTextByShift = await translateShiftSummaries(translationItems)
 
       const wb = new ExcelJS.Workbook()
@@ -905,6 +976,107 @@ export default function ManagerShiftStatPhotos() {
       buildShiftSummarySheet('Shift Summary', 'en')
       buildShiftSummarySheet('Podsumowanie zmiany', 'pl')
 
+      // Issue Log / Rejestr zdarzeń - kazdy pojedynczy zglaszany problem (Downtime/Reject)
+      // jako osobny wiersz, zamiast upychania wszystkich zdarzen zmiany w jednej komorce
+      // Shift Summary. Shift Summary zostaje czytelnym przegladem "jedna zmiana = jeden
+      // wiersz"; ten arkusz to warstwa szczegolowa do dalszej analizy/filtrowania.
+      const ISSUE_LOG_LABELS: Record<ExportLang, { title: string; columns: string[]; noData: string; typeDowntime: string; typeReject: string }> = {
+        en: {
+          title: 'Issue Log - every reported downtime and reject',
+          columns: ['Date', 'Shift', 'Machine', 'Hour', 'Type', 'Category', 'Station', 'Description'],
+          noData: 'No issues reported for this range.',
+          typeDowntime: 'Downtime',
+          typeReject: 'Reject'
+        },
+        pl: {
+          title: 'Rejestr zdarzeń - wszystkie zgłoszone przestoje i odrzuty',
+          columns: ['Data', 'Zmiana', 'Automat', 'Godzina', 'Typ', 'Kategoria', 'Stacja', 'Opis'],
+          noData: 'Brak zgłoszonych problemów w tym zakresie.',
+          typeDowntime: 'Postój',
+          typeReject: 'Odrzut'
+        }
+      }
+
+      const buildIssueLogSheet = (sheetName: string, lang: ExportLang) => {
+        const labels = ISSUE_LOG_LABELS[lang]
+        const logWs = wb.addWorksheet(sheetName)
+        logWs.mergeCells(1, 1, 1, labels.columns.length)
+        const logTitle = logWs.getCell(1, 1)
+        logTitle.value = labels.title
+        logTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+        logTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        logTitle.alignment = { horizontal: 'center', vertical: 'middle' }
+        logWs.getRow(1).height = 26
+
+        const logHeaderRow = 3
+        const logColumnWidths = [13, 9, 20, 9, 11, 26, 20, 70]
+        labels.columns.forEach((label, ci) => {
+          const cell = logWs.getCell(logHeaderRow, ci + 1)
+          cell.value = label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+          logWs.getColumn(ci + 1).width = logColumnWidths[ci]
+        })
+
+        const logRows = issueLogEntries
+          .map(entry => {
+            const first = photosByShift.get(entry.shiftId)?.[0]
+            const stationText = entry.stations?.length
+              ? entry.stations.map(s => stationLabelFor(s.station, lang)).join(', ')
+              : stationLabelFor(entry.singleStation, lang)
+            const description = (lang === 'en' ? translatedTextByShift.get(entry.id) : undefined) || entry.reason
+            return {
+              date: first?.shift_date ?? '',
+              shiftType: first?.shift_type ?? '',
+              machineName: one(first?.machine)?.name ?? '—',
+              hourBlock: entry.hourBlock,
+              hourStart: entry.hourStart,
+              typeLabel: entry.type === 'downtime' ? labels.typeDowntime : labels.typeReject,
+              category: entry.category ? classificationLabel(entry.type, entry.category, lang) : '—',
+              stationText,
+              description
+            }
+          })
+          .sort((a, b) =>
+            a.date.localeCompare(b.date) ||
+            a.machineName.localeCompare(b.machineName) ||
+            a.shiftType.localeCompare(b.shiftType) ||
+            a.hourStart - b.hourStart
+          )
+
+        if (!logRows.length) {
+          const cell = logWs.getCell(logHeaderRow + 1, 1)
+          cell.value = labels.noData
+          cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
+          return
+        }
+
+        let logRow = logHeaderRow + 1
+        logRows.forEach(r => {
+          const cells: (string | number)[] = [
+            r.date, r.shiftType, r.machineName, r.hourBlock, r.typeLabel, r.category, r.stationText, r.description
+          ]
+          cells.forEach((value, ci) => {
+            const cell = logWs.getCell(logRow, ci + 1)
+            cell.value = value
+            cell.font = { name: 'Arial', size: 9 }
+            cell.alignment = { wrapText: ci === 7, vertical: 'top' }
+            cell.border = {
+              top: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              bottom: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              left: { style: 'thin', color: { argb: 'FFD1D5DB' } },
+              right: { style: 'thin', color: { argb: 'FFD1D5DB' } }
+            }
+          })
+          logRow += 1
+        })
+        logWs.views = [{ state: 'frozen', ySplit: logHeaderRow }]
+      }
+
+      buildIssueLogSheet('Issue Log', 'en')
+      buildIssueLogSheet('Rejestr zdarzeń', 'pl')
+
       const zestawPhotos = list.filter(p => p.module_key === 'zestaw')
       const komoraPhotos = list.filter(p => p.module_key === 'komora')
 
@@ -932,7 +1104,7 @@ export default function ManagerShiftStatPhotos() {
           const labels = CLASSIFICATION_LABELS[lang]
           const sheetSuffix = lang === 'en' ? 'Hourly Performance' : 'Wydajność godzinowa'
           const base64 = renderHourlyPerformanceChart(machineName, stats, lang)
-          const imageId = wb.addImage({ base64, extension: 'png' })
+          const imageId = wb.addImage({ base64, extension: 'jpeg' })
           const chartWs = wb.addWorksheet(sanitizeSheetName(`${machineName} - ${sheetSuffix}`))
           chartWs.addImage(imageId, 'A1:L24')
 
