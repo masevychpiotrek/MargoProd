@@ -211,19 +211,39 @@ async function fetchAllPhotosForExport(filters: PhotoFilters): Promise<PhotoRow[
 // powtorzyl zdjecie po nieudanym odczycie/pomylce) - bez odsiania tego w arkuszach
 // porownawczych ta sama zmiana pojawiala sie jako DWIE niemal identyczne kolumny obok
 // siebie ("2026-07-30 II Automat 4" x2), co dokladnie myli porownanie zmiana-do-zmiany.
-// Zostawiamy tylko najnowsze (najpozniej sfotografowane) zdjecie na zmiane/modul -
-// traktujemy je jako poprawke poprzedniego.
-function dedupeByShift(photos: PhotoRow[]): PhotoRow[] {
-  const byShift = new Map<string, PhotoRow>()
+//
+// WAZNE: zwykle odrzucenie starszego zdjecia w calosci ("zostaw tylko najnowsze") bylo
+// bledem - dwa zdjecia tej samej zmiany czesto maja NIEPOKRYWAJACE sie zestawy
+// odczytanych etykiet (inny kadr/jakosc OCR za kazdym razem), wiec odrzucajac cale
+// starsze zdjecie gubilismy realne wiersze metryk, ktore byly TYLKO na nim (dokladnie
+// to zglosil manager: "ucieto wszystko po wierszu 31"). Zamiast wybierac jedno zdjecie,
+// SCALAMY odczyty ze wszystkich zdjec danej zmiany (nowsze nadpisuje starsze przy tej
+// samej etykiecie, ale unikalne etykiety ze starszego zdjecia zostaja) - kolumna
+// nadal jedna na zmiane, ale bez utraty danych.
+type ShiftPhotoGroup = { representative: PhotoRow; readings: Map<string, ShiftStatReading> }
+
+function groupPhotosByShift(photos: PhotoRow[], readingsByPhoto: Map<string, ShiftStatReading[]>): ShiftPhotoGroup[] {
+  const byShift = new Map<string, PhotoRow[]>()
   const withoutShift: PhotoRow[] = []
   photos.forEach(photo => {
     if (!photo.shift_id) { withoutShift.push(photo); return }
-    const existing = byShift.get(photo.shift_id)
-    if (!existing || new Date(photo.captured_at).getTime() > new Date(existing.captured_at).getTime()) {
-      byShift.set(photo.shift_id, photo)
-    }
+    const arr = byShift.get(photo.shift_id) ?? []
+    arr.push(photo)
+    byShift.set(photo.shift_id, arr)
   })
-  return [...byShift.values(), ...withoutShift]
+
+  const mergeGroup = (group: PhotoRow[]): ShiftPhotoGroup => {
+    const sorted = group.slice().sort((a, b) => new Date(a.captured_at).getTime() - new Date(b.captured_at).getTime())
+    const readings = new Map<string, ShiftStatReading>()
+    sorted.forEach(photo => {
+      (readingsByPhoto.get(photo.id) ?? []).forEach(r => readings.set(r.metric_label, r))
+    })
+    return { representative: sorted[sorted.length - 1], readings }
+  }
+
+  const groups = [...byShift.values()].map(mergeGroup)
+  withoutShift.forEach(photo => groups.push(mergeGroup([photo])))
+  return groups
 }
 
 async function fetchMachines() {
@@ -839,17 +859,17 @@ export default function ManagerShiftStatPhotos() {
         // Grupowanie po automacie, a dopiero w obrebie automatu chronologicznie (dzien po
         // dniu, zmiana po zmianie) - zeby sasiednie kolumny byly kolejnymi zmianami TEGO
         // SAMEGO automatu, a nie przeplatanka automat-automat wynikajaca z sortowania
-        // czysto po czasie zdjecia. dedupeByShift() usuwa duplikaty (dwa zdjecia tego
-        // samego modulu z tej samej zmiany - patrz komentarz przy funkcji), zeby jedna
-        // zmiana = jedna kolumna.
-        const sortedPhotos = dedupeByShift(modulePhotos).sort((a, b) => {
-          const machineA = one(a.machine)?.name ?? ''
-          const machineB = one(b.machine)?.name ?? ''
+        // czysto po czasie zdjecia. groupPhotosByShift() SCALA odczyty wszystkich zdjec
+        // tej samej zmiany w jedna kolumne (patrz komentarz przy funkcji) - jedna zmiana =
+        // jedna kolumna, bez utraty odczytow, ktore byly tylko na jednym z kilku zdjec.
+        const sortedGroups = groupPhotosByShift(modulePhotos, readingsByPhoto).sort((a, b) => {
+          const machineA = one(a.representative.machine)?.name ?? ''
+          const machineB = one(b.representative.machine)?.name ?? ''
           if (machineA !== machineB) return machineA.localeCompare(machineB, 'pl', { numeric: true })
-          return (a.captured_at ?? '').localeCompare(b.captured_at ?? '')
+          return (a.representative.captured_at ?? '').localeCompare(b.representative.captured_at ?? '')
         })
 
-        ws.mergeCells(1, 1, 1, Math.max(sortedPhotos.length + 1, 2))
+        ws.mergeCells(1, 1, 1, Math.max(sortedGroups.length + 1, 2))
         const title = ws.getCell(1, 1)
         title.value = titleText
         title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
@@ -857,7 +877,7 @@ export default function ManagerShiftStatPhotos() {
         title.alignment = { horizontal: 'center', vertical: 'middle' }
         ws.getRow(1).height = 26
 
-        if (!sortedPhotos.length) {
+        if (!sortedGroups.length) {
           const cell = ws.getCell(3, 1)
           cell.value = labels.noData
           cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
@@ -869,7 +889,7 @@ export default function ManagerShiftStatPhotos() {
         const metricsStartRow = metaHeaderRow + labels.rowLabels.length + 1
 
         ws.getColumn(1).width = 26
-        sortedPhotos.forEach((_, ci) => { ws.getColumn(firstDataCol + ci).width = 18 })
+        sortedGroups.forEach((_, ci) => { ws.getColumn(firstDataCol + ci).width = 18 })
 
         labels.rowLabels.forEach((label, ri) => {
           const cell = ws.getCell(metaHeaderRow + ri, 1)
@@ -879,20 +899,13 @@ export default function ManagerShiftStatPhotos() {
           cell.alignment = { vertical: 'middle' }
         })
 
-        const readingMapByPhoto = new Map<string, Map<string, ShiftStatReading>>()
-        sortedPhotos.forEach(photo => {
-          const map = new Map<string, ShiftStatReading>()
-          ;(readingsByPhoto.get(photo.id) ?? []).forEach(r => map.set(r.metric_label, r))
-          readingMapByPhoto.set(photo.id, map)
-        })
-
         // Gruba zlota linia na koncu bloku kolumn kazdego automatu - wizualnie oddziela
         // "Automat 3, dzien po dniu, zmiana po zmianie" od "Automat 4, ...".
         const groupEndBorder = { style: 'medium' as const, color: { argb: GOLD } }
-        const isLastOfMachineGroup = sortedPhotos.map((photo, ci) => {
-          const next = sortedPhotos[ci + 1]
+        const isLastOfMachineGroup = sortedGroups.map((group, ci) => {
+          const next = sortedGroups[ci + 1]
           if (!next) return false
-          return (one(photo.machine)?.name ?? '') !== (one(next.machine)?.name ?? '')
+          return (one(group.representative.machine)?.name ?? '') !== (one(next.representative.machine)?.name ?? '')
         })
 
         // Niebieska przerywana linia na poczatku bloku kolumn kazdego nowego dnia (w
@@ -900,14 +913,15 @@ export default function ManagerShiftStatPhotos() {
         // sie od razu wzrokowo zlapac, gdzie konczy sie jeden dzien a zaczyna kolejny przy
         // porownywaniu zmiana-po-zmianie.
         const dayBreakBorder = { style: 'dashed' as const, color: { argb: 'FF3B82F6' } }
-        const isNewDayWithinGroup = sortedPhotos.map((photo, ci) => {
+        const isNewDayWithinGroup = sortedGroups.map((group, ci) => {
           if (ci === 0) return false
-          const prev = sortedPhotos[ci - 1]
-          const sameMachine = (one(photo.machine)?.name ?? '') === (one(prev.machine)?.name ?? '')
-          return sameMachine && photo.shift_date !== prev.shift_date
+          const prev = sortedGroups[ci - 1]
+          const sameMachine = (one(group.representative.machine)?.name ?? '') === (one(prev.representative.machine)?.name ?? '')
+          return sameMachine && group.representative.shift_date !== prev.representative.shift_date
         })
 
-        sortedPhotos.forEach((photo, ci) => {
+        sortedGroups.forEach((group, ci) => {
+          const photo = group.representative
           const col = firstDataCol + ci
           const metaValues = [
             photo.shift_date ?? '',
@@ -932,8 +946,8 @@ export default function ManagerShiftStatPhotos() {
         // Kolejnosc wierszy odczytow = kolejnosc na ekranie PLC (najnizszy sort_order
         // sposrod wszystkich zdjec, w ktorych dana etykieta wystapila).
         const metricOrder = new Map<string, number>()
-        sortedPhotos.forEach(photo => {
-          (readingsByPhoto.get(photo.id) ?? []).forEach(r => {
+        sortedGroups.forEach(group => {
+          group.readings.forEach(r => {
             const current = metricOrder.get(r.metric_label)
             if (current === undefined || r.sort_order < current) metricOrder.set(r.metric_label, r.sort_order)
           })
@@ -951,9 +965,9 @@ export default function ManagerShiftStatPhotos() {
           labelCell.alignment = { vertical: 'middle' }
           labelCell.border = THIN_BORDER
 
-          sortedPhotos.forEach((photo, ci) => {
+          sortedGroups.forEach((group, ci) => {
             const col = firstDataCol + ci
-            const reading = readingMapByPhoto.get(photo.id)?.get(label)
+            const reading = group.readings.get(label)
             const cell = ws.getCell(row, col)
             cell.value = reading ? (reading.corrected_value ?? reading.metric_value) : ''
             cell.font = { name: 'Arial', size: 9 }
