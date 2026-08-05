@@ -419,20 +419,39 @@ function chunkTranslationItems(items: { id: string; text: string }[]): { id: str
   return batches
 }
 
-async function translateShiftSummaries(items: { id: string; text: string }[]): Promise<Map<string, string>> {
+type TranslateOutcome = { map: Map<string, string>; errorMessage: string | null }
+
+// UWAGA: edge function zawsze zwraca HTTP 200 (jej helper json() ma domyslny status
+// 200 nawet dla { error: "..." }), wiec `error` z supabase.functions.invoke() NIGDY nie
+// zlapie jej wewnetrznych bledow (brak uprawnien/klucza AI/rate-limit/zly JSON od
+// modelu) - invoke() traktuje kazde 2xx jako sukces. Trzeba jawnie sprawdzic
+// `data?.error`, inaczej taki blad ginie po cichu (dokladnie to sie dzialo - eksport
+// "dzialal", ale zwracal 0 tlumaczen bez zadnego widocznego powodu).
+async function translateShiftSummaries(items: { id: string; text: string }[]): Promise<TranslateOutcome> {
   const result = new Map<string, string>()
-  if (!items.length) return result
+  let errorMessage: string | null = null
+  if (!items.length) return { map: result, errorMessage }
   for (const batch of chunkTranslationItems(items)) {
     try {
       const { data, error } = await supabase.functions.invoke('translate-shift-summaries', { body: { items: batch } })
-      if (error) continue
+      if (error) {
+        errorMessage = error.message || 'Błąd wywołania funkcji tłumaczenia.'
+        console.error('[translate-shift-summaries] invoke error:', error)
+        continue
+      }
+      if (data?.error) {
+        errorMessage = String(data.error)
+        console.error('[translate-shift-summaries] edge function error:', data.error)
+        continue
+      }
       const translations = (data?.translations ?? []) as { id: string; text: string }[]
       translations.forEach(t => result.set(t.id, t.text))
-    } catch {
-      // pojedyncza paczka bez tlumaczenia nie blokuje reszty eksportu
+    } catch (e) {
+      errorMessage = e instanceof Error ? e.message : 'Nieznany błąd połączenia.'
+      console.error('[translate-shift-summaries] exception:', e)
     }
   }
-  return result
+  return { map: result, errorMessage }
 }
 
 function formatMinutes(value: number): string {
@@ -778,7 +797,13 @@ export default function ManagerShiftStatPhotos() {
           .map(([shiftId, info]) => ({ id: shiftId, text: info.text })),
         ...issueLogEntries.map(e => ({ id: e.id, text: e.reason }))
       ]
-      const translatedTextByShift = await translateShiftSummaries(translationItems)
+      const { map: translatedTextByShift, errorMessage: translationErrorMessage } = await translateShiftSummaries(translationItems)
+      // Nieudane tlumaczenie NIE blokuje eksportu (arkusze EN po prostu spadaja na
+      // polski tekst - patrz uzycie translatedTextByShift nizej), ale pokazujemy
+      // powod na goraco, zamiast pozwolic mu ginac po cichu jak dotychczas.
+      if (translationErrorMessage) {
+        setExportError(`Plik gotowy, ale tłumaczenie na EN nie powiodło się (arkusze EN pokazują polski tekst): ${translationErrorMessage}`)
+      }
 
       const wb = new ExcelJS.Workbook()
       wb.creator = 'MargoLine MES'
