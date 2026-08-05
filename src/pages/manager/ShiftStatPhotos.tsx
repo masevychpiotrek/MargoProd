@@ -387,20 +387,50 @@ async function fetchShiftProblems(shiftIds: string[]) {
   return { summaries: result, entries }
 }
 
-// Tlumaczenie tresci "Problem summary" na potrzeby arkusza EN - to jedyne miejsce w
-// eksporcie, gdzie surowy tekst operatora trafia na arkusz jezykowy inny niz polski,
-// wiec bez tego arkusz EN bylby bezuzyteczny dla odbiorcy nie znajacego polskiego.
-// Nie krytyczne dla reszty eksportu - w razie bledu arkusz EN spada na oryginalny tekst.
+// Tlumaczenie tresci "Problem summary" (Shift Summary) i pojedynczych zdarzen (Issue
+// Log) na potrzeby arkuszy EN - to jedyne miejsce w eksporcie, gdzie surowy tekst
+// operatora trafia na arkusz jezykowy inny niz polski, wiec bez tego arkusze EN bylyby
+// bezuzyteczne dla odbiorcy nie znajacego polskiego.
+//
+// Edge function ma twardy limit na WYWOLANIE: max 500 pozycji / 80 000 znakow (patrz
+// supabase/functions/translate-shift-summaries/index.ts) - przy dluzszym eksporcie
+// (Shift Summary + Issue Log razem) laczna tresc do przetlumaczenia latwo to
+// przekracza, a przekroczenie 80k znakow odrzuca CALE wywolanie na raz (blad -> pusta
+// mapa -> caly arkusz EN spada na polski tekst). Dzielimy wiec na paczki bezpiecznie
+// pod limitem i wolamy funkcje kilka razy - jedna zbyt duza/nieudana paczka nie kasuje
+// tlumaczen z pozostalych.
+const TRANSLATE_BATCH_MAX_ITEMS = 400
+const TRANSLATE_BATCH_MAX_CHARS = 60_000
+
+function chunkTranslationItems(items: { id: string; text: string }[]): { id: string; text: string }[][] {
+  const batches: { id: string; text: string }[][] = []
+  let current: { id: string; text: string }[] = []
+  let currentChars = 0
+  items.forEach(item => {
+    if (current.length && (current.length >= TRANSLATE_BATCH_MAX_ITEMS || currentChars + item.text.length > TRANSLATE_BATCH_MAX_CHARS)) {
+      batches.push(current)
+      current = []
+      currentChars = 0
+    }
+    current.push(item)
+    currentChars += item.text.length
+  })
+  if (current.length) batches.push(current)
+  return batches
+}
+
 async function translateShiftSummaries(items: { id: string; text: string }[]): Promise<Map<string, string>> {
   const result = new Map<string, string>()
   if (!items.length) return result
-  try {
-    const { data, error } = await supabase.functions.invoke('translate-shift-summaries', { body: { items } })
-    if (error) return result
-    const translations = (data?.translations ?? []) as { id: string; text: string }[]
-    translations.forEach(t => result.set(t.id, t.text))
-  } catch {
-    // brak tlumaczenia nie blokuje eksportu
+  for (const batch of chunkTranslationItems(items)) {
+    try {
+      const { data, error } = await supabase.functions.invoke('translate-shift-summaries', { body: { items: batch } })
+      if (error) continue
+      const translations = (data?.translations ?? []) as { id: string; text: string }[]
+      translations.forEach(t => result.set(t.id, t.text))
+    } catch {
+      // pojedyncza paczka bez tlumaczenia nie blokuje reszty eksportu
+    }
   }
   return result
 }
@@ -1218,15 +1248,30 @@ export default function ManagerShiftStatPhotos() {
     }
   }
 
+  const filtered = photos.filter(p => {
+    const q = search.trim().toLowerCase()
+    if (!q) return true
+    return (one(p.machine)?.name ?? '').toLowerCase().includes(q) ||
+      (one(p.operator)?.full_name ?? '').toLowerCase().includes(q) ||
+      (p.shift_date ?? '').includes(q)
+  })
+
+  // Pusty wybor = dzialaj na wszystkim co widoczne po filtrze (jak dotychczas);
+  // zaznaczenie konkretnych zdjec zawezalo dzialanie tylko do nich.
+  const exportTargets = selectedIds.size > 0 ? filtered.filter(p => selectedIds.has(p.id)) : filtered
+
   // Siatka na ekranie (i przez to `filtered`/`exportTargets`) jest celowo ograniczona do
   // 300 najnowszych zdjec dla wydajnosci UI. Do eksportu "wszystkie pasujace do filtrow"
-  // (brak recznego zaznaczenia) trzeba pobrac PELNY zbior z bazy, inaczej dluzszy okres
-  // po cichu traci starsze zmiany - to byl zrodlo zgloszonego "ucina, myli dane".
-  // Reczne zaznaczenie zdjec omija to pobranie - operuje na tym, co manager faktycznie
-  // wybral z widocznej listy.
+  // trzeba pobrac PELNY zbior z bazy, inaczej dluzszy okres po cichu traci starsze zmiany -
+  // to byl zrodlo zgloszonego "ucina, myli dane". Sam brak recznego zaznaczenia to za malo
+  // zeby to wykryc: przycisk "Zaznacz wszystkie widoczne" tez zapelnia selectedIds (samymi
+  // id z tej samej capowanej listy!), wiec bez tego warunku wciaz szedl przez stara,
+  // capowana sciezke. Prawdziwie "reczny, czastkowy" wybor to tylko taki, ktory jest
+  // WEZSZY niz to, co aktualnie widac po filtrze - inaczej zawsze robimy pelne pobranie.
+  const isPartialManualSelection = selectedIds.size > 0 && selectedIds.size < filtered.length
   const handleExportExcelClick = async () => {
     if (exportTargets.length === 0) return
-    if (selectedIds.size > 0) {
+    if (isPartialManualSelection) {
       await handleExportExcel(exportTargets, showCapturedTime)
       return
     }
@@ -1255,18 +1300,6 @@ export default function ManagerShiftStatPhotos() {
       setExportingExcel(false)
     }
   }
-
-  const filtered = photos.filter(p => {
-    const q = search.trim().toLowerCase()
-    if (!q) return true
-    return (one(p.machine)?.name ?? '').toLowerCase().includes(q) ||
-      (one(p.operator)?.full_name ?? '').toLowerCase().includes(q) ||
-      (p.shift_date ?? '').includes(q)
-  })
-
-  // Pusty wybor = dzialaj na wszystkim co widoczne po filtrze (jak dotychczas);
-  // zaznaczenie konkretnych zdjec zawezalo dzialanie tylko do nich.
-  const exportTargets = selectedIds.size > 0 ? filtered.filter(p => selectedIds.has(p.id)) : filtered
 
   const filtersActive = filterMachineId || filterModule || filterShift || filterOcrStatus || dateFrom || dateTo
   const clearFilters = () => {
