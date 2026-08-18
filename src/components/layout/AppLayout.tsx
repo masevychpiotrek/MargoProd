@@ -44,6 +44,7 @@ const NAV_OPERATOR = [
   { to: '/operator/tasks',   label: 'Zadania',      icon: Icons.tasks },
   { to: '/operator/production-jobs', label: 'Zlecenie produkcyjne', icon: Icons.orders },
   { to: '/operator/complaint', label: 'Reklamacja wewnętrzna', icon: Icons.complaint },
+  { to: '/operator/changes', label: 'Zmiany i problemy', icon: Icons.failure },
   { to: '/operator/password', label: 'Zmien haslo',  icon: Icons.password },
   { to: '/operator/history', label: 'Historia',     icon: Icons.history },
   { to: '/tpm',              label: '── TPM/PM IS PRO', icon: Icons.machines },
@@ -64,6 +65,7 @@ const NAV_MANAGER = [
   { to: '/manager/production-jobs', label: 'Zlecenia produkcyjne', icon: Icons.orders },
   { to: '/manager/shift-stat-photos', label: 'Statystyki zmianowe', icon: Icons.camera },
   { to: '/manager/complaints', label: 'Reklamacje wewnętrzne', icon: Icons.complaint },
+  { to: '/manager/changes',   label: 'Zmiany i problemy', icon: Icons.failure },
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
   { to: '/syringe/reports',      label: '── Raporty SA',     icon: Icons.export },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
@@ -113,6 +115,7 @@ const NAV_SYRINGE_OPERATOR = [
 
 const NAV_SPECIALIST = [
   { to: '/specialist', label: 'Zgłoszenia awarii', icon: Icons.failure, end: true },
+  { to: '/specialist/changes', label: 'Zmiany i problemy', icon: Icons.failure },
   { to: '/tpm/issues', label: 'TPM — Zgłoszenia',  icon: Icons.machines },
   { to: '/tpm/pm',     label: 'TPM — Karty PM',     icon: Icons.tasks },
   { to: '/tpm/parameters', label: 'TPM — Parametry', icon: Icons.targets },
@@ -143,6 +146,7 @@ const NAV_ADMIN = [
   { to: '/manager/day-report',  label: '── Raport dnia',      icon: Icons.report },
   { to: '/manager/export',      label: '── Eksport',          icon: Icons.export },
   { to: '/specialist',          label: '── Awarie (spec.)',   icon: Icons.failure },
+  { to: '/manager/changes',     label: '── Zmiany i problemy', icon: Icons.failure },
   { to: '/syringe/supervisor',  label: '── Strzykawki SA',    icon: Icons.machines },
   { to: '/syringe/history',     label: '── Historia SA',      icon: Icons.history },
 ]

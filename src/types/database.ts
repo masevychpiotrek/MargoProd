@@ -222,6 +222,48 @@ export interface FailureReport {
   assignee?:        Profile | null
 }
 
+// ---- Transparentność Zmian i Problemów (change_log / issue_log) ----
+
+export type ChangeLogType     = 'parameter' | 'part' | 'software' | 'procedure'
+export type IssueLogStatus    = 'new' | 'in_progress' | 'waiting_part' | 'closed'
+export type IssueLogPriority  = 'low' | 'medium' | 'critical'
+
+export interface ChangeLogEntry {
+  id:              string
+  created_at:      string
+  machine_id:      string
+  station:         string | null
+  user_id:         string
+  change_type:     ChangeLogType
+  value_before:    string | null
+  value_after:     string | null
+  reason:          string
+  approved_by:     string | null
+  attachment_url:  string | null
+  // joined
+  machine?:        Machine
+  user?:           Profile
+  approver?:       Profile | null
+}
+
+export interface IssueLogEntry {
+  id:              string
+  created_at:      string
+  machine_id:      string
+  station:         string | null
+  reported_by:     string
+  description:     string
+  status:          IssueLogStatus
+  priority:        IssueLogPriority
+  assigned_to:     string | null
+  closed_at:       string | null
+  resolution:      string | null
+  // joined
+  machine?:        Machine
+  reporter?:       Profile
+  assignee?:       Profile | null
+}
+
 // ---- Form / UI types ----
 
 export interface HourlyReportFormData {

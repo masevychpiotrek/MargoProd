@@ -32,6 +32,7 @@ const AdminTargets       = lazy(() => import('@/pages/admin/Targets'))
 const AdminSchedules     = lazy(() => import('@/pages/admin/Schedules'))
 const AdminReset         = lazy(() => import('@/pages/admin/Reset'))
 const SpecialistDashboard = lazy(() => import('@/pages/Specialist/Dashboard'))
+const ChangeIssueLog      = lazy(() => import('@/pages/Specialist/ChangeIssueLog'))
 
 // ── SYRINGE OPERATOR MODULE ──
 const SyringeSessionStart  = lazy(() => import('@/pages/syringe/SessionStart'))
@@ -199,7 +200,8 @@ const router = createBrowserRouter([
           { path: 'password', element: <Wrap><OperatorPassword /></Wrap> },
           { path: 'history',  element: <Wrap><OperatorHistory /></Wrap> },
           { path: 'production-jobs', element: <Wrap><OperatorProductionOrders /></Wrap> },
-          { path: 'complaint', element: <Wrap><OperatorQualityComplaint /></Wrap> }
+          { path: 'complaint', element: <Wrap><OperatorQualityComplaint /></Wrap> },
+          { path: 'changes', element: <Wrap><ChangeIssueLog /></Wrap> }
         ]
       },
 
@@ -248,6 +250,10 @@ const router = createBrowserRouter([
         path: 'manager/complaints',
         element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ManagerQualityComplaints /></Wrap></RequireAuth>
       },
+      {
+        path: 'manager/changes',
+        element: <RequireAuth roles={['manager', 'admin', 'viewer']}><Wrap><ChangeIssueLog /></Wrap></RequireAuth>
+      },
       // ── SYRINGE OPERATOR MODULE ──
       {
         path: 'syringe',
@@ -293,6 +299,10 @@ const router = createBrowserRouter([
       {
         path: 'specialist',
         element: <RequireAuth roles={['specialist', 'admin']}><Wrap><SpecialistDashboard /></Wrap></RequireAuth>
+      },
+      {
+        path: 'specialist/changes',
+        element: <RequireAuth roles={['specialist', 'admin']}><Wrap><ChangeIssueLog /></Wrap></RequireAuth>
       },
 
       // ── ADMIN ──
