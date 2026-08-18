@@ -44,10 +44,33 @@ async function fetchHistory(jobId: string) {
   return (data ?? []) as HistoryRow[]
 }
 
+// Zbiorcze pobranie dla kopiowania wielu zleceń naraz (np. całego asortymentu) - jedno
+// zapytanie na wiele job_id zamiast N osobnych zapytań per zlecenie.
+async function fetchComponentsForJobs(jobIds: string[]) {
+  if (!jobIds.length) return [] as ProductionJobComponent[]
+  const { data } = await supabase
+    .from('production_job_components')
+    .select('*')
+    .in('job_id', jobIds)
+    .order('sort_order')
+  return (data ?? []) as ProductionJobComponent[]
+}
+
+async function fetchHistoryForJobs(jobIds: string[]) {
+  if (!jobIds.length) return [] as HistoryRow[]
+  const { data } = await supabase
+    .from('production_job_component_history')
+    .select('*, changed_by_profile:profiles!changed_by(full_name)')
+    .in('job_id', jobIds)
+    .order('changed_at', { ascending: false })
+  return (data ?? []) as HistoryRow[]
+}
+
 export default function ManagerProductionJobs() {
   const [jobs, setJobs] = useState<JobRow[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
+  const [filterAssortment, setFilterAssortment] = useState('')
 
   const [selectedJob, setSelectedJob] = useState<JobRow | null>(null)
   const [components, setComponents] = useState<ProductionJobComponent[]>([])
@@ -55,6 +78,12 @@ export default function ManagerProductionJobs() {
   const [detailLoading, setDetailLoading] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
   const [fallbackText, setFallbackText] = useState<string | null>(null)
+
+  // Zbiorcze kopiowanie wszystkich (aktualnie widocznych po filtrach) zleceń naraz -
+  // zamiast otwierać każde zlecenie z osobna i klikać "Kopiuj" pojedynczo, np. dla
+  // wszystkich zleceń danego asortymentu w wybranym okresie.
+  const [bulkCopyStatus, setBulkCopyStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
+  const [bulkFallbackText, setBulkFallbackText] = useState<string | null>(null)
 
   useEffect(() => { load() }, [])
 
@@ -75,7 +104,13 @@ export default function ManagerProductionJobs() {
     setDetailLoading(false)
   }
 
+  // Lista asortymentów do filtra brana z faktycznie załadowanych zleceń (nie ze stałej
+  // ASSORTMENTS) - zawsze zgodna z tym, co realnie jest w bazie, nawet jeśli lista
+  // asortymentów się kiedyś zmieni.
+  const assortmentOptions = [...new Set(jobs.map(j => j.assortment_name))].sort((a, b) => a.localeCompare(b, 'pl'))
+
   const filtered = jobs.filter(j => {
+    if (filterAssortment && j.assortment_name !== filterAssortment) return false
     const q = search.trim().toLowerCase()
     if (!q) return true
     return j.order_number.toLowerCase().includes(q) ||
@@ -83,6 +118,69 @@ export default function ManagerProductionJobs() {
       j.assortment_name.toLowerCase().includes(q) ||
       (one(j.machine)?.name ?? '').toLowerCase().includes(q)
   })
+
+  // Kopiuje dane WSZYSTKICH aktualnie widocznych (po filtrach: asortyment + szukajka)
+  // zleceń naraz, jeden blok pod drugim - dokładnie ten sam format co pojedyncze
+  // "Kopiuj dane zlecenia", tylko dla całego asortymentu (lub innego zestawu z filtra)
+  // zamiast otwierania każdego zlecenia z osobna.
+  const handleBulkCopy = async () => {
+    if (filtered.length === 0) return
+    setBulkCopyStatus('loading')
+    setBulkFallbackText(null)
+    try {
+      const jobIds = filtered.map(j => j.id)
+      const [allComponents, allHistory] = await Promise.all([
+        fetchComponentsForJobs(jobIds),
+        fetchHistoryForJobs(jobIds)
+      ])
+      const componentsByJob = new Map<string, ProductionJobComponent[]>()
+      allComponents.forEach(c => {
+        const arr = componentsByJob.get(c.job_id) ?? []
+        arr.push(c)
+        componentsByJob.set(c.job_id, arr)
+      })
+      const historyByJob = new Map<string, HistoryRow[]>()
+      allHistory.forEach(h => {
+        const arr = historyByJob.get(h.job_id) ?? []
+        arr.push(h)
+        historyByJob.set(h.job_id, arr)
+      })
+
+      const blocks = filtered.map(job => {
+        const comps = componentsByJob.get(job.id) ?? []
+        const hist = historyByJob.get(job.id) ?? []
+        return formatJobCopyText({
+          job,
+          machineName: one(job.machine)?.name ?? '—',
+          operatorName: one(job.operator)?.full_name ?? '—',
+          components: comps,
+          history: hist.map(h => ({
+            ...h,
+            component_label: comps.find(c => c.id === h.component_id)?.component_label,
+            changed_by_name: one(h.changed_by_profile)?.full_name ?? '—'
+          }))
+        })
+      })
+
+      const divider = '\n\n' + '='.repeat(40) + '\n\n'
+      const header = `Zbiorczy eksport zleceń${filterAssortment ? ` — asortyment: ${filterAssortment}` : ''} (${filtered.length} zleceń)\n${'='.repeat(40)}\n\n`
+      const text = header + blocks.join(divider)
+
+      try {
+        await navigator.clipboard.writeText(text)
+        setBulkCopyStatus('ok')
+        setBulkFallbackText(null)
+      } catch {
+        setBulkCopyStatus('fail')
+        setBulkFallbackText(text)
+      }
+    } catch {
+      // blad pobrania danych (np. siec) - nie mamy tekstu do fallbacku, tylko status
+      setBulkCopyStatus('fail')
+    } finally {
+      setTimeout(() => setBulkCopyStatus('idle'), 2500)
+    }
+  }
 
   const handleCopy = async () => {
     if (!selectedJob) return
@@ -117,11 +215,32 @@ export default function ManagerProductionJobs() {
         </div>
       </div>
 
-      <input
-        value={search} onChange={e => setSearch(e.target.value)}
-        placeholder="Szukaj po numerze zlecenia, serii, asortymencie, automacie..."
-        className="input w-full max-w-md"
-      />
+      <div className="flex flex-wrap items-center gap-3">
+        <input
+          value={search} onChange={e => setSearch(e.target.value)}
+          placeholder="Szukaj po numerze zlecenia, serii, asortymencie, automacie..."
+          className="input w-full max-w-md"
+        />
+        <select value={filterAssortment} onChange={e => setFilterAssortment(e.target.value)} className="input w-auto">
+          <option value="">Wszystkie asortymenty</option>
+          {assortmentOptions.map(a => <option key={a} value={a}>{a}</option>)}
+        </select>
+        <button
+          onClick={handleBulkCopy}
+          disabled={bulkCopyStatus === 'loading' || filtered.length === 0}
+          className="btn-secondary whitespace-nowrap disabled:opacity-40"
+        >
+          {bulkCopyStatus === 'loading' ? 'Pobieranie...'
+            : bulkCopyStatus === 'ok' ? 'Skopiowano ✓'
+            : bulkCopyStatus === 'fail' ? 'Nie udało się — zaznacz poniżej'
+            : `Kopiuj wszystkie widoczne (${filtered.length})`}
+        </button>
+      </div>
+
+      {bulkFallbackText && (
+        <textarea readOnly value={bulkFallbackText} onClick={e => (e.target as HTMLTextAreaElement).select()}
+          className="input font-mono text-xs min-h-[160px] w-full" />
+      )}
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
