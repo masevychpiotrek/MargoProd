@@ -1,7 +1,14 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { PRODUCTION_DAY_HOURS, cn, compareProductionHours, getProductionDate } from '@/lib/utils'
-import type { HourlyReport, Machine, Shift, ShiftType } from '@/types/database'
+import { useAuthStore } from '@/stores/authStore'
+import {
+  fetchShiftEmailData, coverageStats, confirmActionItem, previewShiftEmail, sendShiftEmailNow,
+  fetchRecipients, addRecipient, setRecipientActive, deleteRecipient,
+  MATCHED_BY_LABELS,
+  type ShiftEmailData
+} from '@/lib/shiftEmail'
+import type { HourlyReport, Machine, Shift, ShiftType, ShiftNotificationRecipient, TechnicianActionItem } from '@/types/database'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -1244,9 +1251,50 @@ function ReportModal({ date, rows, reports, totals, shiftTotals, eventsByShift, 
   )
 }
 
+// ─── Niedopasowana odpowiedź technika (parsowanie numerem/AI się nie udało) ────
+
+function UnmatchedActionItem({ item, numberedItems, canConfirm, onConfirm }: {
+  item: TechnicianActionItem
+  numberedItems: { number: number; machine_name: string; hour_range: string }[]
+  canConfirm: boolean
+  onConfirm: (itemNumber: number | null) => void
+}) {
+  const [selected, setSelected] = useState<string>(item.item_number != null ? String(item.item_number) : '')
+  return (
+    <div className="rounded-xl border border-amber-500/30 bg-amber-500/5 p-3 space-y-2">
+      <div className="flex items-center justify-between gap-2">
+        <span className="text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border border-amber-500/30 bg-amber-500/10 text-amber-300">
+          {item.matched_by ? MATCHED_BY_LABELS[item.matched_by] : 'Brak dopasowania'}
+        </span>
+      </div>
+      <p className="text-sm text-navy-200 whitespace-pre-wrap break-words">{item.action_text}</p>
+      {canConfirm && (
+        <div className="flex flex-wrap items-center gap-2 pt-1">
+          <select value={selected} onChange={e => setSelected(e.target.value)} className="input text-xs py-1.5">
+            <option value="">— wybierz pozycję —</option>
+            {numberedItems.map(n => (
+              <option key={n.number} value={n.number}>{n.number}. {n.machine_name} ({n.hour_range})</option>
+            ))}
+          </select>
+          <button
+            onClick={() => onConfirm(selected ? Number(selected) : null)}
+            disabled={!selected}
+            className="btn-secondary text-xs py-1.5 px-3 disabled:opacity-40"
+          >
+            Potwierdź
+          </button>
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Main Component ───────────────────────────────────────────────────────────
 
 export default function ManagerDayReport() {
+  const { profile, user } = useAuthStore()
+  const canManageShiftEmail = profile?.role === 'manager' || profile?.role === 'admin'
+
   const [date, setDate] = useState(todayIso)
   const [machines, setMachines] = useState<Machine[]>([])
   const [reports, setReports] = useState<ReportWithContext[]>([])
@@ -1254,6 +1302,69 @@ export default function ManagerDayReport() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modalState, setModalState] = useState<'closed' | 'apikey' | 'report'>('closed')
+
+  // ─── Mail zmianowy do techników ──────────────────────────────────────────
+  const emptyShiftEmailData: Record<ShiftType, ShiftEmailData> = {
+    I: { thread: null, reports: [], items: [] },
+    II: { thread: null, reports: [], items: [] },
+    III: { thread: null, reports: [], items: [] }
+  }
+  const [shiftEmailByShift, setShiftEmailByShift] = useState(emptyShiftEmailData)
+  const [previewModal, setPreviewModal] = useState<{ shift: ShiftType; html: string } | null>(null)
+  const [previewLoading, setPreviewLoading] = useState<ShiftType | null>(null)
+  const [sending, setSending] = useState(false)
+  const [shiftEmailError, setShiftEmailError] = useState('')
+  const [recipientsOpen, setRecipientsOpen] = useState(false)
+  const [recipients, setRecipients] = useState<ShiftNotificationRecipient[]>([])
+  const [newRecipientEmail, setNewRecipientEmail] = useState('')
+  const [newRecipientName, setNewRecipientName] = useState('')
+
+  const loadShiftEmailData = useCallback(async () => {
+    const [i, ii, iii] = await Promise.all(SHIFTS.map(s => fetchShiftEmailData(date, s)))
+    setShiftEmailByShift({ I: i, II: ii, III: iii })
+  }, [date])
+
+  useEffect(() => { loadShiftEmailData() }, [loadShiftEmailData])
+
+  const openPreview = async (shift: ShiftType) => {
+    setShiftEmailError('')
+    setPreviewLoading(shift)
+    const result = await previewShiftEmail(date, shift)
+    setPreviewLoading(null)
+    if (result.error) { setShiftEmailError(result.error); return }
+    setPreviewModal({ shift, html: result.html ?? '' })
+  }
+
+  const confirmSendShiftEmail = async () => {
+    if (!previewModal) return
+    setSending(true)
+    setShiftEmailError('')
+    const result = await sendShiftEmailNow(date, previewModal.shift)
+    setSending(false)
+    if (result.error) { setShiftEmailError(result.error); return }
+    setPreviewModal(null)
+    loadShiftEmailData()
+  }
+
+  const handleConfirmActionItem = async (itemId: string, itemNumber: number | null) => {
+    if (!user) return
+    const err = await confirmActionItem(itemId, itemNumber, user.id)
+    if (err) { setShiftEmailError(err); return }
+    loadShiftEmailData()
+  }
+
+  const openRecipients = async () => {
+    setRecipientsOpen(true)
+    setRecipients(await fetchRecipients())
+  }
+
+  const handleAddRecipient = async () => {
+    if (!newRecipientEmail.trim() || !user) return
+    const err = await addRecipient(newRecipientEmail, newRecipientName, user.id)
+    if (err) { setShiftEmailError(err); return }
+    setNewRecipientEmail(''); setNewRecipientName('')
+    setRecipients(await fetchRecipients())
+  }
   const loadSeq = useRef(0)
 
   const load = useCallback(async () => {
@@ -1451,6 +1562,74 @@ export default function ManagerDayReport() {
         />
       )}
 
+      {previewModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.85)', backdropFilter: 'blur(8px)' }}>
+          <div className="bg-navy-800 border border-navy-600 rounded-2xl p-6 w-full max-w-2xl max-h-[90vh] overflow-y-auto space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Podgląd maila — Zmiana {previewModal.shift}</h2>
+                <p className="text-navy-400 text-sm">Sprawdź treść przed wysyłką do techników</p>
+              </div>
+              <button onClick={() => setPreviewModal(null)} className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+            </div>
+            <div className="rounded-xl border border-navy-700 bg-white overflow-hidden">
+              <iframe title="Podgląd maila zmianowego" srcDoc={previewModal.html} className="w-full h-[420px] border-0" />
+            </div>
+            {shiftEmailError && (
+              <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{shiftEmailError}</div>
+            )}
+            <div className="flex gap-3">
+              <button onClick={() => setPreviewModal(null)} className="btn-secondary flex-1 py-2.5">Anuluj</button>
+              <button onClick={confirmSendShiftEmail} disabled={sending} className="btn-primary flex-1 py-2.5 disabled:opacity-40">
+                {sending ? 'Wysyłanie...' : 'Wyślij'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {recipientsOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.85)', backdropFilter: 'blur(8px)' }}>
+          <div className="bg-navy-800 border border-navy-600 rounded-2xl p-6 w-full max-w-md max-h-[90vh] overflow-y-auto space-y-4">
+            <div className="flex items-start justify-between">
+              <div>
+                <h2 className="text-xl font-bold text-white">Odbiorcy maila zmianowego</h2>
+                <p className="text-navy-400 text-sm">Stała lista adresów — niezależna od kont w systemie</p>
+              </div>
+              <button onClick={() => setRecipientsOpen(false)} className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+            </div>
+            <div className="space-y-2">
+              {recipients.length === 0 && <div className="text-sm text-navy-500 italic">Brak odbiorców — mail nie zostanie wysłany.</div>}
+              {recipients.map(r => (
+                <div key={r.id} className="flex items-center justify-between gap-2 rounded-lg border border-navy-700 bg-navy-900 px-3 py-2">
+                  <div>
+                    <div className="text-sm text-white">{r.email}</div>
+                    {r.full_name && <div className="text-xs text-navy-500">{r.full_name}</div>}
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <label className="flex items-center gap-1 text-xs text-navy-400">
+                      <input type="checkbox" checked={r.is_active} onChange={async e => {
+                        await setRecipientActive(r.id, e.target.checked)
+                        setRecipients(await fetchRecipients())
+                      }} /> aktywny
+                    </label>
+                    <button
+                      onClick={async () => { await deleteRecipient(r.id); setRecipients(await fetchRecipients()) }}
+                      className="text-red-400 hover:text-red-300 text-sm"
+                    >✕</button>
+                  </div>
+                </div>
+              ))}
+            </div>
+            <div className="space-y-2 border-t border-navy-700 pt-4">
+              <input value={newRecipientEmail} onChange={e => setNewRecipientEmail(e.target.value)} placeholder="adres@margomed.pl" className="input w-full" />
+              <input value={newRecipientName} onChange={e => setNewRecipientName(e.target.value)} placeholder="Imię i nazwisko (opcjonalnie)" className="input w-full" />
+              <button onClick={handleAddRecipient} disabled={!newRecipientEmail.trim()} className="btn-primary w-full py-2.5 disabled:opacity-40">Dodaj odbiorcę</button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <div className="space-y-5">
         {/* Header */}
         <div className="flex flex-wrap items-start justify-between gap-3">
@@ -1605,6 +1784,52 @@ export default function ManagerDayReport() {
           </div>
         </div>
 
+        {/* Mail zmianowy do techników */}
+        {canManageShiftEmail && (
+          <div className="card">
+            <div className="card-header">
+              <div>
+                <div className="card-title">Mail zmianowy do techników</div>
+                <div className="card-sub">Ponumerowana lista odchyleń, wysyłana automatycznie 13:00/21:00/05:00 lub ręcznie</div>
+              </div>
+              <button onClick={openRecipients} className="btn-secondary text-xs py-2 px-3">Odbiorcy</button>
+            </div>
+            {shiftEmailError && (
+              <div className="mb-3 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{shiftEmailError}</div>
+            )}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              {SHIFTS.map(shift => {
+                const data = shiftEmailByShift[shift]
+                const cov = coverageStats(data.thread, data.items)
+                return (
+                  <div key={shift} className="rounded-xl border border-navy-700 bg-navy-900 p-3 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="font-bold text-white">Zmiana {shift}</div>
+                      {data.thread && (
+                        <span className={cn('text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-lg border',
+                          cov.covered === cov.total ? 'border-green-500/30 bg-green-500/10 text-green-400' : 'border-amber-500/30 bg-amber-500/10 text-amber-300'
+                        )}>
+                          {cov.covered}/{cov.total} z odpowiedzią
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs text-navy-500">
+                      {data.thread ? `Wysłano ${new Date(data.thread.sent_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}` : 'Jeszcze nie wysłano dla tej zmiany'}
+                    </div>
+                    <button
+                      onClick={() => openPreview(shift)}
+                      disabled={previewLoading === shift}
+                      className="btn-primary w-full py-2 text-sm disabled:opacity-40"
+                    >
+                      {previewLoading === shift ? 'Generowanie...' : 'Wyślij mail zmianowy teraz'}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        )}
+
         {/* Zdarzenia per zmiana */}
         <div className="grid grid-cols-1 xl:grid-cols-3 gap-4">
           {SHIFTS.map(shift => (
@@ -1634,6 +1859,52 @@ export default function ManagerDayReport() {
                   </div>
                 ))}
               </div>
+
+              {shiftEmailByShift[shift].thread && (
+                <div className="mt-4 space-y-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Działania techników</div>
+                  {shiftEmailByShift[shift].thread!.numbered_items.map(numItem => {
+                    const matched = shiftEmailByShift[shift].items.filter(i => i.item_number === numItem.number && !i.needs_review)
+                    return (
+                      <div key={numItem.number} className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="text-sm text-navy-200">
+                            <span className="font-bold text-white">{numItem.number}. {numItem.machine_name}</span>
+                            <span className="ml-2 font-mono text-xs text-navy-500">{numItem.hour_range}</span>
+                            <div className="text-navy-300">{numItem.summary_text}</div>
+                          </div>
+                        </div>
+                        {matched.length === 0 ? (
+                          <div className="mt-2 text-xs italic text-navy-500">Brak odpowiedzi technika</div>
+                        ) : (
+                          <div className="mt-2 space-y-1.5">
+                            {matched.map(m => (
+                              <div key={m.id} className="rounded-lg bg-navy-800 px-3 py-2 text-sm text-navy-200">
+                                {m.action_text}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })}
+                </div>
+              )}
+
+              {shiftEmailByShift[shift].items.some(i => i.needs_review) && (
+                <div className="mt-4 space-y-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-amber-400">Niedopasowane</div>
+                  {shiftEmailByShift[shift].items.filter(i => i.needs_review).map(item => (
+                    <UnmatchedActionItem
+                      key={item.id}
+                      item={item}
+                      numberedItems={shiftEmailByShift[shift].thread?.numbered_items ?? []}
+                      canConfirm={canManageShiftEmail}
+                      onConfirm={num => handleConfirmActionItem(item.id, num)}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
         </div>

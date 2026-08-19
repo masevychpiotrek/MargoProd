@@ -264,6 +264,72 @@ export interface IssueLogEntry {
   assignee?:       Profile | null
 }
 
+// ---- Automatyczne maile zmianowe do techników ----
+
+export type ShiftEmailMatchedVia = 'reply' | 'subject_fallback'
+export type TechnicianMatchedBy  = 'number' | 'ai' | null
+
+export interface ShiftNotificationRecipient {
+  id:          string
+  email:       string
+  full_name:   string | null
+  is_active:   boolean
+  created_at:  string
+  created_by:  string | null
+}
+
+export interface ShiftEmailNumberedItem {
+  number:            number
+  machine_id:        string
+  machine_name:      string
+  hourly_report_ids: string[]
+  hour_range:        string
+  summary_text:      string
+}
+
+export interface ShiftEmailThread {
+  id:              string
+  shift_date:      string
+  shift_type:      ShiftType
+  message_id:      string
+  sent_at:         string
+  sent_manually:   boolean
+  sent_by:         string | null
+  recipients:      string[]
+  numbered_items:  ShiftEmailNumberedItem[]
+}
+
+export interface TechnicianShiftReport {
+  id:                string
+  thread_id:         string
+  shift_date:        string
+  shift_type:        ShiftType
+  technician_email:  string
+  technician_id:     string | null
+  raw_content:       string
+  subject:           string | null
+  received_at:       string
+  is_late:           boolean
+  matched_via:       ShiftEmailMatchedVia
+  // joined
+  technician?:       Profile | null
+}
+
+export interface TechnicianActionItem {
+  id:                    string
+  report_id:             string
+  item_number:           number | null
+  action_text:           string
+  matched_problem_ids:   string[] | null
+  matched_by:            TechnicianMatchedBy
+  needs_review:          boolean
+  confirmed_by:          string | null
+  confirmed_at:          string | null
+  // joined
+  report?:               TechnicianShiftReport
+  confirmer?:            Profile | null
+}
+
 // ---- Form / UI types ----
 
 export interface HourlyReportFormData {

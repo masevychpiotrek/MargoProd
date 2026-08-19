@@ -146,8 +146,8 @@ export default function ChangeIssueLog() {
     setSaving(true)
     const { error } = await supabase.from('change_log').update({ approved_by: profile.id }).eq('id', row.id)
     if (!error) {
-      setChanges(prev => prev.map(r => r.id === row.id ? { ...r, approved_by: profile.id, approver: { full_name: profile.full_name } } : r))
-      setSelectedChange(prev => prev && prev.id === row.id ? { ...prev, approved_by: profile.id, approver: { full_name: profile.full_name } } : prev)
+      setChanges(prev => prev.map(r => r.id === row.id ? { ...r, approved_by: profile.id, approver: profile } : r))
+      setSelectedChange(prev => prev && prev.id === row.id ? { ...prev, approved_by: profile.id, approver: profile } : prev)
     }
     setSaving(false)
   }
