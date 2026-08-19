@@ -63,13 +63,15 @@ Deno.serve(async (req) => {
     let thread: { id: string; sent_at: string; shift_date: string; shift_type: ShiftType; numbered_items: NumberedItem[] } | null = null
     let matchedVia: 'reply' | 'subject_fallback' = 'reply'
 
-    if (candidateIds.length) {
+    // Petla .eq() zamiast jednego .in(candidateIds) - candidateIds ma co najwyzej
+    // 2-3 elementy (In-Reply-To + References), wiec koszt pomijalny, a unika sie
+    // jakichkolwiek niejasnosci wokol kodowania '<'/'>'/'@' w skladni listy in.().
+    for (const candidate of [...new Set(candidateIds)]) {
       const { data } = await admin.from('shift_email_threads')
         .select('id, sent_at, shift_date, shift_type, numbered_items')
-        .in('message_id', candidateIds)
-        .limit(1)
+        .eq('message_id', candidate)
         .maybeSingle()
-      if (data) thread = data as typeof thread
+      if (data) { thread = data as typeof thread; break }
     }
 
     if (!thread) {
