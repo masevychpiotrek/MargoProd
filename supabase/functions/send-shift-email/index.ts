@@ -239,7 +239,12 @@ Deno.serve(async (req) => {
     })
 
     const pmData = await pmResponse.json().catch(() => ({}))
-    if (!pmResponse.ok) {
+    // UWAGA: Postmark potrafi zwrocic HTTP 200 razem z ErrorCode != 0 w tresci
+    // (np. konto zawieszone do zatwierdzenia, niepotwierdzony nadawca) - samo
+    // sprawdzenie pmResponse.ok NIE wystarcza (ta sama pulapka co przy
+    // translate-shift-summaries wczesniej w tej sesji: blad chowajacy sie w
+    // body 200 OK). Trzeba jawnie sprawdzic ErrorCode.
+    if (!pmResponse.ok || (typeof pmData?.ErrorCode === 'number' && pmData.ErrorCode !== 0)) {
       return json({ error: `Wysylka nie powiodla sie: ${pmData?.Message ?? pmResponse.status}` })
     }
 
