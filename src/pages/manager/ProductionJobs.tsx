@@ -244,6 +244,59 @@ export default function ManagerProductionJobs() {
       const wb = new ExcelJS.Workbook()
       wb.creator = 'MargoLine MES'
       wb.created = new Date()
+
+      // Podsumowanie - jeden wiersz na zlecenie, chronologicznie: dnia po dniu,
+      // zmiana po zmianie, jaki automat montowal jaki asortyment i ile sztuk -
+      // ten sam widok co glowna tabela na ekranie, ale w jednym, czytelnym arkuszu
+      // zamiast rozproszony po kolumnach w arkuszu "Zlecenia" (kszaltki).
+      const summaryWs = wb.addWorksheet('Podsumowanie')
+      const summaryColumns = ['Data', 'Zmiana', 'Automat', 'Asortyment', 'Ilość szt.', 'Numer zlecenia', 'Seria', 'Operator', 'Status']
+      const summaryWidths = [12, 9, 16, 22, 12, 16, 14, 20, 14]
+      summaryWs.mergeCells(1, 1, 1, summaryColumns.length)
+      const summaryTitle = summaryWs.getCell(1, 1)
+      summaryTitle.value = 'Podsumowanie produkcji — dzień po dniu, zmiana po zmianie'
+      summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+      summaryTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+      summaryTitle.alignment = { horizontal: 'center', vertical: 'middle' }
+      summaryWs.getRow(1).height = 26
+
+      const summaryHeaderRow = 3
+      summaryColumns.forEach((label, ci) => {
+        const cell = summaryWs.getCell(summaryHeaderRow, ci + 1)
+        cell.value = label
+        cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+        cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+        cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+        summaryWs.getColumn(ci + 1).width = summaryWidths[ci]
+      })
+
+      const chronological = filtered.slice().sort((a, b) => a.started_at.localeCompare(b.started_at))
+      let summaryRow = summaryHeaderRow + 1
+      chronological.forEach((job, ri) => {
+        const stripeColor = ri % 2 === 0 ? 'FFF3F4F6' : 'FFFFFFFF'
+        const cells: (string | number)[] = [
+          new Date(job.started_at).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' }),
+          job.shift_type ?? '—',
+          one(job.machine)?.name ?? '—',
+          job.assortment_name,
+          job.calculated_qty.toLocaleString('pl-PL'),
+          job.order_number,
+          job.series_number ?? '—',
+          one(job.operator)?.full_name ?? '—',
+          job.status === 'confirmed' ? 'Zatwierdzone' : 'W trakcie'
+        ]
+        cells.forEach((value, ci) => {
+          const cell = summaryWs.getCell(summaryRow, ci + 1)
+          cell.value = value
+          cell.font = { name: 'Arial', size: 9, bold: ci === 4 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+          cell.alignment = { horizontal: ci === 4 ? 'right' : 'left', vertical: 'middle' }
+          cell.border = THIN_BORDER
+        })
+        summaryRow += 1
+      })
+      summaryWs.views = [{ state: 'frozen', ySplit: summaryHeaderRow }]
+
       const ws = wb.addWorksheet('Zlecenia')
 
       const metaLabels = ['Numer zlecenia', 'Seria', 'Automat', 'Zmiana', 'Operator', 'Start', 'Ilość szt.', 'Status']
