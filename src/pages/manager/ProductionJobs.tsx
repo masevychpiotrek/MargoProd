@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { formatJobCopyText } from '@/lib/productionJobs'
+import { formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS } from '@/lib/productionJobs'
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
 
 type JobRow = ProductionJob & {
@@ -15,6 +15,32 @@ type HistoryRow = ProductionJobComponentHistory & {
 
 function one<T>(value: T | T[] | null | undefined): T | undefined {
   return Array.isArray(value) ? value[0] : value ?? undefined
+}
+
+const NAVY = 'FF1A2744'
+const GOLD = 'FFC9A84C'
+const THIN_BORDER = {
+  top: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+  bottom: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+  left: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } },
+  right: { style: 'thin' as const, color: { argb: 'FFD1D5DB' } }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type EJS = any
+declare global {
+  interface Window { ExcelJS?: EJS }
+}
+
+function loadExcelJS(): Promise<EJS> {
+  return new Promise((resolve, reject) => {
+    if (window.ExcelJS) { resolve(window.ExcelJS); return }
+    const s = document.createElement('script')
+    s.src = 'https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js'
+    s.onload = () => resolve(window.ExcelJS!)
+    s.onerror = () => reject(new Error('Nie udało się załadować ExcelJS'))
+    document.head.appendChild(s)
+  })
 }
 
 async function fetchJobs() {
@@ -84,6 +110,14 @@ export default function ManagerProductionJobs() {
   // wszystkich zleceń danego asortymentu w wybranym okresie.
   const [bulkCopyStatus, setBulkCopyStatus] = useState<'idle' | 'loading' | 'ok' | 'fail'>('idle')
   const [bulkFallbackText, setBulkFallbackText] = useState<string | null>(null)
+
+  // Eksport do prawdziwego pliku XLSX - zamiast tekstu do wklejenia (ktory przy kilku
+  // zleceniach tego samego asortymentu zlewal sie w jedna, nieczytelna mase), kazde
+  // zlecenie dostaje wlasna, wyraznie oddzielona kolumne. Wzorzec 1:1 z
+  // ShiftStatPhotos.tsx (kolumny=instancje, wiersze=parametry, zlota linia miedzy
+  // grupami - tu grupa to asortyment zamiast automatu).
+  const [exportingExcel, setExportingExcel] = useState(false)
+  const [exportError, setExportError] = useState('')
 
   useEffect(() => { load() }, [])
 
@@ -182,6 +216,156 @@ export default function ManagerProductionJobs() {
     }
   }
 
+  const handleExportExcel = async () => {
+    if (filtered.length === 0) return
+    setExportingExcel(true)
+    setExportError('')
+    try {
+      const jobIds = filtered.map(j => j.id)
+      const [ExcelJS, allComponents] = await Promise.all([
+        loadExcelJS(),
+        fetchComponentsForJobs(jobIds)
+      ])
+      const componentsByJob = new Map<string, ProductionJobComponent[]>()
+      allComponents.forEach(c => {
+        const arr = componentsByJob.get(c.job_id) ?? []
+        arr.push(c)
+        componentsByJob.set(c.job_id, arr)
+      })
+
+      // Grupowanie po asortymencie, a w obrebie asortymentu chronologicznie - zeby
+      // sasiednie kolumny byly kolejnymi zleceniami TEGO SAMEGO asortymentu, a nie
+      // przeplatanka wynikajaca z sortowania czysto po dacie startu.
+      const sortedJobs = filtered.slice().sort((a, b) =>
+        a.assortment_name.localeCompare(b.assortment_name, 'pl') ||
+        a.started_at.localeCompare(b.started_at)
+      )
+
+      const wb = new ExcelJS.Workbook()
+      wb.creator = 'MargoLine MES'
+      wb.created = new Date()
+      const ws = wb.addWorksheet('Zlecenia')
+
+      const metaLabels = ['Numer zlecenia', 'Seria', 'Automat', 'Zmiana', 'Operator', 'Start', 'Ilość szt.', 'Status']
+      const firstDataCol = 2
+      const titleText = filterAssortment ? `Zlecenia produkcyjne — ${filterAssortment}` : 'Zlecenia produkcyjne'
+
+      ws.mergeCells(1, 1, 1, Math.max(sortedJobs.length + 1, 2))
+      const title = ws.getCell(1, 1)
+      title.value = titleText
+      title.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
+      title.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+      title.alignment = { horizontal: 'center', vertical: 'middle' }
+      ws.getRow(1).height = 26
+
+      if (sortedJobs.length === 0) {
+        const cell = ws.getCell(3, 1)
+        cell.value = 'Brak zleceń dla wybranych filtrów.'
+        cell.font = { name: 'Arial', italic: true, size: 9, color: { argb: 'FF6B7280' } }
+      } else {
+        const metaHeaderRow = 3
+        const standardStartRow = metaHeaderRow + metaLabels.length + 1
+        const drenStartRow = standardStartRow + 1 + STANDARD_COMPONENTS.length + 1
+
+        ws.getColumn(1).width = 26
+        sortedJobs.forEach((_, ci) => { ws.getColumn(firstDataCol + ci).width = 18 })
+
+        // Gruba zlota linia na koncu bloku kolumn kazdego asortymentu - oddziela
+        // wizualnie np. "IS PRO 150 cm" od "IS PRO AIR PASS 150 cm".
+        const groupEndBorder = { style: 'medium' as const, color: { argb: GOLD } }
+        const isLastOfGroup = sortedJobs.map((job, ci) => {
+          const next = sortedJobs[ci + 1]
+          return !next || next.assortment_name !== job.assortment_name
+        })
+
+        metaLabels.forEach((label, ri) => {
+          const cell = ws.getCell(metaHeaderRow + ri, 1)
+          cell.value = label
+          cell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          cell.alignment = { vertical: 'middle' }
+        })
+
+        sortedJobs.forEach((job, ci) => {
+          const col = firstDataCol + ci
+          const metaValues = [
+            job.order_number,
+            job.series_number ?? '—',
+            one(job.machine)?.name ?? '—',
+            job.shift_type ?? '—',
+            one(job.operator)?.full_name ?? '—',
+            new Date(job.started_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }),
+            job.calculated_qty.toLocaleString('pl-PL'),
+            job.status === 'confirmed' ? 'Zatwierdzone' : 'W trakcie'
+          ]
+          metaValues.forEach((value, ri) => {
+            const cell = ws.getCell(metaHeaderRow + ri, col)
+            cell.value = value
+            cell.font = { name: 'Arial', bold: true, size: 9, color: { argb: 'FFE5E9F2' } }
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF24345A' } }
+            cell.alignment = { horizontal: 'center', vertical: 'middle', wrapText: true }
+            if (isLastOfGroup[ci]) cell.border = { right: groupEndBorder }
+          })
+        })
+
+        const renderSection = (sectionTitle: string, startRow: number, defs: typeof STANDARD_COMPONENTS) => {
+          const sectionCell = ws.getCell(startRow, 1)
+          sectionCell.value = sectionTitle
+          sectionCell.font = { name: 'Arial', bold: true, color: { argb: GOLD }, size: 9 }
+          sectionCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+          sortedJobs.forEach((_, ci) => {
+            const cell = ws.getCell(startRow, firstDataCol + ci)
+            cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
+            if (isLastOfGroup[ci]) cell.border = { right: groupEndBorder }
+          })
+
+          defs.forEach((def, ri) => {
+            const row = startRow + 1 + ri
+            const stripeColor = ri % 2 === 0 ? 'FFF3F4F6' : 'FFFFFFFF'
+
+            const labelCell = ws.getCell(row, 1)
+            labelCell.value = def.label
+            labelCell.font = { name: 'Arial', bold: true, size: 9 }
+            labelCell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+            labelCell.alignment = { vertical: 'middle' }
+            labelCell.border = THIN_BORDER
+
+            sortedJobs.forEach((job, ci) => {
+              const col = firstDataCol + ci
+              const comp = componentsByJob.get(job.id)?.find(c => c.component_key === def.key)
+              const cell = ws.getCell(row, col)
+              cell.value = comp?.batch_number ?? ''
+              cell.font = { name: 'Arial', size: 9 }
+              cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
+              cell.alignment = { horizontal: 'right', vertical: 'middle' }
+              cell.border = isLastOfGroup[ci] ? { ...THIN_BORDER, right: groupEndBorder } : THIN_BORDER
+            })
+          })
+        }
+
+        renderSection('Półfabrykaty', standardStartRow, STANDARD_COMPONENTS)
+        renderSection('Dren', drenStartRow, DREN_COMPONENTS)
+
+        ws.views = [{ state: 'frozen', xSplit: 1, ySplit: metaHeaderRow - 1 }]
+      }
+
+      const buffer = await wb.xlsx.writeBuffer()
+      const blob = new Blob([buffer], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `Zlecenia-produkcyjne_${new Date().toISOString().slice(0, 10)}.xlsx`
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : 'Nie udało się przygotować pliku Excel.')
+    } finally {
+      setExportingExcel(false)
+    }
+  }
+
   const handleCopy = async () => {
     if (!selectedJob) return
     const text = formatJobCopyText({
@@ -226,6 +410,13 @@ export default function ManagerProductionJobs() {
           {assortmentOptions.map(a => <option key={a} value={a}>{a}</option>)}
         </select>
         <button
+          onClick={handleExportExcel}
+          disabled={exportingExcel || filtered.length === 0}
+          className="btn-primary whitespace-nowrap disabled:opacity-40"
+        >
+          {exportingExcel ? 'Generowanie...' : `📊 Eksportuj do Excela (${filtered.length})`}
+        </button>
+        <button
           onClick={handleBulkCopy}
           disabled={bulkCopyStatus === 'loading' || filtered.length === 0}
           className="btn-secondary whitespace-nowrap disabled:opacity-40"
@@ -236,6 +427,10 @@ export default function ManagerProductionJobs() {
             : `Kopiuj wszystkie widoczne (${filtered.length})`}
         </button>
       </div>
+
+      {exportError && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">{exportError}</div>
+      )}
 
       {bulkFallbackText && (
         <textarea readOnly value={bulkFallbackText} onClick={e => (e.target as HTMLTextAreaElement).select()}
