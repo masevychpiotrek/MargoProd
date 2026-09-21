@@ -175,7 +175,12 @@ export default function SyringeSessionStart() {
             {assortments.map(a => (
               <button
                 key={a.id}
-                onClick={() => { setAssortmentId(a.id); setOrderId(''); setError('') }}
+                onClick={() => {
+                  setAssortmentId(a.id)
+                  setOrderId('')
+                  setError('')
+                  if (a.shift_target_qty) setPlanQty(String(a.shift_target_qty))
+                }}
                 className={`rounded-xl border-2 p-4 text-left transition-all ${
                   assortmentId === a.id
                     ? 'border-brand bg-brand/10 text-brand'
@@ -183,7 +188,10 @@ export default function SyringeSessionStart() {
                 }`}
               >
                 <div className="font-bold text-sm">{a.name}</div>
-                <div className="text-xs text-navy-400 mt-1">{a.nominal_per_hour} szt/h nominalne</div>
+                <div className="text-xs text-navy-400 mt-1">
+                  {a.nominal_per_hour} szt/h nominalne
+                  {a.shift_target_qty ? ` · cel zmiany: ${a.shift_target_qty.toLocaleString('pl')} szt` : ''}
+                </div>
               </button>
             ))}
           </div>
@@ -238,14 +246,15 @@ export default function SyringeSessionStart() {
           type="number"
           value={planQty}
           onChange={e => setPlanQty(e.target.value)}
-          placeholder={selectedAssortment ? `Nominalna: ${selectedAssortment.nominal_per_hour * 8} szt` : 'np. 8000'}
+          placeholder={selectedAssortment ? `Cel zmiany: ${(selectedAssortment.shift_target_qty ?? selectedAssortment.nominal_per_hour * 8).toLocaleString('pl')} szt` : 'np. 8000'}
           className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-500 focus:outline-none focus:border-brand"
           min={0}
         />
         {selectedMachine && selectedAssortment && (
           <p className="text-xs text-navy-500">
             Nominalna wydajność: {selectedAssortment.nominal_per_hour} szt/h ·
-            Automat: {selectedMachine.nominal_per_hour} szt/h
+            Automat: {selectedMachine.nominal_per_hour} szt/h ·
+            Cel odrzutu: {selectedAssortment.reject_target_pct}%
           </p>
         )}
       </div>

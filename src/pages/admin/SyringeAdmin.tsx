@@ -218,7 +218,7 @@ function AssortmentsTab() {
   const qc = useQueryClient()
   const [msg, setMsg] = useState('')
   const [edits, setEdits] = useState<Record<string, Partial<SaAssortment>>>({})
-  const [newA, setNewA] = useState({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000 })
+  const [newA, setNewA] = useState({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
   const [showAdd, setShowAdd] = useState(false)
 
   const { data: items = [], isLoading } = useQuery({
@@ -235,13 +235,16 @@ function AssortmentsTab() {
       if (!newA.name || !newA.code) throw new Error('Nazwa i kod są wymagane.')
       const { error } = await supabase.from('sa_assortments').insert({
         name: newA.name, code: newA.code, volume_ml: newA.volume_ml || null,
-        nominal_per_hour: newA.nominal_per_hour, sort_order: items.length + 1
+        nominal_per_hour: newA.nominal_per_hour,
+        shift_target_qty: newA.shift_target_qty || null,
+        reject_target_pct: newA.reject_target_pct,
+        sort_order: items.length + 1
       })
       if (error) throw error
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['admin_sa_assortments'] })
-      setNewA({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000 })
+      setNewA({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
       setShowAdd(false); flash('Asortyment dodany')
     },
     onError: (e: Error) => flash('Błąd: ' + e.message)
@@ -277,6 +280,8 @@ function AssortmentsTab() {
             <div><label className="label">Kod *</label><input value={newA.code} onChange={e => setNewA({ ...newA, code: e.target.value })} className="input" placeholder="np. SYR_100ML" /></div>
             <div><label className="label">Pojemność (ml)</label><input type="number" value={newA.volume_ml} onChange={e => setNewA({ ...newA, volume_ml: parseFloat(e.target.value) || 0 })} className="input" /></div>
             <div><label className="label">Wydajność nom. (szt/h)</label><input type="number" value={newA.nominal_per_hour} onChange={e => setNewA({ ...newA, nominal_per_hour: parseInt(e.target.value) || 0 })} className="input" /></div>
+            <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={newA.shift_target_qty} onChange={e => setNewA({ ...newA, shift_target_qty: parseInt(e.target.value) || 0 })} className="input" /></div>
+            <div><label className="label">Cel odrzutu (%)</label><input type="number" step="0.1" value={newA.reject_target_pct} onChange={e => setNewA({ ...newA, reject_target_pct: parseFloat(e.target.value) || 0 })} className="input" /></div>
           </div>
           <button onClick={() => addMut.mutate()} disabled={addMut.isPending} className="btn-primary px-5 py-2">{addMut.isPending ? 'Dodawanie...' : 'Utwórz asortyment'}</button>
         </div>
@@ -294,6 +299,8 @@ function AssortmentsTab() {
               <div><label className="label">Nazwa</label><input value={e.name ?? a.name} onChange={ev => set(a.id, 'name', ev.target.value)} className="input" /></div>
               <div><label className="label">Pojemność (ml)</label><input type="number" value={(e.volume_ml ?? a.volume_ml) ?? 0} onChange={ev => set(a.id, 'volume_ml', parseFloat(ev.target.value) || 0)} className="input" /></div>
               <div><label className="label">Wydajność nom. (szt/h)</label><input type="number" value={e.nominal_per_hour ?? a.nominal_per_hour} onChange={ev => set(a.id, 'nominal_per_hour', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
+              <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={(e.shift_target_qty ?? a.shift_target_qty) ?? 0} onChange={ev => set(a.id, 'shift_target_qty', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
+              <div><label className="label">Cel odrzutu (%)</label><input type="number" step="0.1" value={e.reject_target_pct ?? a.reject_target_pct} onChange={ev => set(a.id, 'reject_target_pct', parseFloat(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
               <div><label className="label">Kolejność</label><input type="number" value={e.sort_order ?? a.sort_order} onChange={ev => set(a.id, 'sort_order', parseInt(ev.target.value) || 0)} className="input" /></div>
             </div>
             {hasChanges && (

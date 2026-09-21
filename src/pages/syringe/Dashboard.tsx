@@ -61,11 +61,11 @@ function formatDuration(startedAt: string) {
   return `${h}h ${m}m`
 }
 
-function KpiCard({ label, value, sub, highlight }: { label: string; value: string | number; sub?: string; highlight?: boolean }) {
+function KpiCard({ label, value, sub, highlight, danger }: { label: string; value: string | number; sub?: string; highlight?: boolean; danger?: boolean }) {
   return (
-    <div className={`rounded-xl border p-4 ${highlight ? 'border-brand/30 bg-brand/5' : 'border-navy-700 bg-navy-800'}`}>
+    <div className={`rounded-xl border p-4 ${danger ? 'border-red-500/30 bg-red-500/5' : highlight ? 'border-brand/30 bg-brand/5' : 'border-navy-700 bg-navy-800'}`}>
       <div className="text-xs text-navy-400 uppercase tracking-wider mb-1">{label}</div>
-      <div className={`text-2xl font-bold ${highlight ? 'text-brand' : 'text-white'}`}>{value}</div>
+      <div className={`text-2xl font-bold ${danger ? 'text-red-400' : highlight ? 'text-brand' : 'text-white'}`}>{value}</div>
       {sub && <div className="text-xs text-navy-500 mt-1">{sub}</div>}
     </div>
   )
@@ -167,6 +167,16 @@ export default function SyringeDashboard() {
   const nominal = session.assortment?.nominal_per_hour ?? 0
   const effPct = nominal > 0 ? Math.round(avgPerHour / nominal * 100) : null
 
+  // Cele zmianowe na asortyment
+  const shiftTarget = session.assortment?.shift_target_qty ?? null
+  const rejectTargetPct = session.assortment?.reject_target_pct ?? null
+  const rejectPctNum = parseFloat(rejectPct)
+
+  // Przypomnienie o wpisie co 2h
+  const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
+  const minSinceEntry = Math.floor((Date.now() - lastEntryAt) / 60000)
+  const entryDue = minSinceEntry >= 120
+
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
       {/* Nagłówek */}
@@ -187,6 +197,24 @@ export default function SyringeDashboard() {
           </button>
         </div>
       </div>
+
+      {/* Przypomnienie o wpisie produkcyjnym co 2h */}
+      {entryDue && !activeDowntime && (
+        <div className="rounded-xl border-2 border-amber-500/40 bg-amber-500/10 p-4 flex items-center justify-between gap-4">
+          <div>
+            <div className="font-bold text-amber-300">Czas na wpis produkcyjny</div>
+            <div className="text-sm text-amber-200 mt-0.5">
+              Od ostatniego wpisu minęło {fmtMin(minSinceEntry)}. Wpisuj wynik co ok. 2h.
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/syringe/entry')}
+            className="shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-300"
+          >
+            Wpisz produkcję
+          </button>
+        </div>
+      )}
 
       {/* Ostrzeżenie o aktywnym przestoju */}
       {activeDowntime && (
@@ -210,11 +238,16 @@ export default function SyringeDashboard() {
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard label="Wyprodukowano" value={totalProduced.toLocaleString('pl')} sub="sztuk łącznie" />
         <KpiCard label="Sztuki dobre" value={totalGood.toLocaleString('pl')} highlight />
-        <KpiCard label="Braki" value={totalReject.toLocaleString('pl')} sub={`${rejectPct}%`} />
+        <KpiCard
+          label="Braki"
+          value={totalReject.toLocaleString('pl')}
+          sub={rejectTargetPct !== null ? `${rejectPct}% (cel: ${rejectTargetPct}%)` : `${rejectPct}%`}
+          danger={rejectTargetPct !== null && rejectPctNum > rejectTargetPct}
+        />
         <KpiCard
           label="Realizacja planu"
           value={planPct !== null ? `${planPct}%` : '—'}
-          sub={planQty > 0 ? `Plan: ${planQty.toLocaleString('pl')} szt` : 'Brak planu'}
+          sub={planQty > 0 ? `Plan: ${planQty.toLocaleString('pl')} szt` : shiftTarget ? `Cel linii: ${shiftTarget.toLocaleString('pl')} szt` : 'Brak planu'}
           highlight={planPct !== null && planPct >= 100}
         />
       </div>
@@ -287,14 +320,22 @@ export default function SyringeDashboard() {
       {lastEntry && (
         <div className="rounded-xl border border-navy-700 bg-navy-800 p-4">
           <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-3">Ostatni wpis produkcyjny</div>
-          <div className="grid grid-cols-3 gap-3 text-sm">
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
             <div>
               <div className="text-navy-500">Godzina</div>
               <div className="text-white font-medium">{new Date(lastEntry.recorded_at).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' })}</div>
             </div>
             <div>
-              <div className="text-navy-500">Licznik</div>
-              <div className="text-white font-medium">{lastEntry.counter_value.toLocaleString('pl')}</div>
+              <div className="text-navy-500">Licznik druk</div>
+              <div className="text-white font-medium">{(lastEntry.counter_print_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
+            </div>
+            <div>
+              <div className="text-navy-500">Licznik montaż</div>
+              <div className="text-white font-medium">{(lastEntry.counter_assembly_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
+            </div>
+            <div>
+              <div className="text-navy-500">Braki</div>
+              <div className="text-white font-medium">{lastEntry.reject_qty.toLocaleString('pl')}</div>
             </div>
             <div>
               <div className="text-navy-500">Wydajność</div>

@@ -47,11 +47,12 @@ export default function SyringeProductionEntry() {
   const navigate = useNavigate()
   const qc = useQueryClient()
 
-  const [counterValue, setCounterValue] = useState('')
-  const [counterReset, setCounterReset] = useState(false)
-  const [counterResetReason, setCounterResetReason] = useState('')
-  const [goodQty, setGoodQty] = useState('')
-  const [rejectQty, setRejectQty] = useState('')
+  const [counterPrintValue, setCounterPrintValue] = useState('')
+  const [counterPrintReset, setCounterPrintReset] = useState(false)
+  const [counterPrintResetReason, setCounterPrintResetReason] = useState('')
+  const [counterAssemblyValue, setCounterAssemblyValue] = useState('')
+  const [counterAssemblyReset, setCounterAssemblyReset] = useState(false)
+  const [counterAssemblyResetReason, setCounterAssemblyResetReason] = useState('')
   const [techRejectQty, setTechRejectQty] = useState('')
   const [qualRejectQty, setQualRejectQty] = useState('')
   const [notes, setNotes] = useState('')
@@ -75,16 +76,30 @@ export default function SyringeProductionEntry() {
     queryFn: fetchDefectCategories
   })
 
-  const producedQty = parseInt(goodQty || '0') + parseInt(rejectQty || '0')
-  const counterNum = parseInt(counterValue || '0')
-  const lastCounter = lastEntry?.counter_value ?? 0
+  const printNum = parseInt(counterPrintValue || '0')
+  const assemblyNum = parseInt(counterAssemblyValue || '0')
+  const lastPrintCounter = lastEntry?.counter_print_value ?? 0
+  const lastAssemblyCounter = lastEntry?.counter_assembly_value ?? 0
+
+  const printDelta = counterPrintValue
+    ? (counterPrintReset ? printNum : printNum - lastPrintCounter)
+    : null
+  const assemblyDelta = counterAssemblyValue
+    ? (counterAssemblyReset ? assemblyNum : assemblyNum - lastAssemblyCounter)
+    : null
+
+  const goodQty = assemblyDelta !== null && assemblyDelta >= 0 ? String(assemblyDelta) : ''
+  const producedQty = printDelta !== null && printDelta > 0 ? printDelta : 0
+  const rejectQty = printDelta !== null && assemblyDelta !== null
+    ? String(Math.max(0, printDelta - assemblyDelta))
+    : ''
 
   const elapsedMs = lastEntry
     ? Date.now() - new Date(lastEntry.recorded_at).getTime()
     : session ? Date.now() - new Date(session.started_at).getTime() : 0
   const elapsedH = elapsedMs / 3600000
-  const perHour = elapsedH > 0 && parseInt(goodQty || '0') > 0
-    ? Math.round(parseInt(goodQty) / elapsedH)
+  const perHour = elapsedH > 0 && assemblyDelta && assemblyDelta > 0
+    ? Math.round(assemblyDelta / elapsedH)
     : null
 
   const planQty = session?.plan_qty ?? 0
@@ -106,15 +121,22 @@ export default function SyringeProductionEntry() {
 
   function validate(): string[] {
     const errs: string[] = []
-    if (!counterValue) errs.push('Nie wpisano stanu licznika.')
-    if (counterNum < 0) errs.push('Stan licznika nie może być ujemny.')
-    if (!counterReset && counterNum < lastCounter)
-      errs.push(`Podana wartość (${counterNum}) jest mniejsza niż poprzedni stan licznika (${lastCounter}). Jeśli licznik był zerowany — zaznacz "Zerowanie licznika".`)
-    if (!goodQty) errs.push('Nie wpisano ilości sztuk dobrych.')
-    if (parseInt(goodQty || '0') < 0) errs.push('Ilość sztuk dobrych nie może być ujemna.')
+    if (!counterPrintValue) errs.push('Nie wpisano stanu licznika automatu drukującego.')
+    if (!counterAssemblyValue) errs.push('Nie wpisano stanu licznika automatu montującego.')
+    if (printNum < 0) errs.push('Stan licznika druku nie może być ujemny.')
+    if (assemblyNum < 0) errs.push('Stan licznika montażu nie może być ujemny.')
+    if (!counterPrintReset && counterPrintValue && printNum < lastPrintCounter)
+      errs.push(`Licznik druku (${printNum}) jest mniejszy niż poprzedni stan (${lastPrintCounter}). Jeśli licznik był zerowany — zaznacz "Zerowanie licznika".`)
+    if (!counterAssemblyReset && counterAssemblyValue && assemblyNum < lastAssemblyCounter)
+      errs.push(`Licznik montażu (${assemblyNum}) jest mniejszy niż poprzedni stan (${lastAssemblyCounter}). Jeśli licznik był zerowany — zaznacz "Zerowanie licznika".`)
+    if (counterPrintReset && !counterPrintResetReason) errs.push('Podaj uzasadnienie zerowania licznika druku.')
+    if (counterAssemblyReset && !counterAssemblyResetReason) errs.push('Podaj uzasadnienie zerowania licznika montażu.')
+    if (printDelta !== null && assemblyDelta !== null && assemblyDelta > printDelta)
+      errs.push('Montaż nie może być większy niż druk — sprawdź stany liczników.')
+    if (printDelta !== null && printDelta < 0) errs.push('Ujemny przyrost licznika druku — sprawdź wpisaną wartość.')
+    if (assemblyDelta !== null && assemblyDelta < 0) errs.push('Ujemny przyrost licznika montażu — sprawdź wpisaną wartość.')
     if (parseInt(techRejectQty || '0') + parseInt(qualRejectQty || '0') > parseInt(rejectQty || '0'))
-      errs.push('Suma braków technologicznych i jakościowych nie może przekraczać łącznej ilości braków.')
-    if (counterReset && !counterResetReason) errs.push('Podaj uzasadnienie zerowania licznika.')
+      errs.push('Suma braków technologicznych i jakościowych nie może przekraczać obliczonej ilości braków (różnica druk-montaż).')
 
     for (const d of defects) {
       const cat = defectCategories.find(c => c.id === d.category_id)
@@ -149,15 +171,22 @@ export default function SyringeProductionEntry() {
           session_id: session.id,
           machine_id: session.machine_id,
           operator_id: profile.id,
-          counter_value: counterNum,
-          counter_reset: counterReset,
-          counter_reset_reason: counterReset ? counterResetReason : null,
+          // counter_value zostaje jako lustro licznika montażu (wsteczna zgodność z pulpitem/przekazaniem zmiany)
+          counter_value: assemblyNum,
+          counter_reset: counterAssemblyReset,
+          counter_reset_reason: counterAssemblyReset ? counterAssemblyResetReason : null,
+          counter_print_value: printNum,
+          counter_print_reset: counterPrintReset,
+          counter_print_reset_reason: counterPrintReset ? counterPrintResetReason : null,
+          counter_assembly_value: assemblyNum,
+          counter_assembly_reset: counterAssemblyReset,
+          counter_assembly_reset_reason: counterAssemblyReset ? counterAssemblyResetReason : null,
           produced_qty: producedN,
           good_qty: goodN,
           reject_qty: rejectN,
           tech_reject_qty: techN,
           qual_reject_qty: qualN,
-          qty_since_last: counterReset ? counterNum : counterNum - lastCounter,
+          qty_since_last: goodN,
           per_hour: perHour,
           reject_pct: producedN > 0 ? rejectN / producedN * 100 : 0,
           plan_pct: planPctN,
@@ -234,21 +263,22 @@ export default function SyringeProductionEntry() {
       {lastEntry && (
         <div className="rounded-xl border border-navy-700 bg-navy-800/50 p-4 text-sm">
           <div className="text-xs uppercase tracking-wider text-navy-500 mb-2">Poprzedni wpis</div>
-          <div className="flex gap-6 text-navy-300">
-            <span>Licznik: <strong className="text-white">{lastEntry.counter_value.toLocaleString('pl')}</strong></span>
+          <div className="flex gap-6 text-navy-300 flex-wrap">
+            <span>Druk: <strong className="text-white">{(lastEntry.counter_print_value ?? lastEntry.counter_value).toLocaleString('pl')}</strong></span>
+            <span>Montaż: <strong className="text-white">{(lastEntry.counter_assembly_value ?? lastEntry.counter_value).toLocaleString('pl')}</strong></span>
             <span>Dobre: <strong className="text-white">{lastEntry.good_qty.toLocaleString('pl')}</strong></span>
             <span>Godz: <strong className="text-white">{new Date(lastEntry.recorded_at).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' })}</strong></span>
           </div>
         </div>
       )}
 
-      {/* Licznik */}
+      {/* Liczniki */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
-        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika automatu</div>
+        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika — automat drukujący</div>
         <input
           type="number"
-          value={counterValue}
-          onChange={e => { setCounterValue(e.target.value); setErrors([]) }}
+          value={counterPrintValue}
+          onChange={e => { setCounterPrintValue(e.target.value); setErrors([]) }}
           placeholder="np. 123456"
           className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-4 text-2xl font-bold text-white placeholder-navy-600 focus:outline-none focus:border-brand"
           min={0}
@@ -256,53 +286,78 @@ export default function SyringeProductionEntry() {
         <label className="flex items-center gap-3 cursor-pointer">
           <input
             type="checkbox"
-            checked={counterReset}
-            onChange={e => { setCounterReset(e.target.checked); setErrors([]) }}
+            checked={counterPrintReset}
+            onChange={e => { setCounterPrintReset(e.target.checked); setErrors([]) }}
             className="w-5 h-5 rounded accent-brand"
           />
           <span className="text-sm text-navy-300">Licznik był zerowany / wymieniony</span>
         </label>
-        {counterReset && (
+        {counterPrintReset && (
           <input
             type="text"
-            value={counterResetReason}
-            onChange={e => setCounterResetReason(e.target.value)}
+            value={counterPrintResetReason}
+            onChange={e => setCounterPrintResetReason(e.target.value)}
             placeholder="Podaj uzasadnienie zerowania licznika (wymagane)"
             className="w-full bg-navy-900 border border-amber-500/50 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-amber-500"
           />
         )}
-        {counterValue && !counterReset && parseInt(counterValue) > lastCounter && (
+        {printDelta !== null && (
           <div className="text-xs text-navy-500">
-            Produkcja od poprzedniego wpisu: <strong className="text-white">{(parseInt(counterValue) - lastCounter).toLocaleString('pl')} szt</strong>
+            Przyrost od poprzedniego wpisu: <strong className="text-white">{printDelta.toLocaleString('pl')} szt</strong>
           </div>
         )}
       </div>
 
-      {/* Ilości */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
-        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Ilości</div>
+        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika — automat montujący</div>
+        <input
+          type="number"
+          value={counterAssemblyValue}
+          onChange={e => { setCounterAssemblyValue(e.target.value); setErrors([]) }}
+          placeholder="np. 123000"
+          className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-4 text-2xl font-bold text-white placeholder-navy-600 focus:outline-none focus:border-brand"
+          min={0}
+        />
+        <label className="flex items-center gap-3 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={counterAssemblyReset}
+            onChange={e => { setCounterAssemblyReset(e.target.checked); setErrors([]) }}
+            className="w-5 h-5 rounded accent-brand"
+          />
+          <span className="text-sm text-navy-300">Licznik był zerowany / wymieniony</span>
+        </label>
+        {counterAssemblyReset && (
+          <input
+            type="text"
+            value={counterAssemblyResetReason}
+            onChange={e => setCounterAssemblyResetReason(e.target.value)}
+            placeholder="Podaj uzasadnienie zerowania licznika (wymagane)"
+            className="w-full bg-navy-900 border border-amber-500/50 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-amber-500"
+          />
+        )}
+        {assemblyDelta !== null && (
+          <div className="text-xs text-navy-500">
+            Przyrost od poprzedniego wpisu: <strong className="text-white">{assemblyDelta.toLocaleString('pl')} szt</strong>
+          </div>
+        )}
+      </div>
+
+      {/* Ilości (obliczane automatycznie z różnicy liczników) */}
+      <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
+        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Ilości (obliczone: druk − montaż = braki)</div>
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="text-sm text-navy-400 mb-2 block">Sztuki dobre *</label>
-            <input
-              type="number"
-              value={goodQty}
-              onChange={e => { setGoodQty(e.target.value); setErrors([]) }}
-              placeholder="0"
-              min={0}
-              className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-xl font-bold text-green-400 placeholder-navy-600 focus:outline-none focus:border-brand"
-            />
+            <label className="text-sm text-navy-400 mb-2 block">Sztuki dobre (montaż)</label>
+            <div className="w-full bg-navy-900 border border-navy-700 rounded-xl px-4 py-3 text-xl font-bold text-green-400">
+              {goodQty ? parseInt(goodQty).toLocaleString('pl') : '—'}
+            </div>
           </div>
           <div>
-            <label className="text-sm text-navy-400 mb-2 block">Braki łącznie</label>
-            <input
-              type="number"
-              value={rejectQty}
-              onChange={e => { setRejectQty(e.target.value); setErrors([]) }}
-              placeholder="0"
-              min={0}
-              className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-xl font-bold text-red-400 placeholder-navy-600 focus:outline-none focus:border-brand"
-            />
+            <label className="text-sm text-navy-400 mb-2 block">Braki łącznie (druk − montaż)</label>
+            <div className="w-full bg-navy-900 border border-navy-700 rounded-xl px-4 py-3 text-xl font-bold text-red-400">
+              {rejectQty ? parseInt(rejectQty).toLocaleString('pl') : '—'}
+            </div>
           </div>
           <div>
             <label className="text-sm text-navy-400 mb-2 block">w tym technologiczne</label>

@@ -436,6 +436,8 @@ export interface SaAssortment {
   code: string
   volume_ml: number | null
   nominal_per_hour: number
+  shift_target_qty: number | null
+  reject_target_pct: number
   description: string | null
   is_active: boolean
   sort_order: number
@@ -540,6 +542,12 @@ export interface SaProductionEntry {
   counter_value: number
   counter_reset: boolean
   counter_reset_reason: string | null
+  counter_print_value: number | null
+  counter_print_reset: boolean
+  counter_print_reset_reason: string | null
+  counter_assembly_value: number | null
+  counter_assembly_reset: boolean
+  counter_assembly_reset_reason: string | null
   produced_qty: number
   good_qty: number
   reject_qty: number
