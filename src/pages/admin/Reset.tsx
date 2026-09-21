@@ -8,8 +8,8 @@ interface ResetOption {
   label: string
   desc: string
   color: string
-  tables: string[]
   warn: string
+  rpc?: string
 }
 
 const OPTIONS: ResetOption[] = [
@@ -18,7 +18,6 @@ const OPTIONS: ResetOption[] = [
     label: 'Raporty godzinowe',
     desc: 'Usuwa wszystkie raporty godzinowe i zdarzenia przestojowe',
     color: 'border-amber-500/30 hover:border-amber-500/60',
-    tables: ['downtime_events', 'hourly_reports'],
     warn: 'Usuniecie raportów jest nieodwracalne.'
   },
   {
@@ -26,7 +25,6 @@ const OPTIONS: ResetOption[] = [
     label: 'Zmiany produkcyjne',
     desc: 'Usuwa wszystkie zmiany (wymaga wcześniejszego usunięcia raportów)',
     color: 'border-amber-500/30 hover:border-amber-500/60',
-    tables: ['shifts'],
     warn: 'Usuwa wszystkie zmiany.'
   },
   {
@@ -34,7 +32,6 @@ const OPTIONS: ResetOption[] = [
     label: 'Audit log',
     desc: 'Usuwa historię zdarzeń systemowych',
     color: 'border-navy-600 hover:border-navy-500',
-    tables: ['audit_logs'],
     warn: 'Usuwa historię zdarzeń.'
   },
   {
@@ -42,46 +39,66 @@ const OPTIONS: ResetOption[] = [
     label: '🚨 RESET WSZYSTKICH DANYCH',
     desc: 'Usuwa wszystkie dane produkcyjne - raporty, zmiany i audit',
     color: 'border-red-500/60 hover:border-red-500 bg-red-500/5',
-    tables: ['downtime_events', 'hourly_reports', 'shifts', 'audit_logs'],
     warn: 'To usunie WSZYSTKIE dane produkcyjne. Tej operacji nie można cofnąć!'
   }
 ]
 
+const SA_OPTIONS: ResetOption[] = [
+  {
+    id: 'sessions',
+    label: 'Wpisy operatorów (SA)',
+    desc: 'Usuwa wszystkie sesje zmianowe, wpisy produkcji, braki, przestoje, awarie, zgłoszenia jakości, zużycie komponentów, przezbrojenia i przekazania zmian na liniach strzykawkowych',
+    color: 'border-amber-500/30 hover:border-amber-500/60',
+    warn: 'Usuwa WSZYSTKIE dane wprowadzone przez operatorów linii strzykawkowych. Automaty, asortymenty i kategorie (konfiguracja) zostają nienaruszone.',
+    rpc: 'sa_admin_reset_data'
+  },
+  {
+    id: 'audit',
+    label: 'Audit log (SA)',
+    desc: 'Usuwa historię zdarzeń modułu strzykawkowego',
+    color: 'border-navy-600 hover:border-navy-500',
+    warn: 'Usuwa historię zdarzeń modułu SA.',
+    rpc: 'sa_admin_reset_data'
+  },
+  {
+    id: 'all',
+    label: '🚨 RESET WSZYSTKICH DANYCH SA',
+    desc: 'Usuwa wszystkie wpisy operatorów oraz audit log modułu strzykawkowego',
+    color: 'border-red-500/60 hover:border-red-500 bg-red-500/5',
+    warn: 'To usunie WSZYSTKIE dane operatorskie modułu strzykawkowego (sesje, produkcja, braki, przestoje, awarie, jakość, komponenty, przezbrojenia, przekazania) oraz audit log SA. Tej operacji nie można cofnąć!',
+    rpc: 'sa_admin_reset_data'
+  }
+]
+
+type Group = 'ispro' | 'sa'
+
 export default function AdminReset() {
   const testMode = useTestMode()
+  const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [selected,  setSelected]  = useState<string | null>(null)
   const [confirm,   setConfirm]   = useState('')
   const [loading,   setLoading]   = useState(false)
   const [msg,       setMsg]       = useState('')
   const [error,     setError]     = useState('')
 
-  const selectedOption = OPTIONS.find(o => o.id === selected)
+  const selectedOption = (selectedGroup === 'sa' ? SA_OPTIONS : OPTIONS).find(o => o.id === selected)
 
-  const handleReset = async () => {
-    if (!selectedOption) return
-    if (confirm !== 'RESET') { setError('Wpisz RESET żeby potwierdzić'); return }
-    setLoading(true); setError('')
-    try {
-      for (const table of selectedOption.tables) {
-        const { error: err } = await supabase.from(table).delete().neq('id', '00000000-0000-0000-0000-000000000000')
-        if (err) { setError(`Błąd przy usuwaniu ${table}: ${err.message}`); setLoading(false); return }
-      }
-      setMsg(`✓ ${selectedOption.label} — dane usunięte`)
-      setSelected(null); setConfirm('')
-      setTimeout(() => setMsg(''), 5000)
-    } finally { setLoading(false) }
+  const pick = (group: Group, id: string) => {
+    setSelectedGroup(group); setSelected(id); setConfirm(''); setError('')
   }
+  const cancelSelection = () => { setSelectedGroup(null); setSelected(null); setConfirm(''); setError('') }
 
   const handleResetRpc = async () => {
     if (!selectedOption) return
     if (confirm !== 'RESET') { setError('Wpisz RESET zeby potwierdzic'); return }
     setLoading(true); setError('')
     try {
-      const { data, error: err } = await supabase.rpc('admin_reset_test_data', { p_scope: selectedOption.id })
+      const rpcName = selectedOption.rpc ?? 'admin_reset_test_data'
+      const { data, error: err } = await supabase.rpc(rpcName, { p_scope: selectedOption.id })
       if (err) {
-        const missingFunction = err.message.includes('admin_reset_test_data') || err.message.includes('schema cache')
+        const missingFunction = err.message.includes(rpcName) || err.message.includes('schema cache')
         setError(missingFunction
-          ? 'Reset nie jest jeszcze aktywny w bazie. Wgraj migracje 009_admin_reset_test_data.sql w Supabase SQL Editor i odswiez strone.'
+          ? `Reset nie jest jeszcze aktywny w bazie. Wgraj migracje z funkcją ${rpcName} w Supabase SQL Editor i odswiez strone.`
           : `Blad resetu: ${err.message}`)
         return
       }
@@ -89,12 +106,10 @@ export default function AdminReset() {
       const deleted = (data as { deleted?: Record<string, number> } | null)?.deleted ?? {}
       const count = Object.values(deleted).reduce((sum, value) => sum + Number(value), 0)
       setMsg(`OK: ${selectedOption.label} - usunieto ${count} rekordow`)
-      setSelected(null); setConfirm('')
+      cancelSelection()
       setTimeout(() => setMsg(''), 5000)
     } finally { setLoading(false) }
   }
-
-  void handleReset
 
   return (
     <div className="space-y-6 max-w-2xl">
@@ -137,17 +152,36 @@ export default function AdminReset() {
         </div>
       </div>
 
-      {/* Options */}
-      <div className="space-y-3">
-        {OPTIONS.map(o => (
-          <button key={o.id} onClick={() => { setSelected(o.id); setConfirm(''); setError('') }}
-            className={cn('w-full p-4 rounded-xl border-2 text-left transition-all',
-              selected === o.id ? 'border-red-500 bg-red-500/10' : o.color, 'bg-navy-800'
-            )}>
-            <div className="font-bold text-white">{o.label}</div>
-            <div className="text-xs text-navy-400 mt-1">{o.desc}</div>
-          </button>
-        ))}
+      {/* Options — IS PRO */}
+      <div>
+        <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Automaty IS PRO</div>
+        <div className="space-y-3">
+          {OPTIONS.map(o => (
+            <button key={o.id} onClick={() => pick('ispro', o.id)}
+              className={cn('w-full p-4 rounded-xl border-2 text-left transition-all',
+                selectedGroup === 'ispro' && selected === o.id ? 'border-red-500 bg-red-500/10' : o.color, 'bg-navy-800'
+              )}>
+              <div className="font-bold text-white">{o.label}</div>
+              <div className="text-xs text-navy-400 mt-1">{o.desc}</div>
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Options — Linie strzykawkowe (SA) */}
+      <div>
+        <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Linie strzykawkowe (SA)</div>
+        <div className="space-y-3">
+          {SA_OPTIONS.map(o => (
+            <button key={o.id} onClick={() => pick('sa', o.id)}
+              className={cn('w-full p-4 rounded-xl border-2 text-left transition-all',
+                selectedGroup === 'sa' && selected === o.id ? 'border-red-500 bg-red-500/10' : o.color, 'bg-navy-800'
+              )}>
+              <div className="font-bold text-white">{o.label}</div>
+              <div className="text-xs text-navy-400 mt-1">{o.desc}</div>
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* Confirm dialog */}
@@ -167,7 +201,7 @@ export default function AdminReset() {
               className="btn-danger flex-1 py-3 font-bold disabled:opacity-40">
               {loading ? 'Usuwanie...' : '🗑 Usuń dane'}
             </button>
-            <button onClick={() => { setSelected(null); setConfirm(''); setError('') }}
+            <button onClick={cancelSelection}
               className="btn-secondary px-6 py-3">
               Anuluj
             </button>
