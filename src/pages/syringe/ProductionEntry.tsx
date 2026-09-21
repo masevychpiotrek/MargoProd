@@ -53,8 +53,6 @@ export default function SyringeProductionEntry() {
   const [counterAssemblyValue, setCounterAssemblyValue] = useState('')
   const [counterAssemblyReset, setCounterAssemblyReset] = useState(false)
   const [counterAssemblyResetReason, setCounterAssemblyResetReason] = useState('')
-  const [techRejectQty, setTechRejectQty] = useState('')
-  const [qualRejectQty, setQualRejectQty] = useState('')
   const [notes, setNotes] = useState('')
   const [defects, setDefects] = useState<DefectRow[]>([])
   const [errors, setErrors] = useState<string[]>([])
@@ -109,9 +107,15 @@ export default function SyringeProductionEntry() {
   const sessionGood = session?.total_good ?? 0
   const planPct = planQty > 0 ? Math.round((sessionGood + parseInt(goodQty || '0')) / planQty * 100) : null
 
+  const allocatedQty = defects.reduce((sum, d) => sum + (parseInt(d.qty) || 0), 0)
+  const remainingToAllocate = parseInt(rejectQty || '0') - allocatedQty
+
   function addDefectRow(catId: string) {
     if (defects.find(d => d.category_id === catId)) return
-    setDefects(prev => [...prev, { category_id: catId, qty: '', notes: '' }])
+    // Podpowiadamy od razu ilość, jaka została do rozliczenia — operator ją
+    // koryguje, jeśli dana kategoria nie wyjaśnia wszystkich pozostałych braków.
+    const suggested = Math.max(0, remainingToAllocate)
+    setDefects(prev => [...prev, { category_id: catId, qty: suggested > 0 ? String(suggested) : '', notes: '' }])
   }
 
   function updateDefectRow(catId: string, field: 'qty' | 'notes', value: string) {
@@ -138,8 +142,6 @@ export default function SyringeProductionEntry() {
       errs.push('Montaż nie może być większy niż druk — sprawdź stany liczników.')
     if (printDelta !== null && printDelta < 0) errs.push('Ujemny przyrost licznika druku — sprawdź wpisaną wartość.')
     if (assemblyDelta !== null && assemblyDelta < 0) errs.push('Ujemny przyrost licznika montażu — sprawdź wpisaną wartość.')
-    if (parseInt(techRejectQty || '0') + parseInt(qualRejectQty || '0') > parseInt(rejectQty || '0'))
-      errs.push('Suma braków technologicznych i jakościowych nie może przekraczać obliczonej ilości braków (różnica druk-montaż).')
 
     for (const d of defects) {
       const cat = defectCategories.find(c => c.id === d.category_id)
@@ -147,6 +149,13 @@ export default function SyringeProductionEntry() {
         errs.push(`Kategoria "${cat.name}" wymaga komentarza.`)
       if (!d.qty || parseInt(d.qty) <= 0)
         errs.push(`Podaj ilość dla kategorii braków: ${cat?.name ?? '—'}.`)
+    }
+
+    const rejectN = parseInt(rejectQty || '0')
+    if (rejectN > 0) {
+      if (defects.length === 0) errs.push('Rozlicz braki na kategorie — nie dodano żadnej kategorii.')
+      else if (remainingToAllocate > 0) errs.push(`Rozlicz wszystkie braki na kategorie — zostało ${remainingToAllocate} szt do przypisania.`)
+      else if (remainingToAllocate < 0) errs.push(`Suma przypisanych kategorii przekracza całkowite braki o ${Math.abs(remainingToAllocate)} szt.`)
     }
     return errs
   }
@@ -159,8 +168,16 @@ export default function SyringeProductionEntry() {
 
       const goodN = parseInt(goodQty)
       const rejectN = parseInt(rejectQty || '0')
-      const techN = parseInt(techRejectQty || '0')
-      const qualN = parseInt(qualRejectQty || '0')
+      // tech/jakość liczone automatycznie z kategorii przypisanych do braków —
+      // 'other' traktujemy jako jakościowe (brak osobnej kolumny w bazie).
+      const techN = defects.reduce((sum, d) => {
+        const cat = defectCategories.find(c => c.id === d.category_id)
+        return cat?.defect_type === 'tech' ? sum + (parseInt(d.qty) || 0) : sum
+      }, 0)
+      const qualN = defects.reduce((sum, d) => {
+        const cat = defectCategories.find(c => c.id === d.category_id)
+        return cat?.defect_type !== 'tech' ? sum + (parseInt(d.qty) || 0) : sum
+      }, 0)
       const producedN = goodN + rejectN
       const planPctN = planQty > 0 ? (sessionGood + goodN) / planQty * 100 : null
       const remainingN = planQty > 0 ? Math.max(0, planQty - sessionGood - goodN) : null
@@ -362,28 +379,6 @@ export default function SyringeProductionEntry() {
               {rejectQty ? parseInt(rejectQty).toLocaleString('pl') : '—'}
             </div>
           </div>
-          <div>
-            <label className="text-sm text-navy-400 mb-2 block">w tym technologiczne</label>
-            <input
-              type="number"
-              value={techRejectQty}
-              onChange={e => setTechRejectQty(e.target.value)}
-              placeholder="0"
-              min={0}
-              className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-600 focus:outline-none focus:border-brand"
-            />
-          </div>
-          <div>
-            <label className="text-sm text-navy-400 mb-2 block">w tym jakościowe</label>
-            <input
-              type="number"
-              value={qualRejectQty}
-              onChange={e => setQualRejectQty(e.target.value)}
-              placeholder="0"
-              min={0}
-              className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-600 focus:outline-none focus:border-brand"
-            />
-          </div>
         </div>
 
         {/* Obliczenia na bieżąco */}
@@ -420,7 +415,25 @@ export default function SyringeProductionEntry() {
       {/* Kategorie braków */}
       {parseInt(rejectQty || '0') > 0 && (
         <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
-          <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Kategorie braków</div>
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Kategorie braków</div>
+            <div className={`text-sm font-bold ${
+              remainingToAllocate === 0 ? 'text-green-400' : remainingToAllocate < 0 ? 'text-red-400' : 'text-amber-400'
+            }`}>
+              {remainingToAllocate === 0
+                ? `✓ Rozliczone ${allocatedQty.toLocaleString('pl')} / ${rejectQty} szt`
+                : remainingToAllocate < 0
+                  ? `Przekroczono o ${Math.abs(remainingToAllocate).toLocaleString('pl')} szt`
+                  : `Zostało do przypisania: ${remainingToAllocate.toLocaleString('pl')} szt`}
+            </div>
+          </div>
+
+          <div className="h-2 bg-navy-900 rounded-full overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all ${remainingToAllocate < 0 ? 'bg-red-500' : remainingToAllocate === 0 ? 'bg-green-500' : 'bg-amber-500'}`}
+              style={{ width: `${Math.min(100, parseInt(rejectQty || '0') > 0 ? allocatedQty / parseInt(rejectQty) * 100 : 0)}%` }}
+            />
+          </div>
 
           {defects.map(d => {
             const cat = defectCategories.find(c => c.id === d.category_id)
