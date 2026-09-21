@@ -4,26 +4,34 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import type { SaMachine, SaAssortment, SaOrder } from '@/types/database'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import { syringeCurrentShift, wholeQuantity } from '@/lib/syringeMetrics'
 
 type ShiftType = 'I' | 'II' | 'III'
 
 async function fetchMachines() {
   const r = await supabase.from('sa_machines').select('*').eq('is_active', true).is('deleted_at', null).order('sort_order')
+  if (r.error) throw r.error
   return r.data as SaMachine[] ?? []
 }
 
 async function fetchAssortments() {
   const r = await supabase.from('sa_assortments').select('*').eq('is_active', true).order('sort_order')
+  if (r.error) throw r.error
   return r.data as SaAssortment[] ?? []
 }
 
 async function fetchOpenOrders(machineId: string, assortmentId: string) {
   const r = await supabase.from('sa_orders').select('*, assortment:sa_assortments(*)').eq('machine_id', machineId).eq('assortment_id', assortmentId).in('status', ['planned', 'in_progress']).order('planned_date')
+  if (r.error) throw r.error
   return r.data as SaOrder[] ?? []
 }
 
 async function fetchActiveSession(machineId: string) {
   const r = await supabase.from('sa_sessions').select('id, operator_id, shift_type, started_at').eq('machine_id', machineId).is('ended_at', null).maybeSingle()
+  if (r.error) throw r.error
   return r.data
 }
 
@@ -31,22 +39,24 @@ export default function SyringeSessionStart() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
+  const ownSession = useSyringeSession()
 
-  const [shift, setShift] = useState<ShiftType>('I')
+  const [shift, setShift] = useState<ShiftType>(syringeCurrentShift)
   const [machineId, setMachineId] = useState('')
   const [assortmentId, setAssortmentId] = useState('')
   const [orderId, setOrderId] = useState('')
   const [planQty, setPlanQty] = useState('')
   const [error, setError] = useState('')
 
-  const { data: machines = [] } = useQuery({ queryKey: ['sa_machines'], queryFn: fetchMachines })
-  const { data: assortments = [] } = useQuery({ queryKey: ['sa_assortments'], queryFn: fetchAssortments })
+  const { data: machines = [], error: machinesError } = useQuery({ queryKey: ['sa_machines'], queryFn: fetchMachines })
+  const { data: assortments = [], error: assortmentsError } = useQuery({ queryKey: ['sa_assortments'], queryFn: fetchAssortments })
   const { data: orders = [] } = useQuery({
     queryKey: ['sa_orders', machineId, assortmentId],
     queryFn: () => fetchOpenOrders(machineId, assortmentId),
     enabled: !!machineId && !!assortmentId
   })
-  const { data: activeSession } = useQuery({
+  const { data: activeSession, error: activeError, isFetching: checkingActive } = useQuery({
     queryKey: ['sa_active_session', machineId],
     queryFn: () => fetchActiveSession(machineId),
     enabled: !!machineId
@@ -60,32 +70,22 @@ export default function SyringeSessionStart() {
       if (!profile) throw new Error('Brak profilu użytkownika.')
       if (!machineId) throw new Error('Nie wybrano automatu.')
       if (!assortmentId) throw new Error('Nie wybrano asortymentu.')
+      if (planQty && !wholeQuantity(planQty)) throw new Error('Plan musi być nieujemną liczbą całkowitą.')
 
       if (activeSession) {
         throw new Error('Na tym automacie istnieje już aktywna sesja. Skontaktuj się z mistrzem.')
       }
 
-      const { data, error } = await supabase
-        .from('sa_sessions')
-        .insert({
+      return command('start', {
           machine_id: machineId,
-          operator_id: profile.id,
           assortment_id: assortmentId,
           order_id: orderId || null,
           shift_type: shift,
-          session_date: new Date().toISOString().split('T')[0],
-          plan_qty: planQty ? parseInt(planQty) : null,
-          machine_status: 'production'
+          plan_qty: planQty || null
         })
-        .select()
-        .single()
-
-      if (error) throw error
-      return data
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_sessions'] })
-      qc.invalidateQueries({ queryKey: ['sa_active_session'] })
+      void invalidateSyringe(qc)
       navigate('/syringe')
     },
     onError: (e: Error) => setError(e.message)
@@ -104,11 +104,15 @@ export default function SyringeSessionStart() {
         <p className="text-navy-400 text-sm mt-1">Operator automatów strzykawkowych</p>
       </div>
 
-      {error && (
+      {(error || machinesError || assortmentsError || activeError || ownSession.error) && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-300">
-          {error}
+          {error || machinesError?.message || assortmentsError?.message || activeError?.message || ownSession.error?.message}
         </div>
       )}
+      {ownSession.data && <div className="space-y-3" role="status">
+        <p>Masz otwartą zmianę: {ownSession.data.machine?.name} · zmiana {ownSession.data.shift_type}.</p>
+        <button className="btn-primary" onClick={() => navigate('/syringe')}>Wróć do aktywnej zmiany</button>
+      </div>}
 
       {/* Zmiana */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
@@ -140,7 +144,7 @@ export default function SyringeSessionStart() {
               return (
                 <button
                   key={m.id}
-                  onClick={() => { setMachineId(m.id); setError('') }}
+                  onClick={() => { setMachineId(m.id); setOrderId(''); setError('') }}
                   className={`rounded-xl border-2 p-4 text-left transition-all ${
                     machineId === m.id
                       ? 'border-brand bg-brand/10 text-brand'
@@ -179,7 +183,7 @@ export default function SyringeSessionStart() {
                   setAssortmentId(a.id)
                   setOrderId('')
                   setError('')
-                  if (a.shift_target_qty) setPlanQty(String(a.shift_target_qty))
+                  setPlanQty(a.shift_target_qty == null ? '' : String(a.shift_target_qty))
                 }}
                 className={`rounded-xl border-2 p-4 text-left transition-all ${
                   assortmentId === a.id
@@ -211,7 +215,7 @@ export default function SyringeSessionStart() {
                   key={o.id}
                   onClick={() => {
                     setOrderId(o.id)
-                    setPlanQty(String(o.target_qty - o.produced_qty))
+                    setPlanQty(String(Math.max(0, o.target_qty - o.good_qty)))
                   }}
                   className={`w-full rounded-xl border-2 p-4 text-left transition-all ${
                     orderId === o.id
@@ -226,7 +230,7 @@ export default function SyringeSessionStart() {
                     }`}>{o.status === 'in_progress' ? 'W toku' : 'Zaplanowane'}</span>
                   </div>
                   <div className="text-xs text-navy-400 mt-1">
-                    Cel: {o.target_qty.toLocaleString('pl')} · Wykonano: {o.produced_qty.toLocaleString('pl')} · Pozostało: {(o.target_qty - o.produced_qty).toLocaleString('pl')}
+                    Cel: {o.target_qty.toLocaleString('pl')} · Dobre: {o.good_qty.toLocaleString('pl')} · Pozostało: {Math.max(0, o.target_qty - o.good_qty).toLocaleString('pl')}
                   </div>
                 </button>
               ))}
@@ -284,7 +288,7 @@ export default function SyringeSessionStart() {
 
       <button
         onClick={() => { setError(''); startMutation.mutate() }}
-        disabled={!machineId || !assortmentId || startMutation.isPending || !!activeSession}
+        disabled={!machineId || !assortmentId || startMutation.isPending || checkingActive || !!activeSession || !!ownSession.data || ownSession.isLoading || !!ownSession.error || !!activeError}
         className="w-full py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 disabled:cursor-not-allowed hover:bg-brand/90 transition-all"
       >
         {startMutation.isPending ? 'Rozpoczynanie...' : 'Rozpocznij zmianę'}

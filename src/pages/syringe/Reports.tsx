@@ -1,50 +1,67 @@
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
+import { syringeRange, syringeProductionDate } from '@/lib/syringeMetrics'
 import { supabase } from '@/lib/supabase'
 import { exportXlsx, exportCsv, printDocument, esc, type Sheet } from '@/lib/tpmExport'
 import type { SaSession } from '@/types/database'
 
 type PeriodType = 'day' | 'week' | 'month'
 
-function rangeFor(type: PeriodType, anchor: string) {
-  const d = new Date(anchor)
-  if (type === 'month') {
-    return {
-      from: new Date(d.getFullYear(), d.getMonth(), 1).toISOString().split('T')[0],
-      to: new Date(d.getFullYear(), d.getMonth() + 1, 0).toISOString().split('T')[0]
-    }
+async function readPages<T>(page: (offset: number) => PromiseLike<{ data: T[] | null; error: { message: string } | null }>) {
+  const rows: T[] = []
+  for (let offset = 0; ; offset += 500) {
+    const result = await page(offset)
+    if (result.error) throw new Error(result.error.message)
+    rows.push(...(result.data ?? []))
+    if (!result.data || result.data.length < 500) return rows
   }
-  if (type === 'week') {
-    const day = (d.getDay() + 6) % 7
-    const from = new Date(d); from.setDate(d.getDate() - day)
-    const to = new Date(from); to.setDate(from.getDate() + 6)
-    return { from: from.toISOString().split('T')[0], to: to.toISOString().split('T')[0] }
-  }
-  return { from: anchor, to: anchor }
 }
 
 async function fetchSessions(from: string, to: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
+  return readPages<SaSession>(offset => supabase.from('sa_sessions')
     .select('*, machine:sa_machines(*), assortment:sa_assortments(*), operator:profiles!sa_sessions_operator_id_fkey(id, full_name)')
     .gte('session_date', from).lte('session_date', to)
-    .order('session_date', { ascending: false })
-  return data as SaSession[] ?? []
+    .order('session_date', { ascending: false }).order('id').range(offset, offset + 499))
 }
-async function fetchDowntime(from: string, to: string) {
-  const { data } = await supabase
-    .from('sa_downtime_events')
-    .select('duration_min, started_at, category:sa_downtime_categories(name)')
-    .gte('started_at', from).lte('started_at', to + 'T23:59:59')
-  return data ?? []
+
+async function fetchDowntime(from: string, to: string, shift: string) {
+  return readPages<any>(offset => {
+    let q = supabase.from('sa_downtime_events')
+      .select('duration_min, category:sa_downtime_categories(name), session:sa_sessions!inner(session_date, shift_type)')
+      .gte('session.session_date', from).lte('session.session_date', to)
+    if (shift) q = q.eq('session.shift_type', shift)
+    return q.order('id').range(offset, offset + 499)
+  })
 }
-async function fetchDefects(from: string, to: string) {
-  const { data } = await supabase
-    .from('sa_defect_entries')
-    .select('qty, created_at, category:sa_defect_categories(name)')
-    .gte('created_at', from).lte('created_at', to + 'T23:59:59')
-  return data ?? []
+
+async function fetchChangeovers(from: string, to: string, shift: string) {
+  return readPages<any>(offset => {
+    let q = supabase.from('sa_changeovers').select('duration_min, session:sa_sessions!inner(session_date, shift_type)')
+      .gte('session.session_date', from).lte('session.session_date', to)
+    if (shift) q = q.eq('session.shift_type', shift)
+    return q.order('id').range(offset, offset + 499)
+  })
+}
+
+async function fetchDefects(from: string, to: string, shift: string) {
+  return readPages<any>(offset => {
+    let q = supabase.from('sa_defect_entries')
+      .select('qty, category:sa_defect_categories(name), entry:sa_production_entries!inner(is_cancelled), session:sa_sessions!inner(session_date, shift_type)')
+      .eq('entry.is_cancelled', false).gte('session.session_date', from).lte('session.session_date', to)
+    if (shift) q = q.eq('session.shift_type', shift)
+    return q.order('id').range(offset, offset + 499)
+  })
+}
+
+async function fetchProduction(from: string, to: string, shift: string) {
+  return readPages<any>(offset => {
+    let q = supabase.from('sa_production_entries')
+      .select('good_qty, assortment:sa_assortments(name), session:sa_sessions!inner(session_date, shift_type, assortment:sa_assortments(name))')
+      .eq('is_cancelled', false).gte('session.session_date', from).lte('session.session_date', to)
+    if (shift) q = q.eq('session.shift_type', shift)
+    return q.order('id').range(offset, offset + 499)
+  })
 }
 
 function groupSum<T>(items: T[], keyFn: (i: T) => string, valFn: (i: T) => number) {
@@ -56,14 +73,18 @@ function groupSum<T>(items: T[], keyFn: (i: T) => string, valFn: (i: T) => numbe
 export default function SyringeReports() {
   const navigate = useNavigate()
   const [type, setType] = useState<PeriodType>('day')
-  const [anchor, setAnchor] = useState(new Date().toISOString().split('T')[0])
+  const [anchor, setAnchor] = useState(syringeProductionDate)
   const [shift, setShift] = useState<string>('')
-  const { from, to } = rangeFor(type, anchor)
+  const { from, to } = syringeRange(type, anchor)
 
-  const { data: sessions = [], isLoading } = useQuery({ queryKey: ['sa_report_sessions', from, to], queryFn: () => fetchSessions(from, to) })
-  const { data: downtime = [] } = useQuery({ queryKey: ['sa_report_downtime', from, to], queryFn: () => fetchDowntime(from, to) })
-  const { data: defects = [] } = useQuery({ queryKey: ['sa_report_defects', from, to], queryFn: () => fetchDefects(from, to) })
+  const { data: sessions = [], isFetching: sessionsLoading, error: sessionsError } = useQuery({ queryKey: ['sa_report_sessions', from, to], queryFn: () => fetchSessions(from, to) })
+  const { data: downtime = [], isFetching: downtimeLoading, error: downtimeError } = useQuery({ queryKey: ['sa_report_downtime', from, to, shift], queryFn: () => fetchDowntime(from, to, shift) })
+  const { data: defects = [], isFetching: defectsLoading, error: defectsError } = useQuery({ queryKey: ['sa_report_defects', from, to, shift], queryFn: () => fetchDefects(from, to, shift) })
 
+  const { data: production = [], isFetching: productionLoading, error: productionError } = useQuery({ queryKey: ['sa_report_production', from, to, shift], queryFn: () => fetchProduction(from, to, shift) })
+  const { data: changeovers = [], isFetching: changeoversLoading, error: changeoversError } = useQuery({ queryKey: ['sa_report_changeovers', from, to, shift], queryFn: () => fetchChangeovers(from, to, shift) })
+  const isLoading = sessionsLoading || downtimeLoading || defectsLoading || productionLoading || changeoversLoading
+  const reportError = changeoversError || sessionsError || downtimeError || defectsError || productionError
   const filteredSessions = shift ? sessions.filter(s => s.shift_type === shift) : sessions
 
   const r = useMemo(() => {
@@ -77,13 +98,13 @@ export default function SyringeReports() {
     const rejectPct = produced > 0 ? (reject / produced * 100).toFixed(1) : '0.0'
 
     const byMachine = groupSum(s, x => (x.machine as { name?: string })?.name ?? '—', x => x.total_good ?? 0)
-    const byAssortment = groupSum(s, x => (x.assortment as { name?: string })?.name ?? '—', x => x.total_good ?? 0)
+    const byAssortment = groupSum(production, x => x.assortment?.name ?? x.session?.assortment?.name ?? '—', x => x.good_qty ?? 0)
     const byOperator = groupSum(s, x => (x.operator as { full_name?: string })?.full_name ?? '—', x => x.total_good ?? 0)
-    const byDowntime = groupSum(downtime, (x: any) => x.category?.name ?? '—', (x: any) => x.duration_min ?? 0)
+    const byDowntime = groupSum([...downtime, ...changeovers.map(c => ({ ...c, category: { name: 'Przezbrojenie' } }))], (x: any) => x.category?.name ?? '—', (x: any) => x.duration_min ?? 0)
     const byDefect = groupSum(defects, (x: any) => x.category?.name ?? '—', (x: any) => x.qty ?? 0)
 
     return { count: s.length, produced, good, reject, planned, downMin, planPct, rejectPct, byMachine, byAssortment, byOperator, byDowntime, byDefect }
-  }, [filteredSessions, downtime, defects])
+  }, [filteredSessions, downtime, defects, production, changeovers])
 
   const periodLabel = type === 'day' ? 'dzienny' : type === 'week' ? 'tygodniowy' : 'miesięczny'
 
@@ -140,6 +161,8 @@ export default function SyringeReports() {
     printDocument(`Raport ${periodLabel} — linia strzykawkowa`, html)
   }
 
+  if (reportError) return <div role="alert" className="text-red-400 p-5">Nie można przygotować pełnego raportu: {reportError.message}</div>
+
   return (
     <div className="space-y-5">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -158,7 +181,7 @@ export default function SyringeReports() {
             </button>
           ))}
         </div>
-        <div><label className="label">Data w okresie</label><input type="date" value={anchor} onChange={e => setAnchor(e.target.value)} className="input" /></div>
+        <div><label className="label">Data w okresie</label><input type="date" value={anchor} onChange={e => { if (e.target.value) setAnchor(e.target.value) }} className="input" /></div>
         <div>
           <label className="label">Zmiana</label>
           <select value={shift} onChange={e => setShift(e.target.value)} className="input">
@@ -169,9 +192,9 @@ export default function SyringeReports() {
         <div className="text-sm text-navy-400">Zakres: <span className="text-white">{from} – {to}</span></div>
         <div className="flex-1" />
         <div className="flex gap-2">
-          <button onClick={doCsv} className="btn-secondary px-3 py-2">CSV</button>
-          <button onClick={doXlsx} className="btn-secondary px-3 py-2">XLSX</button>
-          <button onClick={doPrint} className="btn-primary px-4 py-2">🖨 PDF</button>
+          <button disabled={isLoading} onClick={doCsv} className="btn-secondary px-3 py-2">CSV</button>
+          <button disabled={isLoading} onClick={doXlsx} className="btn-secondary px-3 py-2">XLSX</button>
+          <button disabled={isLoading} onClick={doPrint} className="btn-primary px-4 py-2">🖨 PDF</button>
         </div>
       </div>
 

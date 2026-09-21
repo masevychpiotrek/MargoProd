@@ -2,36 +2,34 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import { useClock } from '@/hooks/useClock'
-import type { SaSession, SaDowntimeEvent, SaDowntimeCategory } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
+import type { SaDowntimeEvent, SaDowntimeCategory } from '@/types/database'
 
 async function fetchActiveDowntime(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_downtime_events')
     .select('*, category:sa_downtime_categories(*)')
     .eq('session_id', sessionId)
     .is('ended_at', null)
     .maybeSingle()
+  if (error) throw error
+  if (error) throw error
   return data as (SaDowntimeEvent & { category?: SaDowntimeCategory }) | null
 }
 
 async function fetchDowntimeCategories() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_downtime_categories')
     .select('*')
     .eq('is_active', true)
     .order('sort_order')
+  if (error) throw error
+  if (error) throw error
   return data as SaDowntimeCategory[] ?? []
 }
 
@@ -54,6 +52,7 @@ export default function SyringeDowntimeEntry() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
   const { now } = useClock()
 
   // Start downtime
@@ -67,20 +66,16 @@ export default function SyringeDowntimeEntry() {
   const [endErrors, setEndErrors] = useState<string[]>([])
   const [startErrors, setStartErrors] = useState<string[]>([])
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
-  const { data: activeDowntime } = useQuery({
+  const { data: activeDowntime, error: downtimeError } = useQuery({
     queryKey: ['sa_active_downtime', session?.id],
     queryFn: () => fetchActiveDowntime(session!.id),
     enabled: !!session?.id,
     refetchInterval: 5000
   })
 
-  const { data: categories = [] } = useQuery({
+  const { data: categories = [], error: categoriesError } = useQuery({
     queryKey: ['sa_downtime_categories'],
     queryFn: fetchDowntimeCategories
   })
@@ -99,19 +94,11 @@ export default function SyringeDowntimeEntry() {
       if (!selectedCategoryId) errs.push('Wybierz przyczynę przestoju.')
       if (errs.length > 0) { setStartErrors(errs); throw new Error('Walidacja') }
 
-      await supabase.from('sa_downtime_events').insert({
-        session_id: session.id,
-        machine_id: session.machine_id,
-        operator_id: profile.id,
-        category_id: selectedCategoryId,
-        description: description || null
-      })
-
-      await supabase.from('sa_sessions').update({ machine_status: 'waiting' }).eq('id', session.id)
+      await command('downtime_start', { session_id: session.id, category_id: selectedCategoryId, description })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_downtime'] })
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       setSelectedCategoryId('')
       setDescription('')
     },
@@ -127,25 +114,12 @@ export default function SyringeDowntimeEntry() {
       if (fullyResolved === null) errs.push('Określ, czy problem został całkowicie usunięty.')
       if (errs.length > 0) { setEndErrors(errs); throw new Error('Walidacja') }
 
-      const now = new Date().toISOString()
-      const diffMin = Math.round((Date.now() - new Date(activeDowntime.started_at).getTime()) / 60000)
-
-      await supabase.from('sa_downtime_events').update({
-        ended_at: now,
-        duration_min: diffMin,
-        actions_taken: actionsTaken || null,
-        maintenance_needed: maintenanceNeeded,
-        fully_resolved: fullyResolved
-      }).eq('id', activeDowntime.id)
-
-      await supabase.from('sa_sessions').update({
-        machine_status: 'production',
-        total_downtime_min: (session.total_downtime_min ?? 0) + diffMin
-      }).eq('id', session.id)
+      await command('downtime_end', { session_id: session.id, event_id: activeDowntime.id,
+        actions_taken: actionsTaken, maintenance_needed: maintenanceNeeded, fully_resolved: fullyResolved })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_downtime'] })
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       navigate('/syringe')
     },
     onError: (e: Error) => {
@@ -153,13 +127,14 @@ export default function SyringeDowntimeEntry() {
     }
   })
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <p className="text-navy-400">Brak aktywnej sesji.</p>
-        <button onClick={() => navigate('/syringe')} className="btn-primary mt-4">Wróć</button>
-      </div>
-    )
+  const loadError = downtimeError || categoriesError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => window.location.reload()}>Ponów odczyt</button>
+  </div>
+
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   return (

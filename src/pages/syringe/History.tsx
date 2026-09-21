@@ -13,7 +13,8 @@ async function fetchSessions(operatorId: string, isManager: boolean, limit = 20)
   if (!isManager) {
     q = q.eq('operator_id', operatorId)
   }
-  const { data } = await q
+  const { data, error } = await q
+  if (error) throw error
   return data as SaSession[] ?? []
 }
 
@@ -22,13 +23,19 @@ export default function SyringeHistory() {
   const [selected, setSelected] = useState<string | null>(null)
   const isManager = profile?.role === 'manager' || profile?.role === 'admin'
 
-  const { data: sessions = [], isLoading } = useQuery({
+  const { data: sessions = [], isLoading, error: historyError } = useQuery({
     queryKey: ['sa_history', profile?.id, isManager],
     queryFn: () => fetchSessions(profile!.id, isManager),
     enabled: !!profile?.id
   })
 
   if (isLoading) return <div className="text-navy-400 text-center py-16">Ładowanie...</div>
+
+  const loadError = historyError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => window.location.reload()}>Ponów odczyt</button>
+  </div>
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">

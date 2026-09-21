@@ -1,38 +1,35 @@
-import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useEffect, useRef, useState } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
-import type { SaSession, SaProductionEntry, SaDefectCategory } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
+import { syringeRate, wholeQuantity } from '@/lib/syringeMetrics'
+import type { SaProductionEntry, SaDefectCategory } from '@/types/database'
 
 async function fetchLastEntry(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_production_entries')
-    .select('*')
+    .select('*, defect_entries:sa_defect_entries(*)')
     .eq('session_id', sessionId)
     .eq('is_cancelled', false)
     .order('recorded_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-  return data as SaProductionEntry | null
+    .order('created_at', { ascending: false }).order('id', { ascending: false })
+    .limit(2)
+  if (error) throw error
+  return (data ?? []) as SaProductionEntry[]
 }
 
 async function fetchDefectCategories() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_defect_categories')
     .select('*')
     .eq('is_active', true)
     .order('sort_order')
+  if (error) throw error
   return data as SaDefectCategory[] ?? []
 }
 
@@ -46,6 +43,11 @@ export default function SyringeProductionEntry() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
+  const [search] = useSearchParams()
+  const editing = search.get('edit') === 'last'
+  const initializedEdit = useRef<string>()
+  const [correctionReason, setCorrectionReason] = useState('')
 
   const [counterPrintValue, setCounterPrintValue] = useState('')
   const [counterPrintReset, setCounterPrintReset] = useState(false)
@@ -57,27 +59,38 @@ export default function SyringeProductionEntry() {
   const [defects, setDefects] = useState<DefectRow[]>([])
   const [errors, setErrors] = useState<string[]>([])
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
-  const { data: lastEntry } = useQuery({
-    queryKey: ['sa_last_entry', session?.id],
+  const { data: recentEntries = [], isLoading: lastLoading, error: lastError, refetch: refetchLast } = useQuery({
+    queryKey: ['sa_recent_counters', session?.id],
     queryFn: () => fetchLastEntry(session!.id),
     enabled: !!session?.id
   })
 
-  const { data: defectCategories = [] } = useQuery({
+  const { data: defectCategories = [], error: categoriesError } = useQuery({
     queryKey: ['sa_defect_categories'],
     queryFn: fetchDefectCategories
   })
 
+  const currentEntry = editing ? recentEntries[0] : null
+  const lastEntry = recentEntries[editing ? 1 : 0] ?? null
+  useEffect(() => {
+    if (!currentEntry || initializedEdit.current === currentEntry.id) return
+    initializedEdit.current = currentEntry.id
+    setCounterPrintValue(String(currentEntry.counter_print_value ?? currentEntry.counter_value))
+    setCounterAssemblyValue(String(currentEntry.counter_assembly_value ?? currentEntry.counter_value))
+    setCounterPrintReset(currentEntry.counter_print_reset)
+    setCounterAssemblyReset(currentEntry.counter_assembly_reset)
+    setCounterPrintResetReason(currentEntry.counter_print_reset_reason ?? '')
+    setCounterAssemblyResetReason(currentEntry.counter_assembly_reset_reason ?? '')
+    setNotes(currentEntry.notes ?? '')
+    setDefects((currentEntry.defect_entries ?? []).map(d => ({ category_id: d.category_id, qty: String(d.qty), notes: d.notes ?? '' })))
+  }, [currentEntry])
+
   const printNum = parseInt(counterPrintValue || '0')
   const assemblyNum = parseInt(counterAssemblyValue || '0')
-  const lastPrintCounter = lastEntry?.counter_print_value ?? 0
-  const lastAssemblyCounter = lastEntry?.counter_assembly_value ?? 0
+  const lastPrintCounter = lastEntry?.counter_print_value ?? lastEntry?.counter_value ?? 0
+  const lastAssemblyCounter = lastEntry?.counter_assembly_value ?? lastEntry?.counter_value ?? 0
 
   const printDelta = counterPrintValue
     ? (counterPrintReset ? printNum : printNum - lastPrintCounter)
@@ -92,21 +105,12 @@ export default function SyringeProductionEntry() {
     ? String(Math.max(0, printDelta - assemblyDelta))
     : ''
 
-  // Wydajność liczymy WYŁĄCZNIE między dwoma realnymi wpisami — "czas od startu
-  // sesji" nie jest wiarygodnym punktem odniesienia (rozruch, przezbrojenie,
-  // czas zanim operator zacznie wpisywać), więc przy pierwszym wpisie zmiany
-  // celowo nie liczymy żadnej wydajności zamiast zgadywać z niepewnych danych.
-  const elapsedMs = lastEntry ? Date.now() - new Date(lastEntry.recorded_at).getTime() : 0
-  const elapsedH = elapsedMs / 3600000
-  // Poniżej 5 minut ekstrapolacja szt/h jest niemiarodajna (i przy bardzo małym
-  // elapsedH może przepełnić kolumnę NUMERIC(8,2)) — nie liczymy wtedy wydajności.
-  const MIN_ELAPSED_H_FOR_RATE = 5 / 60
-  const perHour = lastEntry && elapsedH >= MIN_ELAPSED_H_FOR_RATE && assemblyDelta && assemblyDelta > 0
-    ? Math.min(999999, Math.round(assemblyDelta / elapsedH))
+  const perHour = lastEntry && assemblyDelta !== null && assemblyDelta >= 0
+    ? syringeRate(assemblyDelta, (currentEntry ? new Date(currentEntry.recorded_at).getTime() : Date.now()) - new Date(lastEntry.recorded_at).getTime())
     : null
 
   const planQty = session?.plan_qty ?? 0
-  const sessionGood = session?.total_good ?? 0
+  const sessionGood = (session?.total_good ?? 0) - (currentEntry?.good_qty ?? 0)
   const planPct = planQty > 0 ? Math.round((sessionGood + parseInt(goodQty || '0')) / planQty * 100) : null
 
   const allocatedQty = defects.reduce((sum, d) => sum + (parseInt(d.qty) || 0), 0)
@@ -130,6 +134,9 @@ export default function SyringeProductionEntry() {
 
   function validate(): string[] {
     const errs: string[] = []
+    if (editing && (!currentEntry || !correctionReason.trim())) errs.push('Podaj powód korekty ostatniego wpisu.')
+    if (!wholeQuantity(counterPrintValue) || !wholeQuantity(counterAssemblyValue)) errs.push('Liczniki muszą być nieujemnymi liczbami całkowitymi.')
+    if (allocatedQty !== Number(rejectQty || 0)) errs.push('Suma kategorii musi odpowiadać liczbie braków, również gdy braki wynoszą zero.')
     if (!counterPrintValue) errs.push('Nie wpisano stanu licznika automatu drukującego.')
     if (!counterAssemblyValue) errs.push('Nie wpisano stanu licznika automatu montującego.')
     if (printNum < 0) errs.push('Stan licznika druku nie może być ujemny.')
@@ -138,8 +145,8 @@ export default function SyringeProductionEntry() {
       errs.push(`Licznik druku (${printNum}) jest mniejszy niż poprzedni stan (${lastPrintCounter}). Jeśli licznik był zerowany — zaznacz "Zerowanie licznika".`)
     if (!counterAssemblyReset && counterAssemblyValue && assemblyNum < lastAssemblyCounter)
       errs.push(`Licznik montażu (${assemblyNum}) jest mniejszy niż poprzedni stan (${lastAssemblyCounter}). Jeśli licznik był zerowany — zaznacz "Zerowanie licznika".`)
-    if (counterPrintReset && !counterPrintResetReason) errs.push('Podaj uzasadnienie zerowania licznika druku.')
-    if (counterAssemblyReset && !counterAssemblyResetReason) errs.push('Podaj uzasadnienie zerowania licznika montażu.')
+    if (counterPrintReset && !counterPrintResetReason.trim()) errs.push('Podaj uzasadnienie zerowania licznika druku.')
+    if (counterAssemblyReset && !counterAssemblyResetReason.trim()) errs.push('Podaj uzasadnienie zerowania licznika montażu.')
     if (printDelta !== null && assemblyDelta !== null && assemblyDelta > printDelta)
       errs.push('Montaż nie może być większy niż druk — sprawdź stany liczników.')
     if (printDelta !== null && printDelta < 0) errs.push('Ujemny przyrost licznika druku — sprawdź wpisaną wartość.')
@@ -147,9 +154,9 @@ export default function SyringeProductionEntry() {
 
     for (const d of defects) {
       const cat = defectCategories.find(c => c.id === d.category_id)
-      if (cat?.requires_comment && !d.notes)
+      if (cat?.requires_comment && !d.notes.trim())
         errs.push(`Kategoria "${cat.name}" wymaga komentarza.`)
-      if (!d.qty || parseInt(d.qty) <= 0)
+      if (!wholeQuantity(d.qty) || Number(d.qty) <= 0)
         errs.push(`Podaj ilość dla kategorii braków: ${cat?.name ?? '—'}.`)
     }
 
@@ -168,109 +175,34 @@ export default function SyringeProductionEntry() {
       const errs = validate()
       if (errs.length > 0) { setErrors(errs); throw new Error('Popraw błędy walidacji.') }
 
-      const goodN = parseInt(goodQty)
-      const rejectN = parseInt(rejectQty || '0')
-      // tech/jakość liczone automatycznie z kategorii przypisanych do braków —
-      // 'other' traktujemy jako jakościowe (brak osobnej kolumny w bazie).
-      const techN = defects.reduce((sum, d) => {
-        const cat = defectCategories.find(c => c.id === d.category_id)
-        return cat?.defect_type === 'tech' ? sum + (parseInt(d.qty) || 0) : sum
-      }, 0)
-      const qualN = defects.reduce((sum, d) => {
-        const cat = defectCategories.find(c => c.id === d.category_id)
-        return cat?.defect_type !== 'tech' ? sum + (parseInt(d.qty) || 0) : sum
-      }, 0)
-      const producedN = goodN + rejectN
-      const planPctN = planQty > 0 ? (sessionGood + goodN) / planQty * 100 : null
-      const remainingN = planQty > 0 ? Math.max(0, planQty - sessionGood - goodN) : null
-      const etaMin = perHour && perHour > 0 && remainingN !== null
-        ? Math.round(remainingN / perHour * 60)
-        : null
-
-      const { data: entryData, error: entryErr } = await supabase
-        .from('sa_production_entries')
-        .insert({
-          session_id: session.id,
-          machine_id: session.machine_id,
-          operator_id: profile.id,
-          // counter_value zostaje jako lustro licznika montażu (wsteczna zgodność z pulpitem/przekazaniem zmiany)
-          counter_value: assemblyNum,
-          counter_reset: counterAssemblyReset,
-          counter_reset_reason: counterAssemblyReset ? counterAssemblyResetReason : null,
-          counter_print_value: printNum,
-          counter_print_reset: counterPrintReset,
-          counter_print_reset_reason: counterPrintReset ? counterPrintResetReason : null,
-          counter_assembly_value: assemblyNum,
-          counter_assembly_reset: counterAssemblyReset,
-          counter_assembly_reset_reason: counterAssemblyReset ? counterAssemblyResetReason : null,
-          produced_qty: producedN,
-          good_qty: goodN,
-          reject_qty: rejectN,
-          tech_reject_qty: techN,
-          qual_reject_qty: qualN,
-          qty_since_last: goodN,
-          per_hour: perHour,
-          reject_pct: producedN > 0 ? rejectN / producedN * 100 : 0,
-          plan_pct: planPctN,
-          remaining_qty: remainingN,
-          eta_minutes: etaMin,
-          notes: notes || null
-        })
-        .select()
-        .single()
-
-      if (entryErr) throw entryErr
-
-      if (defects.length > 0) {
-        const { error: defErr } = await supabase.from('sa_defect_entries').insert(
-          defects
-            .filter(d => parseInt(d.qty) > 0)
-            .map(d => ({
-              entry_id: entryData.id,
-              session_id: session.id,
-              category_id: d.category_id,
-              qty: parseInt(d.qty),
-              notes: d.notes || null
-            }))
-        )
-        if (defErr) throw defErr
-      }
-
-      // Aktualizuj sumy sesji. Śr. wydajność liczymy jako PRAWDZIWĄ średnią
-      // całej zmiany (suma dobrych / czas od startu sesji) — nie mylić z
-      // "perHour", który jest chwilową wydajnością między dwoma wpisami.
-      const sessionElapsedH = (Date.now() - new Date(session.started_at).getTime()) / 3600000
-      const avgPerHourN = sessionElapsedH > 0
-        ? Math.min(999999, Math.round((sessionGood + goodN) / sessionElapsedH))
-        : null
-
-      await supabase.from('sa_sessions').update({
-        total_produced: (session.total_produced ?? 0) + producedN,
-        total_good: (session.total_good ?? 0) + goodN,
-        total_reject: (session.total_reject ?? 0) + rejectN,
-        total_tech_reject: (session.total_tech_reject ?? 0) + techN,
-        total_qual_reject: (session.total_qual_reject ?? 0) + qualN,
-        plan_pct: planPctN,
-        avg_per_hour: avgPerHourN
-      }).eq('id', session.id)
+      await command(editing ? 'production_edit' : 'production', {
+        session_id: session.id,
+        last_entry_id: recentEntries[0]?.id ?? null,
+        correction_reason: editing ? correctionReason.trim() : null,
+        print: counterPrintValue,
+        assembly: counterAssemblyValue,
+        print_reset: counterPrintReset,
+        print_reset_reason: counterPrintReset ? counterPrintResetReason.trim() : null,
+        assembly_reset: counterAssemblyReset,
+        assembly_reset_reason: counterAssemblyReset ? counterAssemblyResetReason.trim() : null,
+        defects: defects.map(d => ({ ...d, qty: Number(d.qty), notes: d.notes.trim() })),
+        notes: notes.trim() || null
+      })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
-      qc.invalidateQueries({ queryKey: ['sa_entries'] })
+      void invalidateSyringe(qc)
       navigate('/syringe')
     },
     onError: (e: Error) => {
-      if (e.message !== 'Popraw błędy walidacji.') setErrors([e.message])
+      if (e.message !== 'Popraw błędy walidacji.') {
+        setErrors([e.message])
+        if (e.message.includes('W międzyczasie')) void refetchLast()
+      }
     }
   })
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <p className="text-navy-400">Brak aktywnej sesji.</p>
-        <button onClick={() => navigate('/syringe')} className="btn-primary mt-4">Wróć</button>
-      </div>
-    )
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   return (
@@ -278,11 +210,15 @@ export default function SyringeProductionEntry() {
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/syringe')} className="text-navy-400 hover:text-white">←</button>
         <div>
-          <h1 className="text-xl font-bold text-white">Rejestracja produkcji</h1>
+          <h1 className="text-xl font-bold text-white">{editing ? 'Korekta ostatniego wpisu' : 'Rejestracja produkcji'}</h1>
           <p className="text-navy-400 text-sm">{session.machine?.name} · {session.assortment?.name}</p>
         </div>
       </div>
 
+      {(lastError || categoriesError) && <div role="alert" className="text-red-400">
+        Nie udało się odczytać danych: {lastError?.message || categoriesError?.message}
+        <button className="btn-secondary ml-2" onClick={() => invalidateSyringe(qc)}>Ponów odczyt</button>
+      </div>}
       {errors.length > 0 && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
           {errors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
@@ -305,6 +241,7 @@ export default function SyringeProductionEntry() {
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika — automat drukujący</div>
         <input
+          aria-label="Licznik druku"
           type="number"
           value={counterPrintValue}
           onChange={e => { setCounterPrintValue(e.target.value); setErrors([]) }}
@@ -340,6 +277,7 @@ export default function SyringeProductionEntry() {
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika — automat montujący</div>
         <input
+          aria-label="Licznik montażu"
           type="number"
           value={counterAssemblyValue}
           onChange={e => { setCounterAssemblyValue(e.target.value); setErrors([]) }}
@@ -429,7 +367,7 @@ export default function SyringeProductionEntry() {
       </div>
 
       {/* Kategorie braków */}
-      {parseInt(rejectQty || '0') > 0 && (
+      {(parseInt(rejectQty || '0') > 0 || defects.length > 0) && (
         <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
           <div className="flex items-center justify-between">
             <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Kategorie braków</div>
@@ -497,6 +435,10 @@ export default function SyringeProductionEntry() {
         </div>
       )}
 
+      {editing && <label className="block">Powód korekty
+        <input aria-label="Powód korekty" value={correctionReason} onChange={e => setCorrectionReason(e.target.value)}
+          className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3 mt-2" />
+      </label>}
       {/* Komentarz */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Komentarz operatora</div>
@@ -513,10 +455,10 @@ export default function SyringeProductionEntry() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); saveMutation.mutate() }}
-          disabled={saveMutation.isPending}
+          disabled={saveMutation.isPending || lastLoading || !!lastError || !!categoriesError}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
-          {saveMutation.isPending ? 'Zapisywanie...' : 'Zapisz produkcję'}
+          {saveMutation.isPending ? 'Zapisywanie...' : editing ? 'Zapisz korektę' : 'Zapisz produkcję'}
         </button>
       </div>
     </div>

@@ -1,20 +1,13 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import Toggle from '@/components/shared/Toggle'
-import type { SaSession, SaFailurePriority } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
+import type { SaFailurePriority } from '@/types/database'
 
 const PRIORITIES: { value: SaFailurePriority; label: string; color: string }[] = [
   { value: 'low',      label: 'Niski',    color: 'border-green-500/50 bg-green-500/10 text-green-300' },
@@ -27,6 +20,7 @@ export default function SyringeFailureReport() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
 
   const [componentName, setComponentName] = useState('')
   const [symptoms, setSymptoms] = useState('')
@@ -37,41 +31,23 @@ export default function SyringeFailureReport() {
   const [errors, setErrors] = useState<string[]>([])
   const [success, setSuccess] = useState(false)
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!profile) throw new Error('Brak profilu.')
       const errs: string[] = []
-      if (!symptoms) errs.push('Opisz objawy awarii.')
+      if (!symptoms.trim()) errs.push('Opisz objawy awarii.')
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
       const machineId = session?.machine_id
       if (!machineId) throw new Error('Nie można ustalić automatu (brak aktywnej sesji). Wskaż automat u administratora.')
 
-      const { error } = await supabase.from('sa_failure_reports').insert({
-        session_id: session?.id ?? null,
-        machine_id: machineId,
-        reporter_id: profile.id,
-        component_name: componentName || null,
-        symptoms,
-        error_code: errorCode || null,
-        priority,
-        production_stopped: productionStopped,
-        can_continue: canContinue
-      })
-      if (error) throw error
-
-      if (productionStopped && session) {
-        await supabase.from('sa_sessions').update({ machine_status: 'failure' }).eq('id', session.id)
-      }
+      await command('failure', { session_id: session!.id, component_name: componentName, symptoms: symptoms.trim(),
+        error_code: errorCode, priority, production_stopped: productionStopped, can_continue: canContinue })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       setSuccess(true)
     },
     onError: (e: Error) => {
@@ -94,6 +70,8 @@ export default function SyringeFailureReport() {
       </div>
     )
   }
+
+  if (!session || sessionError) return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
 
   return (
     <div className="max-w-2xl mx-auto space-y-5 py-2">

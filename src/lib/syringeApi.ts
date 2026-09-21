@@ -1,0 +1,35 @@
+import { supabase } from './supabase'
+import type { QueryClient } from '@tanstack/react-query'
+import type { SaSession } from '@/types/database'
+
+export async function fetchMySyringeSession(operatorId: string) {
+  const { data, error } = await supabase.from('sa_sessions')
+    .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
+    .eq('operator_id', operatorId).is('ended_at', null).order('started_at', { ascending: false })
+  if (error) throw error
+  if (data && data.length > 1) throw new Error('Masz więcej niż jedną otwartą zmianę. Kierownik musi zamknąć nadmiarową zmianę.')
+  return (data?.[0] ?? null) as SaSession | null
+}
+
+export async function syringeCommand(action: string, payload: Record<string, unknown>) {
+  const controller = new AbortController()
+  const timeout = window.setTimeout(() => controller.abort(), 20000)
+  let response
+  try {
+    response = await supabase.rpc('sa_session_command', { p_action: action, p_payload: payload }).abortSignal(controller.signal)
+  } finally {
+    window.clearTimeout(timeout)
+  }
+  if (controller.signal.aborted) throw new Error('Nie otrzymano potwierdzenia w ciągu 20 sekund. Ponów zapis bez zmiany formularza; operacja nie zostanie naliczona ponownie.')
+  const { data, error } = response
+  if (error) {
+    if (error.code === 'PGRST202') throw new Error('Moduł wymaga aktualizacji bazy: migracja 060_syringe_workflow_hardening.sql.')
+    throw new Error(error.message)
+  }
+  if (!data) throw new Error('Nie otrzymano potwierdzenia zapisu. Odśwież dane przed ponowną próbą.')
+  return data
+}
+
+export function invalidateSyringe(qc: QueryClient) {
+  return qc.invalidateQueries({ predicate: query => /^(sa_|admin_sa_)/.test(String(query.queryKey[0])) })
+}

@@ -20,19 +20,21 @@ const STATUS_COLOR = (s: string) =>
     : 'bg-amber-500/15 text-amber-300'
 
 async function fetchFailures(operatorId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_failure_reports')
     .select('*, machine:sa_machines(*)')
     .eq('reporter_id', operatorId)
     .order('created_at', { ascending: false })
+  if (error) throw error
   return data as SaFailureReport[] ?? []
 }
 async function fetchQuality(operatorId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_quality_issues')
     .select('*, machine:sa_machines(*), assortment:sa_assortments(*)')
     .eq('reporter_id', operatorId)
     .order('created_at', { ascending: false })
+  if (error) throw error
   return data as SaQualityIssue[] ?? []
 }
 
@@ -41,15 +43,16 @@ export default function SyringeMyReports() {
   const navigate = useNavigate()
   const [tab, setTab] = useState<'failures' | 'quality'>('failures')
 
-  const { data: failures = [], isLoading: lf } = useQuery({
+  const { data: failures = [], isLoading: lf, error: failuresError } = useQuery({
     queryKey: ['sa_my_failures', profile?.id], queryFn: () => fetchFailures(profile!.id), enabled: !!profile?.id, refetchInterval: 30000
   })
-  const { data: quality = [], isLoading: lq } = useQuery({
+  const { data: quality = [], isLoading: lq, error: qualityError } = useQuery({
     queryKey: ['sa_my_quality', profile?.id], queryFn: () => fetchQuality(profile!.id), enabled: !!profile?.id, refetchInterval: 30000
   })
 
   return (
     <div className="max-w-3xl mx-auto space-y-4">
+      {(failuresError || qualityError) && <p role="alert" className="text-red-400">Nie udało się odczytać zgłoszeń: {failuresError?.message || qualityError?.message}</p>}
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/syringe')} className="text-navy-400 hover:text-white">←</button>
         <h1 className="text-xl font-bold text-white">Moje zgłoszenia</h1>

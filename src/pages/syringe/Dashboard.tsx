@@ -2,9 +2,13 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { useAuthStore } from '@/stores/authStore'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
+import { syringeRate, stoppedMinutes } from '@/lib/syringeMetrics'
 import { useClock } from '@/hooks/useClock'
-import type { SaSession, SaMachineStatus, SaProductionEntry, SaDowntimeEvent } from '@/types/database'
+import type { SaMachineStatus, SaProductionEntry, SaDowntimeEvent } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; color: string; bg: string; border: string }> = {
   production:       { label: 'Produkcja',           color: 'text-green-300',  bg: 'bg-green-500/15',  border: 'border-green-500/40' },
@@ -20,38 +24,37 @@ const STATUS_CONFIG: Record<SaMachineStatus, { label: string; color: string; bg:
 }
 
 const ALL_STATUSES: SaMachineStatus[] = [
-  'production','changeover','failure','adjustment','no_components',
-  'quality_control','planned_stop','waiting','cleaning','end_of_production'
+  'production','failure','adjustment','no_components',
+  'quality_control','planned_stop','waiting','cleaning'
 ]
 
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select(`*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)`)
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
+async function fetchStops(sessionId: string) {
+  const downtime = await supabase.from('sa_downtime_events').select('started_at, ended_at').eq('session_id', sessionId).throwOnError()
+  const changeovers = await supabase.from('sa_changeovers').select('started_at, ended_at').eq('session_id', sessionId).throwOnError()
+  return [...(downtime.data ?? []), ...(changeovers.data ?? [])] as { started_at: string; ended_at: string | null }[]
 }
 
 async function fetchLastEntries(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_production_entries')
     .select('*')
     .eq('session_id', sessionId)
     .eq('is_cancelled', false)
     .order('recorded_at', { ascending: false })
+    .order('created_at', { ascending: false }).order('id', { ascending: false })
     .limit(5)
+  if (error) throw error
   return data as SaProductionEntry[] ?? []
 }
 
 async function fetchActiveDowntime(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_downtime_events')
     .select('*, category:sa_downtime_categories(*)')
     .eq('session_id', sessionId)
     .is('ended_at', null)
     .maybeSingle()
+  if (error) throw error
   return data as SaDowntimeEvent | null
 }
 
@@ -73,27 +76,23 @@ function KpiCard({ label, value, sub, highlight, danger }: { label: string; valu
 }
 
 export default function SyringeDashboard() {
-  const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
   const { now } = useClock()
   const [showStatusPicker, setShowStatusPicker] = useState(false)
 
-  const { data: session, isLoading } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id,
-    refetchInterval: 30000
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
+  const { data: stops = [], error: stopsError } = useQuery({ queryKey: ['sa_session_stops', session?.id], queryFn: () => fetchStops(session!.id), enabled: !!session?.id, refetchInterval: 10000 })
 
-  const { data: entries = [] } = useQuery({
+  const { data: entries = [], error: entriesError } = useQuery({
     queryKey: ['sa_entries', session?.id],
     queryFn: () => fetchLastEntries(session!.id),
     enabled: !!session?.id,
     refetchInterval: 60000
   })
 
-  const { data: activeDowntime } = useQuery({
+  const { data: activeDowntime, error: downtimeError } = useQuery({
     queryKey: ['sa_active_downtime', session?.id],
     queryFn: () => fetchActiveDowntime(session!.id),
     enabled: !!session?.id,
@@ -103,10 +102,10 @@ export default function SyringeDashboard() {
   const statusMutation = useMutation({
     mutationFn: async (status: SaMachineStatus) => {
       if (!session) return
-      await supabase.from('sa_sessions').update({ machine_status: status }).eq('id', session.id)
+      await command('status', { session_id: session.id, status })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       setShowStatusPicker(false)
     }
   })
@@ -129,24 +128,14 @@ export default function SyringeDashboard() {
     return <div className="flex items-center justify-center h-64 text-navy-400">Ładowanie...</div>
   }
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16 space-y-6">
-        <div className="w-20 h-20 rounded-2xl bg-navy-800 border border-navy-700 flex items-center justify-center mx-auto">
-          <svg width="40" height="40" viewBox="0 0 24 24" fill="none" className="text-navy-500">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="1.5"/>
-            <path d="M12 8v4M12 16h.01" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-          </svg>
-        </div>
-        <div>
-          <h2 className="text-xl font-bold text-white">Brak aktywnej sesji</h2>
-          <p className="text-navy-400 text-sm mt-2">Rozpocznij zmianę, aby przejść do rejestracji produkcji.</p>
-        </div>
-        <button onClick={() => navigate('/syringe/start')} className="btn-primary px-8 py-3 text-lg">
-          Rozpocznij zmianę
-        </button>
-      </div>
-    )
+  const loadError = entriesError || downtimeError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => window.location.reload()}>Ponów odczyt</button>
+  </div>
+
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   const statusCfg = STATUS_CONFIG[session.machine_status]
@@ -155,24 +144,23 @@ export default function SyringeDashboard() {
   const totalReject = session.total_reject ?? 0
   const totalProduced = session.total_produced ?? 0
   const planQty = session.plan_qty ?? 0
-  const planPct = planQty > 0 ? Math.min(100, Math.round(totalGood / planQty * 100)) : null
+  const planPct = planQty > 0 ? Math.round(totalGood / planQty * 100) : null
   const rejectPct = totalProduced > 0 ? (totalReject / totalProduced * 100).toFixed(1) : '0.0'
   const elapsedMs = Date.now() - new Date(session.started_at).getTime()
-  const elapsedH = elapsedMs / 3600000
-  const avgPerHour = elapsedH > 0 ? Math.round(totalGood / elapsedH) : 0
+  const avgPerHour = syringeRate(totalGood, elapsedMs)
 
   // Czas pracy vs przestojów i wydajność do nominalnej
   const elapsedMin = Math.floor(elapsedMs / 60000)
-  const downtimeMin = session.total_downtime_min ?? 0
+  const downtimeMin = stoppedMinutes(stops, session.started_at, now.getTime())
   const activeMin = Math.max(0, elapsedMin - downtimeMin)
   const fmtMin = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`
   const nominal = session.assortment?.nominal_per_hour ?? 0
-  const effPct = nominal > 0 ? Math.round(avgPerHour / nominal * 100) : null
+  const effPct = nominal > 0 && avgPerHour !== null ? Math.round(avgPerHour / nominal * 100) : null
 
   // Cele zmianowe na asortyment
   const shiftTarget = session.assortment?.shift_target_qty ?? null
   const rejectTargetPct = session.assortment?.reject_target_pct ?? null
-  const rejectPctNum = parseFloat(rejectPct)
+  const rejectPctNum = totalProduced > 0 ? totalReject / totalProduced * 100 : 0
 
   // Przypomnienie o wpisie co 2h
   const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
@@ -181,6 +169,7 @@ export default function SyringeDashboard() {
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
+      {(statusMutation.error || stopsError) && <p role="alert" className="text-red-400">{statusMutation.error?.message || stopsError?.message}</p>}
       {/* Nagłówek */}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
@@ -255,7 +244,7 @@ export default function SyringeDashboard() {
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-        <KpiCard label="Wydajność" value={`${avgPerHour.toLocaleString('pl')}`} sub={effPct !== null ? `${effPct}% nominalnej` : 'szt/h średnia'} highlight={effPct !== null && effPct >= 95} />
+        <KpiCard label="Wydajność" value={avgPerHour?.toLocaleString('pl') ?? '—'} sub={effPct !== null ? `${effPct}% nominalnej · szt/h` : 'szt/h średnia'} highlight={effPct !== null && effPct >= 95} />
         <KpiCard
           label="Wydajność nominalna"
           value={nominal ? nominal.toLocaleString('pl') : '—'}
@@ -293,7 +282,7 @@ export default function SyringeDashboard() {
               style={{ width: `${Math.min(100, effPct)}%` }}
             />
           </div>
-          <div className="text-xs text-navy-500">{avgPerHour.toLocaleString('pl')} / {nominal.toLocaleString('pl')} szt/h</div>
+          <div className="text-xs text-navy-500">{avgPerHour?.toLocaleString('pl') ?? '—'} / {nominal.toLocaleString('pl')} szt/h</div>
         </div>
       )}
 
@@ -321,7 +310,10 @@ export default function SyringeDashboard() {
       {/* Ostatni wpis */}
       {lastEntry && (
         <div className="rounded-xl border border-navy-700 bg-navy-800 p-4">
-          <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-3">Ostatni wpis produkcyjny</div>
+          <div className="flex flex-wrap justify-between gap-3 mb-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Ostatni wpis produkcyjny</div>
+            <button className="btn-secondary" onClick={() => navigate('/syringe/entry?edit=last')}>Popraw ostatni wpis</button>
+          </div>
           <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
             <div>
               <div className="text-navy-500">Godzina</div>
@@ -341,7 +333,7 @@ export default function SyringeDashboard() {
             </div>
             <div>
               <div className="text-navy-500">Wydajność</div>
-              <div className="text-white font-medium">{lastEntry.per_hour ? `${Math.round(lastEntry.per_hour).toLocaleString('pl')} szt/h` : '—'}</div>
+              <div className="text-white font-medium">{lastEntry.per_hour !== null ? `${Math.round(lastEntry.per_hour).toLocaleString('pl')} szt/h` : '—'}</div>
             </div>
           </div>
         </div>
@@ -439,12 +431,16 @@ export default function SyringeDashboard() {
               <button onClick={() => setShowStatusPicker(false)} className="text-navy-400 hover:text-white text-xl">×</button>
             </div>
             <div className="grid grid-cols-2 gap-2">
+              {statusMutation.error && <p role="alert" className="col-span-2 text-red-400">{statusMutation.error.message}</p>}
               {ALL_STATUSES.map(s => {
                 const cfg = STATUS_CONFIG[s]
                 return (
                   <button
                     key={s}
-                    onClick={() => statusMutation.mutate(s)}
+                    onClick={() => {
+                      if (s === 'production') statusMutation.mutate(s)
+                      else navigate(s === 'failure' ? '/syringe/failure' : s === 'quality_control' ? '/syringe/quality' : '/syringe/downtime')
+                    }}
                     disabled={statusMutation.isPending}
                     className={`rounded-xl border-2 px-3 py-3 text-sm font-bold text-left transition-all ${
                       session.machine_status === s

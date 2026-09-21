@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { invalidateSyringe } from '@/lib/syringeApi'
 import { supabase, logAudit } from '@/lib/supabase'
 import type {
   SaMachine, SaAssortment, SaDefectCategory, SaDowntimeCategory,
@@ -92,7 +93,7 @@ function MachinesTab() {
       await logAudit('config_change', 'sa_machines', undefined, undefined, { name: newM.name, code: newM.code })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin_sa_machines'] })
+      invalidateSyringe(qc)
       setNewM({ name: '', code: '', location: '', nominal_per_hour: 1000 })
       setShowAdd(false)
       flash('Automat dodany')
@@ -104,12 +105,12 @@ function MachinesTab() {
     mutationFn: async (m: SaMachine) => {
       const changes = edits[m.id]
       if (!changes) return
-      const { error } = await supabase.from('sa_machines').update(changes).eq('id', m.id)
+      const { error } = await supabase.from('sa_machines').update(changes).eq('id', m.id).select().single().throwOnError()
       if (error) throw error
       await logAudit('config_change', 'sa_machines', m.id, { name: m.name }, changes)
     },
     onSuccess: (_d, m) => {
-      qc.invalidateQueries({ queryKey: ['admin_sa_machines'] })
+      invalidateSyringe(qc)
       setEdits(prev => { const n = { ...prev }; delete n[m.id]; return n })
       flash('Zapisano')
     },
@@ -118,9 +119,10 @@ function MachinesTab() {
 
   const toggleMut = useMutation({
     mutationFn: async (m: SaMachine) => {
-      await supabase.from('sa_machines').update({ is_active: !m.is_active }).eq('id', m.id)
+      await supabase.from('sa_machines').update({ is_active: !m.is_active }).eq('id', m.id).select().single().throwOnError()
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_machines'] })
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
   const set = (id: string, field: keyof SaMachine, value: string | number) =>
@@ -243,7 +245,7 @@ function AssortmentsTab() {
       if (error) throw error
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin_sa_assortments'] })
+      invalidateSyringe(qc)
       setNewA({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
       setShowAdd(false); flash('Asortyment dodany')
     },
@@ -252,15 +254,16 @@ function AssortmentsTab() {
   const saveMut = useMutation({
     mutationFn: async (a: SaAssortment) => {
       const changes = edits[a.id]; if (!changes) return
-      const { error } = await supabase.from('sa_assortments').update(changes).eq('id', a.id)
+      const { error } = await supabase.from('sa_assortments').update(changes).eq('id', a.id).select().single().throwOnError()
       if (error) throw error
     },
-    onSuccess: (_d, a) => { qc.invalidateQueries({ queryKey: ['admin_sa_assortments'] }); setEdits(prev => { const n = { ...prev }; delete n[a.id]; return n }); flash('Zapisano') },
+    onSuccess: (_d, a) => { invalidateSyringe(qc); setEdits(prev => { const n = { ...prev }; delete n[a.id]; return n }); flash('Zapisano') },
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleMut = useMutation({
-    mutationFn: async (a: SaAssortment) => { await supabase.from('sa_assortments').update({ is_active: !a.is_active }).eq('id', a.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_assortments'] })
+    mutationFn: async (a: SaAssortment) => { await supabase.from('sa_assortments').update({ is_active: !a.is_active }).eq('id', a.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const set = (id: string, field: keyof SaAssortment, value: string | number) =>
     setEdits(prev => ({ ...prev, [id]: { ...prev[id], [field]: value } }))
@@ -344,16 +347,18 @@ function DefectsTab() {
       })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin_sa_defects'] }); setNewName(''); setNewCode(''); setNewRequiresComment(false); flash('Kategoria dodana') },
+    onSuccess: () => { invalidateSyringe(qc); setNewName(''); setNewCode(''); setNewRequiresComment(false); flash('Kategoria dodana') },
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleMut = useMutation({
-    mutationFn: async (c: SaDefectCategory) => { await supabase.from('sa_defect_categories').update({ is_active: !c.is_active }).eq('id', c.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_defects'] })
+    mutationFn: async (c: SaDefectCategory) => { await supabase.from('sa_defect_categories').update({ is_active: !c.is_active }).eq('id', c.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleCommentMut = useMutation({
-    mutationFn: async (c: SaDefectCategory) => { await supabase.from('sa_defect_categories').update({ requires_comment: !c.requires_comment }).eq('id', c.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_defects'] })
+    mutationFn: async (c: SaDefectCategory) => { await supabase.from('sa_defect_categories').update({ requires_comment: !c.requires_comment }).eq('id', c.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
   const TYPE_LABEL: Record<string, string> = { quality: 'Jakościowy', tech: 'Technologiczny', other: 'Inny' }
@@ -431,12 +436,13 @@ function DowntimesTab() {
       const { error } = await supabase.from('sa_downtime_categories').insert({ name: newName, code: newCode, category_type: newType, sort_order: items.length + 1 })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin_sa_downtimes'] }); setNewName(''); setNewCode(''); flash('Kategoria dodana') },
+    onSuccess: () => { invalidateSyringe(qc); setNewName(''); setNewCode(''); flash('Kategoria dodana') },
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleMut = useMutation({
-    mutationFn: async (c: SaDowntimeCategory) => { await supabase.from('sa_downtime_categories').update({ is_active: !c.is_active }).eq('id', c.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_downtimes'] })
+    mutationFn: async (c: SaDowntimeCategory) => { await supabase.from('sa_downtime_categories').update({ is_active: !c.is_active }).eq('id', c.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
   const TYPE_LABEL: Record<string, string> = { planned: 'Planowany', unplanned: 'Nieplanowany', quality: 'Jakość', logistics: 'Logistyka' }
@@ -503,16 +509,18 @@ function ChecklistTab() {
       const { error } = await supabase.from('sa_checklist_items').insert({ name: newName, is_required: newRequired, sort_order: items.length + 1 })
       if (error) throw error
     },
-    onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin_sa_checklist'] }); setNewName(''); setNewRequired(true); flash('Pozycja dodana') },
+    onSuccess: () => { invalidateSyringe(qc); setNewName(''); setNewRequired(true); flash('Pozycja dodana') },
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleActiveMut = useMutation({
-    mutationFn: async (c: SaChecklistItem) => { await supabase.from('sa_checklist_items').update({ is_active: !c.is_active }).eq('id', c.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_checklist'] })
+    mutationFn: async (c: SaChecklistItem) => { await supabase.from('sa_checklist_items').update({ is_active: !c.is_active }).eq('id', c.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const toggleReqMut = useMutation({
-    mutationFn: async (c: SaChecklistItem) => { await supabase.from('sa_checklist_items').update({ is_required: !c.is_required }).eq('id', c.id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_checklist'] })
+    mutationFn: async (c: SaChecklistItem) => { await supabase.from('sa_checklist_items').update({ is_required: !c.is_required }).eq('id', c.id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
   return (
@@ -593,15 +601,16 @@ function OrdersTab() {
       if (error) throw error
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['admin_sa_orders'] })
+      invalidateSyringe(qc)
       setForm({ order_number: '', machine_id: '', assortment_id: '', target_qty: 0, planned_date: '' })
       setShowAdd(false); flash('Zlecenie utworzone')
     },
     onError: (e: Error) => flash('Błąd: ' + e.message)
   })
   const statusMut = useMutation({
-    mutationFn: async ({ id, status }: { id: string; status: string }) => { await supabase.from('sa_orders').update({ status }).eq('id', id) },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['admin_sa_orders'] })
+    mutationFn: async ({ id, status }: { id: string; status: string }) => { await supabase.from('sa_orders').update({ status }).eq('id', id).select().single().throwOnError() },
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => flash('Błąd: ' + e.message)
   })
 
   const STATUS_LABEL: Record<string, string> = { planned: 'Zaplanowane', in_progress: 'W toku', completed: 'Zakończone', cancelled: 'Anulowane', on_hold: 'Wstrzymane' }

@@ -1,6 +1,8 @@
 node_modules
 .env
 dist
+test-results/
+playwright-report/
 
 # Lokalny skrypt synchronizacji zdjec na SharePoint - zawiera dane logowania
 # konta technicznego, nigdy nie trafia do repo.

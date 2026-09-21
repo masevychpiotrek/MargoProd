@@ -2,8 +2,12 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
-import type { SaSession, SaComponentUsage } from '@/types/database'
+import type { SaComponentUsage } from '@/types/database'
 
 const COMPONENT_TYPES = [
   { value: 'body',           label: 'Korpus' },
@@ -15,22 +19,13 @@ const COMPONENT_TYPES = [
   { value: 'other',          label: 'Inny komponent' }
 ]
 
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
-
 async function fetchSessionComponents(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_component_usages')
     .select('*')
     .eq('session_id', sessionId)
     .order('used_from', { ascending: false })
+  if (error) throw error
   return data as SaComponentUsage[] ?? []
 }
 
@@ -38,6 +33,7 @@ export default function SyringeComponents() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
 
   const [componentType, setComponentType] = useState('body')
   const [componentName, setComponentName] = useState('')
@@ -47,13 +43,9 @@ export default function SyringeComponents() {
   const [notes, setNotes] = useState('')
   const [errors, setErrors] = useState<string[]>([])
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
-  const { data: components = [] } = useQuery({
+  const { data: components = [], error: componentsError } = useQuery({
     queryKey: ['sa_components', session?.id],
     queryFn: () => fetchSessionComponents(session!.id),
     enabled: !!session?.id
@@ -63,20 +55,11 @@ export default function SyringeComponents() {
     mutationFn: async () => {
       if (!profile || !session) throw new Error('Brak aktywnej sesji.')
       const errs: string[] = []
-      if (!componentName) errs.push('Podaj nazwę komponentu.')
+      if (!componentName.trim()) errs.push('Podaj nazwę komponentu.')
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
-      const { error } = await supabase.from('sa_component_usages').insert({
-        session_id: session.id,
-        operator_id: profile.id,
-        component_type: componentType,
-        component_name: componentName,
-        batch_number: batchNumber || null,
-        qty_used: qtyUsed ? parseFloat(qtyUsed) : null,
-        unit,
-        notes: notes || null
-      })
-      if (error) throw error
+      await command('component_add', { session_id: session.id, component_type: componentType, component_name: componentName.trim(),
+        batch_number: batchNumber, qty_used: qtyUsed || null, unit, notes })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_components', session?.id] })
@@ -92,18 +75,21 @@ export default function SyringeComponents() {
 
   const endMutation = useMutation({
     mutationFn: async (componentId: string) => {
-      await supabase.from('sa_component_usages').update({ used_to: new Date().toISOString() }).eq('id', componentId)
+      if (!session) throw new Error('Brak aktywnej zmiany.')
+      await command('component_end', { session_id: session.id, component_id: componentId })
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sa_components', session?.id] })
+    onSuccess: () => invalidateSyringe(qc),
+    onError: (e: Error) => setErrors([e.message])
   })
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <p className="text-navy-400">Brak aktywnej sesji.</p>
-        <button onClick={() => navigate('/syringe')} className="btn-primary mt-4">Wróć</button>
-      </div>
-    )
+  const loadError = componentsError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => window.location.reload()}>Ponów odczyt</button>
+  </div>
+
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   const activeComponents = components.filter(c => !c.used_to)

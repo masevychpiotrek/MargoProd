@@ -2,45 +2,43 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import { wholeQuantity } from '@/lib/syringeMetrics'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
-import type { SaSession } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
 
 async function fetchActiveDowntime(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_downtime_events')
-    .select('id')
+    .select('*, category:sa_downtime_categories(*)')
     .eq('session_id', sessionId)
     .is('ended_at', null)
     .maybeSingle()
+  if (error) throw error
   return data
 }
 
 async function fetchLastCounter(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_production_entries')
-    .select('counter_value')
+    .select('counter_value, counter_print_value, counter_assembly_value')
     .eq('session_id', sessionId)
     .eq('is_cancelled', false)
     .order('recorded_at', { ascending: false })
+    .order('created_at', { ascending: false }).order('id', { ascending: false })
     .limit(1)
     .maybeSingle()
-  return data?.counter_value ?? null
+  if (error) throw error
+  return data ?? null
 }
 
 export default function SyringeShiftHandover() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
 
   const [activeIssues, setActiveIssues] = useState('')
   const [adjustmentsMade, setAdjustmentsMade] = useState('')
@@ -50,14 +48,11 @@ export default function SyringeShiftHandover() {
   const [recommendations, setRecommendations] = useState('')
   const [comment, setComment] = useState('')
   const [finalCounter, setFinalCounter] = useState('')
+  const [finalPrint, setFinalPrint] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [handoverCreated, setHandoverCreated] = useState(false)
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
   const { data: activeDowntime } = useQuery({
     queryKey: ['sa_active_downtime', session?.id],
@@ -65,8 +60,8 @@ export default function SyringeShiftHandover() {
     enabled: !!session?.id
   })
 
-  const { data: lastCounter } = useQuery({
-    queryKey: ['sa_last_counter', session?.id],
+  const { data: lastCounter, isLoading: countersLoading, error: countersError } = useQuery({
+    queryKey: ['sa_handover_counters', session?.id],
     queryFn: () => fetchLastCounter(session!.id),
     enabled: !!session?.id
   })
@@ -74,9 +69,11 @@ export default function SyringeShiftHandover() {
   function validate(): string[] {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
-    if (!finalCounter) errs.push('Nie wpisano końcowego stanu licznika.')
-    if (lastCounter != null && parseInt(finalCounter || '0') < lastCounter)
-      errs.push(`Końcowy stan licznika (${finalCounter}) jest mniejszy niż poprzedni wpis (${lastCounter}).`)
+    if (!wholeQuantity(finalCounter) || !wholeQuantity(finalPrint)) errs.push('Potwierdź końcowe stany obu liczników.')
+    if (Number(finalCounter) !== (lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0)
+      || Number(finalPrint) !== (lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0)) {
+      errs.push('Najpierw zapisz końcową produkcję wraz z kategoriami braków. Liczniki muszą odpowiadać ostatniemu wpisowi.')
+    }
     return errs
   }
 
@@ -86,57 +83,21 @@ export default function SyringeShiftHandover() {
       const errs = validate()
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
-      await supabase.from('sa_handovers').insert({
+      await command('finish', {
         session_id: session.id,
-        from_operator_id: profile.id,
-        machine_status: session.machine_status,
-        current_assortment_id: session.assortment_id,
-        produced_qty: session.total_good ?? 0,
-        remaining_qty: session.plan_qty ? Math.max(0, session.plan_qty - (session.total_good ?? 0)) : null,
-        active_issues: activeIssues || null,
-        adjustments_made: adjustmentsMade || null,
-        unresolved_failures: unresolvedFailures || null,
-        quality_info: qualityInfo || null,
-        component_status: componentStatus || null,
-        recommendations: recommendations || null,
-        comment: comment || null
+        final_print: finalPrint,
+        final_assembly: finalCounter,
+        active_issues: activeIssues,
+        adjustments_made: adjustmentsMade,
+        unresolved_failures: unresolvedFailures,
+        quality_info: qualityInfo,
+        component_status: componentStatus,
+        recommendations,
+        comment
       })
-
-      // Zapisz końcowy wpis produkcyjny z ostatnim stanem licznika
-      const counterN = parseInt(finalCounter)
-      const lastCounterN = lastCounter ?? 0
-      const goodN = Math.max(0, counterN - lastCounterN)
-
-      await supabase.from('sa_production_entries').insert({
-        session_id: session.id,
-        machine_id: session.machine_id,
-        operator_id: profile.id,
-        counter_value: counterN,
-        produced_qty: goodN,
-        good_qty: goodN,
-        reject_qty: 0,
-        tech_reject_qty: 0,
-        qual_reject_qty: 0,
-        qty_since_last: counterN - lastCounterN,
-        notes: 'Wpis końcowy — zakończenie zmiany'
-      })
-
-      // Zakończ sesję
-      const now = new Date().toISOString()
-      const planQty = session.plan_qty ?? 0
-      const totalGood = (session.total_good ?? 0) + goodN
-      await supabase.from('sa_sessions').update({
-        ended_at: now,
-        machine_status: 'end_of_production',
-        total_good: totalGood,
-        total_produced: (session.total_produced ?? 0) + goodN,
-        plan_pct: planQty > 0 ? totalGood / planQty * 100 : null,
-        summary_notes: comment || null
-      }).eq('id', session.id)
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
-      qc.invalidateQueries({ queryKey: ['sa_sessions'] })
+      void invalidateSyringe(qc)
       setHandoverCreated(true)
     },
     onError: (e: Error) => {
@@ -150,7 +111,7 @@ export default function SyringeShiftHandover() {
         <div className="text-5xl">✓</div>
         <h2 className="text-xl font-bold text-white">Zmiana zakończona</h2>
         <p className="text-navy-400 text-sm">
-          Formularz przekazania zmiany został zapisany. Zmiana została zakończona i oczekuje na potwierdzenie przez kolejnego operatora.
+          Formularz przekazania został zapisany, a zmiana zakończona.
         </p>
         <button onClick={() => navigate('/syringe/start')} className="btn-primary px-8 py-3 text-lg">
           Nowa zmiana
@@ -159,13 +120,8 @@ export default function SyringeShiftHandover() {
     )
   }
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <p className="text-navy-400">Brak aktywnej sesji.</p>
-        <button onClick={() => navigate('/syringe')} className="btn-primary mt-4">Wróć</button>
-      </div>
-    )
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   const totalGood = session.total_good ?? 0
@@ -223,20 +179,24 @@ export default function SyringeShiftHandover() {
         </div>
       </div>
 
-      {/* Końcowy stan licznika */}
-      <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Końcowy stan licznika *</div>
-        {lastCounter != null && (
-          <p className="text-xs text-navy-500">Poprzedni wpis: {lastCounter.toLocaleString('pl')}</p>
-        )}
-        <input
-          type="number"
-          value={finalCounter}
-          onChange={e => { setFinalCounter(e.target.value); setErrors([]) }}
-          placeholder="Końcowy odczyt z automatu"
-          min={0}
-          className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-4 text-2xl font-bold text-white placeholder-navy-600 focus:outline-none focus:border-brand"
-        />
+      <div className="border border-navy-700 bg-navy-800 p-5 space-y-3">
+        <h2 className="font-bold">Potwierdzenie końcowych liczników</h2>
+        {countersError && <p role="alert" className="text-red-400">{countersError.message}</p>}
+        <p className="text-sm text-navy-400">
+          Ostatnio zapisano: druk {lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0},
+          montaż {lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0}.
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <label>Druk
+            <input aria-label="Końcowy licznik druku" type="number" min={0} value={finalPrint} onChange={e => setFinalPrint(e.target.value)}
+              className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
+          </label>
+          <label>Montaż
+            <input aria-label="Końcowy licznik montażu" type="number" min={0} value={finalCounter} onChange={e => setFinalCounter(e.target.value)}
+              className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
+          </label>
+        </div>
+        <button className="btn-secondary" onClick={() => navigate('/syringe/entry')}>Zapisz końcową produkcję</button>
       </div>
 
       {/* Formularz przekazania */}
@@ -275,7 +235,7 @@ export default function SyringeShiftHandover() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); handoverMutation.mutate() }}
-          disabled={handoverMutation.isPending || !!activeDowntime}
+          disabled={countersLoading || !!countersError || handoverMutation.isPending || !!activeDowntime}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
           {handoverMutation.isPending ? 'Zapisywanie...' : 'Zakończ zmianę'}

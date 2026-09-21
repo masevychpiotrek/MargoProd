@@ -2,41 +2,43 @@ import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
-import type { SaSession, SaAssortment, SaChangeover, SaChecklistItem } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
+import type { SaAssortment, SaChangeover, SaChecklistItem } from '@/types/database'
 
 async function fetchAssortments() {
-  const { data } = await supabase.from('sa_assortments').select('*').eq('is_active', true).order('sort_order')
+  const { data, error } = await supabase.from('sa_assortments').select('*').eq('is_active', true).order('sort_order')
+  if (error) throw error
+  if (error) throw error
   return data as SaAssortment[] ?? []
 }
 
 async function fetchActiveChangeover(sessionId: string) {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_changeovers')
     .select('*, from_assortment:sa_assortments!sa_changeovers_from_assortment_id_fkey(*), to_assortment:sa_assortments!sa_changeovers_to_assortment_id_fkey(*)')
     .eq('session_id', sessionId)
     .is('ended_at', null)
     .maybeSingle()
+  if (error) throw error
+  if (error) throw error
   return data as (SaChangeover & { from_assortment?: SaAssortment; to_assortment: SaAssortment }) | null
 }
 
 async function fetchChecklistItems() {
-  const { data } = await supabase.from('sa_checklist_items').select('*').eq('is_active', true).order('sort_order')
+  const { data, error } = await supabase.from('sa_checklist_items').select('*').eq('is_active', true).order('sort_order')
+  if (error) throw error
+  if (error) throw error
   return data as SaChecklistItem[] ?? []
 }
 
 async function fetchChecklistCompletions(changeoverId: string) {
-  const { data } = await supabase.from('sa_checklist_completions').select('*').eq('changeover_id', changeoverId)
+  const { data, error } = await supabase.from('sa_checklist_completions').select('*').eq('changeover_id', changeoverId)
+  if (error) throw error
+  if (error) throw error
   return data as { item_id: string; completed: boolean }[] ?? []
 }
 
@@ -44,28 +46,25 @@ export default function SyringeChangeover() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
 
   const [toAssortmentId, setToAssortmentId] = useState('')
   const [counterBefore, setCounterBefore] = useState('')
   const [reason, setReason] = useState('')
   const [errors, setErrors] = useState<string[]>([])
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
-  const { data: assortments = [] } = useQuery({ queryKey: ['sa_assortments'], queryFn: fetchAssortments })
-  const { data: checklistItems = [] } = useQuery({ queryKey: ['sa_checklist_items'], queryFn: fetchChecklistItems })
+  const { data: assortments = [], error: assortmentsError } = useQuery({ queryKey: ['sa_assortments'], queryFn: fetchAssortments })
+  const { data: checklistItems = [], error: checklistError } = useQuery({ queryKey: ['sa_checklist_items'], queryFn: fetchChecklistItems })
 
-  const { data: activeChangeover } = useQuery({
+  const { data: activeChangeover, error: changeoverError } = useQuery({
     queryKey: ['sa_active_changeover', session?.id],
     queryFn: () => fetchActiveChangeover(session!.id),
     enabled: !!session?.id
   })
 
-  const { data: completions = [] } = useQuery({
+  const { data: completions = [], error: completionsError } = useQuery({
     queryKey: ['sa_checklist_completions', activeChangeover?.id],
     queryFn: () => fetchChecklistCompletions(activeChangeover!.id),
     enabled: !!activeChangeover?.id
@@ -80,21 +79,11 @@ export default function SyringeChangeover() {
       if (!toAssortmentId) errs.push('Wybierz nowy asortyment.')
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
-      await supabase.from('sa_changeovers').insert({
-        session_id: session.id,
-        machine_id: session.machine_id,
-        operator_id: profile.id,
-        from_assortment_id: session.assortment_id,
-        to_assortment_id: toAssortmentId,
-        counter_before: counterBefore ? parseInt(counterBefore) : null,
-        reason: reason || null
-      })
-
-      await supabase.from('sa_sessions').update({ machine_status: 'changeover' }).eq('id', session.id)
+      await command('changeover_start', { session_id: session.id, to_assortment_id: toAssortmentId, counter_before: counterBefore || '0', reason })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_changeover', session?.id] })
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
     },
     onError: (e: Error) => {
       if (e.message !== 'Walidacja') setErrors([e.message])
@@ -104,16 +93,10 @@ export default function SyringeChangeover() {
   const toggleItemMutation = useMutation({
     mutationFn: async ({ itemId, checked }: { itemId: string; checked: boolean }) => {
       if (!activeChangeover || !profile) return
-      await supabase.from('sa_checklist_completions')
-        .upsert({
-          changeover_id: activeChangeover.id,
-          item_id: itemId,
-          completed: checked,
-          completed_by: profile.id,
-          completed_at: checked ? new Date().toISOString() : null
-        }, { onConflict: 'changeover_id,item_id' })
+      await command('checklist', { session_id: session!.id, changeover_id: activeChangeover.id, item_id: itemId, completed: checked })
     },
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sa_checklist_completions', activeChangeover?.id] })
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['sa_checklist_completions', activeChangeover?.id] }),
+    onError: (e: Error) => setErrors([e.message])
   })
 
   const endMutation = useMutation({
@@ -127,19 +110,11 @@ export default function SyringeChangeover() {
         throw new Error('Walidacja')
       }
 
-      const now = new Date().toISOString()
-      const diffMin = Math.round((Date.now() - new Date(activeChangeover.started_at).getTime()) / 60000)
-
-      await supabase.from('sa_changeovers').update({ ended_at: now, duration_min: diffMin }).eq('id', activeChangeover.id)
-
-      await supabase.from('sa_sessions').update({
-        assortment_id: activeChangeover.to_assortment_id,
-        machine_status: 'production'
-      }).eq('id', session.id)
+      await command('changeover_end', { session_id: session.id, event_id: activeChangeover.id })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_changeover', session?.id] })
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       navigate('/syringe')
     },
     onError: (e: Error) => {
@@ -147,13 +122,14 @@ export default function SyringeChangeover() {
     }
   })
 
-  if (!session) {
-    return (
-      <div className="max-w-md mx-auto text-center py-16">
-        <p className="text-navy-400">Brak aktywnej sesji.</p>
-        <button onClick={() => navigate('/syringe')} className="btn-primary mt-4">Wróć</button>
-      </div>
-    )
+  const loadError = assortmentsError || checklistError || changeoverError || completionsError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => window.location.reload()}>Ponów odczyt</button>
+  </div>
+
+  if (!session || sessionError) {
+    return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
   }
 
   return (
@@ -196,16 +172,13 @@ export default function SyringeChangeover() {
               const done = completedIds.has(item.id)
               return (
                 <label key={item.id} className="flex items-start gap-3 cursor-pointer group">
-                  <div
-                    onClick={() => toggleItemMutation.mutate({ itemId: item.id, checked: !done })}
-                    className={`mt-0.5 w-6 h-6 rounded-lg border-2 flex items-center justify-center flex-shrink-0 transition-all ${
-                      done
-                        ? 'border-green-500 bg-green-500 text-white'
-                        : 'border-navy-500 bg-navy-900 group-hover:border-brand'
-                    }`}
-                  >
-                    {done && <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><path d="M2 6l3 3 5-5" stroke="white" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/></svg>}
-                  </div>
+                  <input
+                    type="checkbox"
+                    checked={done}
+                    disabled={toggleItemMutation.isPending}
+                    onChange={e => toggleItemMutation.mutate({ itemId: item.id, checked: e.target.checked })}
+                    className="mt-0.5 h-6 w-6 shrink-0 accent-green-500"
+                  />
                   <div>
                     <div className={`text-sm ${done ? 'text-navy-400 line-through' : 'text-white'}`}>{item.name}</div>
                     {item.is_required && !done && (
@@ -219,7 +192,7 @@ export default function SyringeChangeover() {
 
           <button
             onClick={() => { setErrors([]); endMutation.mutate() }}
-            disabled={endMutation.isPending}
+            disabled={endMutation.isPending || toggleItemMutation.isPending}
             className="w-full py-4 rounded-2xl bg-green-600 text-white font-bold text-lg disabled:opacity-40 hover:bg-green-500 transition-all"
           >
             {endMutation.isPending ? 'Kończenie...' : 'Zakończ przezbrojenie i uruchom produkcję'}

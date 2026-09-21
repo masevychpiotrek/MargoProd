@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { rejectPercent, syringeProductionDate } from '@/lib/syringeMetrics'
 import { cn } from '@/lib/utils'
 import type { SaMachine, ShiftType } from '@/types/database'
 
@@ -26,6 +27,7 @@ type ShiftEvent = { machine: string; hour: string; text: string; operator: strin
 type SessionRow = {
   id: string; machine_id: string; shift_type: ShiftType; session_date: string
   started_at: string; total_good: number | null; total_reject: number | null
+  plan_qty: number | null
   total_runtime_min: number | null; total_downtime_min: number | null
   summary_notes: string | null
   machine?: { id: string; name: string }
@@ -35,7 +37,7 @@ type SessionRow = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function todayIso() { return new Date().toISOString().slice(0, 10) }
+function todayIso() { return syringeProductionDate() }
 function addDays(date: string, days: number) {
   const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
@@ -89,7 +91,7 @@ function buildEmailHtml(params: {
     s3bg: '#FFF7ED', s3tx: '#7C2D12', s3ac: '#EA580C',
   }
   const tt = totals.good, to = totals.reject
-  const rejectPctVal = tt > 0 ? ((to / tt) * 100).toFixed(2) + '%' : '0,00%'
+  const rejectPctVal = rejectPercent(tt, to).toFixed(2) + '%'
   const dateFormatted = new Date(`${date}T12:00:00`).toLocaleDateString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric' })
   const dateLong = new Date(`${date}T12:00:00`).toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
   const generatedAt = new Date().toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
@@ -109,8 +111,9 @@ function buildEmailHtml(params: {
   }
   function fmtCell(s: ShiftSummary) {
     if (!s.good && !s.sessions) return `<span style="color:${K.gray3};font-size:11px;${F}">Zmiana nieprodukcyjna</span><br><span style="color:${K.gray4};font-size:10px;${F}">brak sesji w systemie</span>`
-    const rj = (s.good + s.reject) > 0 ? (s.reject / (s.good + s.reject) * 100).toFixed(1) : '0.0'
-    const rjColor = parseFloat(rj) > 5 ? K.red : parseFloat(rj) > 2 ? K.amber : K.green
+    const rawRejectPct = rejectPercent(s.good, s.reject)
+    const rj = rawRejectPct.toFixed(1)
+    const rjColor = rawRejectPct > 5 ? K.red : rawRejectPct > 2 ? K.amber : K.green
     const targetLine = s.target ? `<br><span style="color:${K.gray3};font-size:10px;${F}">cel: ${pieces(s.target)} (${Math.round(s.good / s.target * 100)}%)</span>` : ''
     return `<span style="font-size:15px;font-weight:bold;color:${K.navy};${F}">${pieces(s.good)} szt.</span>`
       + `<br><span style="color:${K.gray3};font-size:11px;${F}">odrzut: </span>`
@@ -120,8 +123,9 @@ function buildEmailHtml(params: {
   }
 
   function buildKpiBanner() {
-    const rj = tt > 0 ? ((to / tt) * 100).toFixed(2) : '0.00'
-    const rjColor = parseFloat(rj) > 5 ? K.red : parseFloat(rj) > 2 ? K.amber : K.green
+    const rawRejectPct = rejectPercent(tt, to)
+    const rj = rawRejectPct.toFixed(2)
+    const rjColor = rawRejectPct > 5 ? K.red : rawRejectPct > 2 ? K.amber : K.green
     const totalTarget = rows.reduce((s, r) => s + (r.total.target ?? 0), 0)
     const targetPct = totalTarget > 0 ? Math.round(tt / totalTarget * 100) : null
     const kpis = [
@@ -193,7 +197,7 @@ ${machineRows}
     &nbsp;&bull;&nbsp;
     Braki: <strong style="color:${K.red}">${pieces(to)} szt.</strong>
     &nbsp;&bull;&nbsp;
-    Wskaźnik odrzutu: <strong style="color:${to / Math.max(tt, 1) * 100 > 5 ? K.red : K.green}">${rejectPctVal}</strong>
+    Wskaźnik odrzutu: <strong style="color:${rejectPercent(tt, to) > 5 ? K.red : K.green}">${rejectPctVal}</strong>
   </td>
 </tr></table>`
 
@@ -839,6 +843,13 @@ export default function SyringeAiReport() {
       supabase.from('sa_quality_issues').select('session_id, detected_at, description, affected_qty').in('session_id', sessionIds),
     ])
     if (requestId !== loadSeq.current) return
+    const eventError = peRes.error || dtRes.error || frRes.error || qiRes.error
+    if (eventError) {
+      setEntryEvents([])
+      setError(`Nie udało się odczytać pełnego przebiegu zmian: ${eventError.message}`)
+      setLoading(false)
+      return
+    }
 
     const events: { machine: string; hour: string; text: string; operator: string; shift: ShiftType }[] = []
 
@@ -895,7 +906,8 @@ export default function SyringeAiReport() {
       shift.sessions += 1
       shift.runtime += s.total_runtime_min ?? 0
       shift.downtime += s.total_downtime_min ?? 0
-      if (s.assortment?.shift_target_qty) shift.target = (shift.target ?? 0) + s.assortment.shift_target_qty
+      const target = s.plan_qty ?? s.assortment?.shift_target_qty
+      if (target != null) shift.target = (shift.target ?? 0) + target
       if (s.assortment?.reject_target_pct != null) shift.rejectTargetPct = s.assortment.reject_target_pct
       if (s.operator?.full_name) shift.operators.push(s.operator.full_name)
       if (s.summary_notes?.trim()) shift.notes.push(s.summary_notes.trim())

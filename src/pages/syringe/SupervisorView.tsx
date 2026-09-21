@@ -2,6 +2,8 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import { syringeRate } from '@/lib/syringeMetrics'
 import { useClock } from '@/hooks/useClock'
 import type { SaSession, SaMachine, SaMachineStatus } from '@/types/database'
 
@@ -19,39 +21,44 @@ const STATUS_CONFIG: Record<SaMachineStatus, { label: string; dot: string; badge
 }
 
 async function fetchMachines() {
-  const { data } = await supabase.from('sa_machines').select('*').eq('is_active', true).is('deleted_at', null).order('sort_order')
+  const { data, error } = await supabase.from('sa_machines').select('*').eq('is_active', true).is('deleted_at', null).order('sort_order')
+  if (error) throw error
   return data as SaMachine[] ?? []
 }
 
 async function fetchActiveSessions() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_sessions')
     .select(`*, machine:sa_machines(*), operator:profiles!sa_sessions_operator_id_fkey(id, full_name), assortment:sa_assortments(*), order:sa_orders(*)`)
     .is('ended_at', null)
+  if (error) throw error
   return data as SaSession[] ?? []
 }
 
 async function fetchActiveDowntimes() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_downtime_events')
     .select('session_id, started_at, category:sa_downtime_categories(name)')
     .is('ended_at', null)
+  if (error) throw error
   return data ?? []
 }
 
 async function fetchActiveFailures() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_failure_reports')
     .select('machine_id, priority, status')
     .not('status', 'in', '(resolved,closed)')
+  if (error) throw error
   return data ?? []
 }
 
 async function fetchActiveQualityIssues() {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('sa_quality_issues')
     .select('machine_id, status')
     .not('status', 'in', '(resolved,closed)')
+  if (error) throw error
   return data ?? []
 }
 
@@ -69,23 +76,23 @@ export default function SyringeSupervisorView() {
   const [filterStatus, setFilterStatus] = useState<string>('')
 
 
-  const { data: machines = [] } = useQuery({ queryKey: ['sa_machines'], queryFn: fetchMachines })
-  const { data: sessions = [], dataUpdatedAt } = useQuery({
+  const { data: machines = [], error: machinesError } = useQuery({ queryKey: ['sa_machines'], queryFn: fetchMachines })
+  const { data: sessions = [], dataUpdatedAt, error: sessionsError } = useQuery({
     queryKey: ['sa_supervisor_sessions'],
     queryFn: fetchActiveSessions,
     refetchInterval: 15000
   })
-  const { data: downtimes = [] } = useQuery({
+  const { data: downtimes = [], error: downtimeError } = useQuery({
     queryKey: ['sa_supervisor_downtimes'],
     queryFn: fetchActiveDowntimes,
     refetchInterval: 15000
   })
-  const { data: failures = [] } = useQuery({
+  const { data: failures = [], error: failuresError } = useQuery({
     queryKey: ['sa_supervisor_failures'],
     queryFn: fetchActiveFailures,
     refetchInterval: 15000
   })
-  const { data: qualityIssues = [] } = useQuery({
+  const { data: qualityIssues = [], error: qualityError } = useQuery({
     queryKey: ['sa_supervisor_quality'],
     queryFn: fetchActiveQualityIssues,
     refetchInterval: 15000
@@ -106,6 +113,12 @@ export default function SyringeSupervisorView() {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [qc])
+
+  const loadError = machinesError || sessionsError || downtimeError || failuresError || qualityError
+  if (loadError) return <div role="alert" className="p-5 text-red-400">
+    Nie udało się odczytać danych: {loadError.message}
+    <button className="btn-secondary ml-2" onClick={() => invalidateSyringe(qc)}>Ponów odczyt</button>
+  </div>
 
   const sessionByMachine = new Map(sessions.map(s => [s.machine_id, s]))
   const downtimeBySession = new Map(downtimes.map(d => [d.session_id, d]))
@@ -207,8 +220,7 @@ export default function SyringeSupervisorView() {
           const totalGood = session.total_good ?? 0
           const planQty = session.plan_qty ?? 0
           const planPct = planQty > 0 ? Math.round(totalGood / planQty * 100) : null
-          const elapsedH = (Date.now() - new Date(session.started_at).getTime()) / 3600000
-          const avgPerHour = elapsedH > 0 && totalGood > 0 ? Math.round(totalGood / elapsedH) : 0
+          const avgPerHour = syringeRate(totalGood, now.getTime() - new Date(session.started_at).getTime())
 
           return (
             <div key={machine.id} className={`rounded-2xl border-2 p-5 space-y-4 ${cfg.badge}`}>
@@ -265,7 +277,7 @@ export default function SyringeSupervisorView() {
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div className="rounded-lg bg-navy-900/50 p-2 text-center">
                   <div className="text-xs text-navy-500">Wydajność</div>
-                  <div className="font-bold text-white">{avgPerHour > 0 ? `${avgPerHour.toLocaleString('pl')} szt/h` : '—'}</div>
+                  <div className="font-bold text-white">{avgPerHour !== null ? `${avgPerHour.toLocaleString('pl')} szt/h` : '—'}</div>
                 </div>
                 <div className="rounded-lg bg-navy-900/50 p-2 text-center">
                   <div className="text-xs text-navy-500">Braki</div>

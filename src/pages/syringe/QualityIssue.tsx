@@ -1,25 +1,18 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { useMutation, useQueryClient } from '@tanstack/react-query'
+import { useSyringeSession } from '@/hooks/useSyringeSession'
+import { useSyringeCommand } from '@/hooks/useSyringeCommand'
+import { invalidateSyringe } from '@/lib/syringeApi'
+import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import Toggle from '@/components/shared/Toggle'
-import type { SaSession } from '@/types/database'
-
-async function fetchMySession(operatorId: string) {
-  const { data } = await supabase
-    .from('sa_sessions')
-    .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
-    .eq('operator_id', operatorId)
-    .is('ended_at', null)
-    .maybeSingle()
-  return data as SaSession | null
-}
 
 export default function SyringeQualityIssue() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const command = useSyringeCommand()
 
   const [batchNumber, setBatchNumber] = useState('')
   const [description, setDescription] = useState('')
@@ -31,42 +24,22 @@ export default function SyringeQualityIssue() {
   const [errors, setErrors] = useState<string[]>([])
   const [success, setSuccess] = useState(false)
 
-  const { data: session } = useQuery({
-    queryKey: ['sa_my_session', profile?.id],
-    queryFn: () => fetchMySession(profile!.id),
-    enabled: !!profile?.id
-  })
+  const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
   const saveMutation = useMutation({
     mutationFn: async () => {
       if (!profile || !session) throw new Error('Brak aktywnej sesji.')
       const errs: string[] = []
-      if (!description) errs.push('Opisz niezgodność.')
-      if (productSeparated && !separationLocation) errs.push('Podaj lokalizację odseparowanego wyrobu.')
+      if (!description.trim()) errs.push('Opisz niezgodność.')
+      if (productSeparated && !separationLocation.trim()) errs.push('Podaj lokalizację odseparowanego wyrobu.')
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
-      const { error } = await supabase.from('sa_quality_issues').insert({
-        session_id: session.id,
-        machine_id: session.machine_id,
-        assortment_id: session.assortment_id,
-        order_id: session.order_id ?? null,
-        reporter_id: profile.id,
-        batch_number: batchNumber || null,
-        description,
-        affected_qty: affectedQty ? parseInt(affectedQty) : null,
-        operator_actions: operatorActions || null,
-        production_stopped: productionStopped,
-        product_separated: productSeparated,
-        separation_location: productSeparated ? separationLocation : null
-      })
-      if (error) throw error
-
-      if (productionStopped) {
-        await supabase.from('sa_sessions').update({ machine_status: 'quality_control' }).eq('id', session.id)
-      }
+      await command('quality', { session_id: session.id, batch_number: batchNumber, description: description.trim(),
+        affected_qty: affectedQty || null, operator_actions: operatorActions, production_stopped: productionStopped,
+        product_separated: productSeparated, separation_location: productSeparated ? separationLocation : null })
     },
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['sa_my_session'] })
+      void invalidateSyringe(qc)
       setSuccess(true)
     },
     onError: (e: Error) => {
@@ -89,6 +62,8 @@ export default function SyringeQualityIssue() {
       </div>
     )
   }
+
+  if (!session || sessionError) return <SyringeSessionState loading={isLoading} error={sessionError} retry={refetchSession} />
 
   return (
     <div className="max-w-2xl mx-auto space-y-5 py-2">
