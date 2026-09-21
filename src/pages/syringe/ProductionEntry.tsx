@@ -98,8 +98,11 @@ export default function SyringeProductionEntry() {
     ? Date.now() - new Date(lastEntry.recorded_at).getTime()
     : session ? Date.now() - new Date(session.started_at).getTime() : 0
   const elapsedH = elapsedMs / 3600000
-  const perHour = elapsedH > 0 && assemblyDelta && assemblyDelta > 0
-    ? Math.round(assemblyDelta / elapsedH)
+  // Poniżej 5 minut ekstrapolacja szt/h jest niemiarodajna (i przy bardzo małym
+  // elapsedH może przepełnić kolumnę NUMERIC(8,2)) — nie liczymy wtedy wydajności.
+  const MIN_ELAPSED_H_FOR_RATE = 5 / 60
+  const perHour = elapsedH >= MIN_ELAPSED_H_FOR_RATE && assemblyDelta && assemblyDelta > 0
+    ? Math.min(999999, Math.round(assemblyDelta / elapsedH))
     : null
 
   const planQty = session?.plan_qty ?? 0
