@@ -92,14 +92,16 @@ export default function SyringeProductionEntry() {
     ? String(Math.max(0, printDelta - assemblyDelta))
     : ''
 
-  const elapsedMs = lastEntry
-    ? Date.now() - new Date(lastEntry.recorded_at).getTime()
-    : session ? Date.now() - new Date(session.started_at).getTime() : 0
+  // Wydajność liczymy WYŁĄCZNIE między dwoma realnymi wpisami — "czas od startu
+  // sesji" nie jest wiarygodnym punktem odniesienia (rozruch, przezbrojenie,
+  // czas zanim operator zacznie wpisywać), więc przy pierwszym wpisie zmiany
+  // celowo nie liczymy żadnej wydajności zamiast zgadywać z niepewnych danych.
+  const elapsedMs = lastEntry ? Date.now() - new Date(lastEntry.recorded_at).getTime() : 0
   const elapsedH = elapsedMs / 3600000
   // Poniżej 5 minut ekstrapolacja szt/h jest niemiarodajna (i przy bardzo małym
   // elapsedH może przepełnić kolumnę NUMERIC(8,2)) — nie liczymy wtedy wydajności.
   const MIN_ELAPSED_H_FOR_RATE = 5 / 60
-  const perHour = elapsedH >= MIN_ELAPSED_H_FOR_RATE && assemblyDelta && assemblyDelta > 0
+  const perHour = lastEntry && elapsedH >= MIN_ELAPSED_H_FOR_RATE && assemblyDelta && assemblyDelta > 0
     ? Math.min(999999, Math.round(assemblyDelta / elapsedH))
     : null
 
@@ -234,7 +236,14 @@ export default function SyringeProductionEntry() {
         if (defErr) throw defErr
       }
 
-      // Aktualizuj sumy sesji
+      // Aktualizuj sumy sesji. Śr. wydajność liczymy jako PRAWDZIWĄ średnią
+      // całej zmiany (suma dobrych / czas od startu sesji) — nie mylić z
+      // "perHour", który jest chwilową wydajnością między dwoma wpisami.
+      const sessionElapsedH = (Date.now() - new Date(session.started_at).getTime()) / 3600000
+      const avgPerHourN = sessionElapsedH > 0
+        ? Math.min(999999, Math.round((sessionGood + goodN) / sessionElapsedH))
+        : null
+
       await supabase.from('sa_sessions').update({
         total_produced: (session.total_produced ?? 0) + producedN,
         total_good: (session.total_good ?? 0) + goodN,
@@ -242,7 +251,7 @@ export default function SyringeProductionEntry() {
         total_tech_reject: (session.total_tech_reject ?? 0) + techN,
         total_qual_reject: (session.total_qual_reject ?? 0) + qualN,
         plan_pct: planPctN,
-        avg_per_hour: perHour
+        avg_per_hour: avgPerHourN
       }).eq('id', session.id)
     },
     onSuccess: () => {
@@ -396,10 +405,17 @@ export default function SyringeProductionEntry() {
                 </div>
               </div>
             )}
-            {perHour !== null && (
+            {perHour !== null ? (
               <div>
                 <div className="text-navy-500">Wydajność</div>
                 <div className="font-bold text-white">{perHour.toLocaleString('pl')} szt/h</div>
+              </div>
+            ) : (
+              <div>
+                <div className="text-navy-500">Wydajność</div>
+                <div className="font-bold text-navy-500 text-xs leading-snug">
+                  {!lastEntry ? 'dostępna od kolejnego wpisu' : 'zbyt mało czasu od poprzedniego wpisu'}
+                </div>
               </div>
             )}
             {planPct !== null && (
