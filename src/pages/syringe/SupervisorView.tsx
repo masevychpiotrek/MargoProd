@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { useClock } from '@/hooks/useClock'
 import type { SaSession, SaMachine, SaMachineStatus } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; dot: string; badge: string }> = {
@@ -54,8 +55,8 @@ async function fetchActiveQualityIssues() {
   return data ?? []
 }
 
-function formatDuration(startedAt: string) {
-  const diff = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+function formatDuration(startedAt: string, nowMs: number = Date.now()) {
+  const diff = Math.floor((nowMs - new Date(startedAt).getTime()) / 1000)
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
   return h > 0 ? `${h}h ${m}m` : `${m}m`
@@ -64,6 +65,7 @@ function formatDuration(startedAt: string) {
 export default function SyringeSupervisorView() {
   const qc = useQueryClient()
   const navigate = useNavigate()
+  const { now } = useClock()
   const [filterStatus, setFilterStatus] = useState<string>('')
 
 
@@ -274,7 +276,7 @@ export default function SyringeSupervisorView() {
               {/* Przestój */}
               {downtime && (
                 <div className="rounded-lg border border-red-500/30 bg-red-500/10 p-2 text-xs text-red-300">
-                  Przestój: {(downtime as any).category?.name ?? '—'} · {formatDuration(downtime.started_at)}
+                  Przestój: {(downtime as any).category?.name ?? '—'} · {formatDuration(downtime.started_at, now.getTime())}
                 </div>
               )}
 

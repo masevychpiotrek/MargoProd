@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import { useClock } from '@/hooks/useClock'
 import type { SaSession, SaDowntimeEvent, SaDowntimeCategory } from '@/types/database'
 
 async function fetchMySession(operatorId: string) {
@@ -34,8 +35,8 @@ async function fetchDowntimeCategories() {
   return data as SaDowntimeCategory[] ?? []
 }
 
-function formatDuration(startedAt: string) {
-  const diff = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+function formatDuration(startedAt: string, nowMs: number = Date.now()) {
+  const diff = Math.floor((nowMs - new Date(startedAt).getTime()) / 1000)
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
   const s = diff % 60
@@ -53,6 +54,7 @@ export default function SyringeDowntimeEntry() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { now } = useClock()
 
   // Start downtime
   const [selectedCategoryId, setSelectedCategoryId] = useState('')
@@ -190,7 +192,7 @@ export default function SyringeDowntimeEntry() {
             )}
             <div>
               <div className="text-sm text-navy-400">Czas trwania</div>
-              <div className="text-white font-bold text-xl">{formatDuration(activeDowntime.started_at)}</div>
+              <div className="text-white font-bold text-xl">{formatDuration(activeDowntime.started_at, now.getTime())}</div>
             </div>
           </div>
 

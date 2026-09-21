@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
+import { useClock } from '@/hooks/useClock'
 import type { SaSession, SaMachineStatus, SaProductionEntry, SaDowntimeEvent } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -54,8 +55,8 @@ async function fetchActiveDowntime(sessionId: string) {
   return data as SaDowntimeEvent | null
 }
 
-function formatDuration(startedAt: string) {
-  const diff = Math.floor((Date.now() - new Date(startedAt).getTime()) / 1000)
+function formatDuration(startedAt: string, nowMs: number = Date.now()) {
+  const diff = Math.floor((nowMs - new Date(startedAt).getTime()) / 1000)
   const h = Math.floor(diff / 3600)
   const m = Math.floor((diff % 3600) / 60)
   return `${h}h ${m}m`
@@ -75,6 +76,7 @@ export default function SyringeDashboard() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
   const qc = useQueryClient()
+  const { now } = useClock()
   const [showStatusPicker, setShowStatusPicker] = useState(false)
 
   const { data: session, isLoading } = useQuery({
@@ -185,7 +187,7 @@ export default function SyringeDashboard() {
           <h1 className="text-xl font-bold text-white">{session.machine?.name}</h1>
           <p className="text-navy-400 text-sm">
             Zmiana {session.shift_type} · {session.assortment?.name} ·
-            Czas: {formatDuration(session.started_at)}
+            Czas: {formatDuration(session.started_at, now.getTime())}
           </p>
         </div>
         <div className="flex gap-2 flex-wrap">
@@ -222,7 +224,7 @@ export default function SyringeDashboard() {
           <div>
             <div className="font-bold text-red-300">Aktywny przestój</div>
             <div className="text-sm text-red-200 mt-0.5">
-              {(activeDowntime as any).category?.name ?? 'Nieznana kategoria'} · trwa: {formatDuration(activeDowntime.started_at)}
+              {(activeDowntime as any).category?.name ?? 'Nieznana kategoria'} · trwa: {formatDuration(activeDowntime.started_at, now.getTime())}
             </div>
           </div>
           <button
