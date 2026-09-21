@@ -68,6 +68,7 @@ const NAV_MANAGER = [
   { to: '/manager/changes',   label: 'Zmiany i problemy', icon: Icons.failure },
   { to: '/syringe/supervisor',   label: '── Strzykawki SA',  icon: Icons.machines },
   { to: '/syringe/reports',      label: '── Raporty SA',     icon: Icons.export },
+  { to: '/syringe/ai-report',    label: '── Raport AI SA',   icon: Icons.report },
   { to: '/syringe/history',      label: '── Historia SA',    icon: Icons.history },
   { to: '/admin/syringe',        label: '── Strzykawki konfig.', icon: Icons.targets },
   { to: '/tpm/manager',          label: '── TPM/PM nadzór',  icon: Icons.machines },

@@ -48,6 +48,7 @@ const SyringeHistory       = lazy(() => import('@/pages/syringe/History'))
 const SyringeSupervisor    = lazy(() => import('@/pages/syringe/SupervisorView'))
 const SyringeMyReports     = lazy(() => import('@/pages/syringe/MyReports'))
 const SyringeReports       = lazy(() => import('@/pages/syringe/Reports'))
+const SyringeAiReport      = lazy(() => import('@/pages/syringe/AiReport'))
 const SyringeAdmin         = lazy(() => import('@/pages/admin/SyringeAdmin'))
 
 // ── TPM / PM — IS PRO ──
@@ -272,6 +273,7 @@ const router = createBrowserRouter([
           { path: 'my-reports',   element: <Wrap><SyringeMyReports /></Wrap> },
           { path: 'supervisor',   element: <RequireAuth roles={['manager', 'admin']}><Wrap><SyringeSupervisor /></Wrap></RequireAuth> },
           { path: 'reports',      element: <RequireAuth roles={['manager', 'admin']}><Wrap><SyringeReports /></Wrap></RequireAuth> },
+          { path: 'ai-report',    element: <RequireAuth roles={['manager', 'admin']}><Wrap><SyringeAiReport /></Wrap></RequireAuth> },
         ]
       },
 

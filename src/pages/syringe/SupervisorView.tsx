@@ -141,6 +141,7 @@ export default function SyringeSupervisorView() {
           </p>
         </div>
         <button onClick={() => navigate('/syringe/reports')} className="btn-primary px-4 py-2">Raporty i eksport</button>
+        <button onClick={() => navigate('/syringe/ai-report')} className="btn-secondary px-4 py-2">✉️ Raport AI</button>
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilterStatus('')}
