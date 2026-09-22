@@ -148,6 +148,100 @@ function buildEmailHtml(params: {
     return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:22px"><tr>${cells}<td style="padding:0"></td></tr></table>`
   }
 
+  function buildPerformanceChart() {
+    const chartRows = rows
+      .filter(row => row.total.sessions > 0 || row.total.good > 0 || (row.total.target ?? 0) > 0)
+      .sort((a, b) => a.machineName.localeCompare(b.machineName))
+
+    if (!chartRows.length) return ''
+
+    const width = 720
+    const height = 310
+    const left = 74
+    const right = 26
+    const top = 28
+    const bottom = 78
+    const plotW = width - left - right
+    const plotH = height - top - bottom
+    const maxValue = Math.max(1, ...chartRows.flatMap(row => [row.total.good, row.total.target ?? 0]))
+    const magnitude = Math.pow(10, Math.max(0, Math.floor(Math.log10(maxValue)) - 1))
+    const yMax = Math.ceil(maxValue / magnitude) * magnitude
+    const yTicks = [0, 0.25, 0.5, 0.75, 1].map(t => Math.round(yMax * t))
+    const x = (index: number) => chartRows.length === 1
+      ? left + plotW / 2
+      : left + (index / (chartRows.length - 1)) * plotW
+    const y = (value: number) => top + plotH - (value / yMax) * plotH
+    const targetPoints = chartRows.map((row, index) => `${x(index).toFixed(1)},${y(row.total.target ?? 0).toFixed(1)}`).join(' ')
+    const actualPoints = chartRows.map((row, index) => `${x(index).toFixed(1)},${y(row.total.good).toFixed(1)}`).join(' ')
+    const label = (name: string) => {
+      const clean = name.replace(/^Automat strzykawkowy\s*/i, '').replace(/^Linia\s*/i, '').trim()
+      return clean.length > 13 ? `${clean.slice(0, 12)}…` : clean
+    }
+    const grid = yTicks.map(tick => {
+      const yy = y(tick)
+      return `<line x1="${left}" y1="${yy.toFixed(1)}" x2="${width - right}" y2="${yy.toFixed(1)}" stroke="${K.gray2}" stroke-width="1" />
+        <text x="${left - 10}" y="${(yy + 4).toFixed(1)}" text-anchor="end" font-size="11" fill="${K.gray3}" style="${F}">${pieces(tick)}</text>`
+    }).join('')
+    const xLabels = chartRows.map((row, index) => {
+      const xx = x(index)
+      return `<text x="${xx.toFixed(1)}" y="${height - 44}" text-anchor="middle" font-size="10" fill="${K.gray3}" style="${F}">${escapeHtml(label(row.machineName))}</text>`
+    }).join('')
+    const actualDots = chartRows.map((row, index) => {
+      const xx = x(index), yy = y(row.total.good)
+      return `<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="4" fill="${K.green}" stroke="#fff" stroke-width="2" />
+        <text x="${xx.toFixed(1)}" y="${(yy - 9).toFixed(1)}" text-anchor="middle" font-size="10" font-weight="bold" fill="${K.green}" style="${F}">${pieces(row.total.good)}</text>`
+    }).join('')
+    const targetDots = chartRows.map((row, index) => {
+      const xx = x(index), yy = y(row.total.target ?? 0)
+      return `<circle cx="${xx.toFixed(1)}" cy="${yy.toFixed(1)}" r="3.5" fill="#fff" stroke="${K.amber}" stroke-width="2" />`
+    }).join('')
+    const rowsHtml = chartRows.map(row => {
+      const target = row.total.target ?? 0
+      const pct = target > 0 ? Math.round(row.total.good / target * 100) : null
+      const tone = pct === null ? K.gray3 : pct >= 100 ? K.green : pct >= 90 ? K.amber : K.red
+      return `<tr>
+        <td style="padding:8px 10px;border:1px solid ${K.gray2};font-size:12px;color:${K.navy};${F}">${escapeHtml(row.machineName)}</td>
+        <td align="right" style="padding:8px 10px;border:1px solid ${K.gray2};font-size:12px;color:${K.gray3};${F}">${target ? pieces(target) : 'brak celu'}</td>
+        <td align="right" style="padding:8px 10px;border:1px solid ${K.gray2};font-size:12px;font-weight:bold;color:${K.green};${F}">${pieces(row.total.good)}</td>
+        <td align="right" style="padding:8px 10px;border:1px solid ${K.gray2};font-size:12px;font-weight:bold;color:${tone};${F}">${pct === null ? '—' : `${pct}%`}</td>
+      </tr>`
+    }).join('')
+
+    return `
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:0 0 24px"><tr>
+  <td style="background:${K.gray1};border:1px solid ${K.gray2};padding:14px 14px 10px;${F}">
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:8px"><tr>
+      <td style="font-size:12px;font-weight:bold;color:${K.navy};${F}">Wykres realizacji celu według linii</td>
+      <td align="right" style="font-size:11px;color:${K.gray3};${F}">
+        <span style="color:${K.amber};font-weight:bold">■ Cel</span>
+        &nbsp;&nbsp;
+        <span style="color:${K.green};font-weight:bold">■ Realizacja</span>
+      </td>
+    </tr></table>
+    <svg xmlns="http://www.w3.org/2000/svg" width="100%" viewBox="0 0 ${width} ${height}" role="img" aria-label="Cel i realizacja produkcji na liniach strzykawkowych" style="display:block;max-width:720px;margin:0 auto;background:#fff;border:1px solid ${K.gray2}">
+      <rect x="0" y="0" width="${width}" height="${height}" fill="#fff" />
+      ${grid}
+      <line x1="${left}" y1="${top}" x2="${left}" y2="${height - bottom}" stroke="${K.gray2}" stroke-width="1" />
+      <line x1="${left}" y1="${height - bottom}" x2="${width - right}" y2="${height - bottom}" stroke="${K.gray2}" stroke-width="1" />
+      <polyline points="${targetPoints}" fill="none" stroke="${K.amber}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+      <polyline points="${actualPoints}" fill="none" stroke="${K.green}" stroke-width="3" stroke-linejoin="round" stroke-linecap="round" />
+      ${targetDots}
+      ${actualDots}
+      ${xLabels}
+    </svg>
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="border-collapse:collapse;margin-top:12px;background:#fff">
+      <thead><tr>
+        <th align="left" style="padding:8px 10px;background:${K.navy};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;${F}">Linia</th>
+        <th align="right" style="padding:8px 10px;background:${K.navy};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;${F}">Cel</th>
+        <th align="right" style="padding:8px 10px;background:${K.navy};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;${F}">Realizacja</th>
+        <th align="right" style="padding:8px 10px;background:${K.navy};color:#fff;font-size:10px;text-transform:uppercase;letter-spacing:.5px;${F}">%</th>
+      </tr></thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+  </td>
+</tr></table>`
+  }
+
   const machineRows = rows.map((row, idx) => {
     const pal = emailPalette[idx % emailPalette.length]
     return `<tr>
@@ -279,14 +373,21 @@ ${machineRows}
 
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px"><tr>
       <td style="border-bottom:2px solid ${K.blue};padding-bottom:7px">
-        <span style="font-size:13px;font-weight:bold;color:${K.blue};${F}">1.&nbsp;&nbsp;Wyniki produkcyjne wed&#322;ug zmian</span>
+        <span style="font-size:13px;font-weight:bold;color:${K.blue};${F}">1.&nbsp;&nbsp;Cel i realizacja wed&#322;ug linii</span>
+      </td>
+    </tr></table>
+    ${buildPerformanceChart()}
+
+    <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:14px"><tr>
+      <td style="border-bottom:2px solid ${K.blue};padding-bottom:7px">
+        <span style="font-size:13px;font-weight:bold;color:${K.blue};${F}">2.&nbsp;&nbsp;Wyniki produkcyjne wed&#322;ug zmian</span>
       </td>
     </tr></table>
     ${prodTable}
 
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 12px"><tr>
       <td style="border-bottom:2px solid ${K.blue};padding-bottom:7px">
-        <span style="font-size:13px;font-weight:bold;color:${K.blue};${F}">2.&nbsp;&nbsp;Przebieg zmian i istotne zdarzenia</span>
+        <span style="font-size:13px;font-weight:bold;color:${K.blue};${F}">3.&nbsp;&nbsp;Przebieg zmian i istotne zdarzenia</span>
       </td>
     </tr></table>
     ${emailShifts}
@@ -294,7 +395,7 @@ ${machineRows}
     ${attentionHtml ? `
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 12px"><tr>
       <td style="border-bottom:2px solid ${K.amber};padding-bottom:7px">
-        <span style="font-size:13px;font-weight:bold;color:${K.amber};${F}">3.&nbsp;&nbsp;Zalecenia na nast&#281;pn&#261; zmian&#281;</span>
+        <span style="font-size:13px;font-weight:bold;color:${K.amber};${F}">4.&nbsp;&nbsp;Zalecenia na nast&#281;pn&#261; zmian&#281;</span>
       </td>
     </tr></table>
     <table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:20px"><tr>
