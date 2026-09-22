@@ -9,7 +9,9 @@ import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import { syringeRate, wholeQuantity } from '@/lib/syringeMetrics'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
-import type { SaProductionEntry, SaDefectCategory } from '@/types/database'
+import { useClock } from '@/hooks/useClock'
+import { formatHourBlock, SHIFT_HOURS } from '@/lib/utils'
+import type { SaProductionEntry, SaDefectCategory, ShiftType } from '@/types/database'
 
 async function fetchLastEntry(sessionId: string) {
   const { data, error } = await supabase
@@ -55,6 +57,7 @@ export default function SyringeProductionEntry() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const command = useSyringeCommand()
+  const { now } = useClock()
   const [search] = useSearchParams()
   const editing = search.get('edit') === 'last'
   const initializedEdit = useRef<string>()
@@ -160,6 +163,17 @@ export default function SyringeProductionEntry() {
   const allocationPct = rejectTotal > 0 ? Math.min(100, Math.max(0, allocatedQty / rejectTotal * 100)) : 0
   const entryLimit = isShiftSettlementMode ? 1 : 8
   const entryLimitReached = !editing && entryCount >= entryLimit
+  const liveReferenceMs = currentEntry ? new Date(currentEntry.recorded_at).getTime() : now.getTime()
+  const shiftElapsedMin = Math.max(0, Math.floor((liveReferenceMs - new Date(session?.started_at ?? now).getTime()) / 60000))
+  const entryElapsedMin = Math.max(0, Math.floor((liveReferenceMs - entryStartMs) / 60000))
+  const currentHourNo = editing ? Math.max(1, entryCount) : Math.min(entryLimit, entryCount + 1)
+  const completedHours = Math.min(entryLimit, entryCount)
+  const remainingHours = Math.max(0, entryLimit - completedHours)
+  const minutesToNextEntry = Math.max(0, 60 - entryElapsedMin)
+  const fmtMin = (value: number) => `${Math.floor(value / 60)}h ${value % 60}m`
+  const shiftHours = session ? (SHIFT_HOURS[session.shift_type as ShiftType] ?? []) : []
+  const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
+  const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
 
   function addDefectRow(catId: string) {
     if (defects.find(d => d.category_id === catId)) return
@@ -323,6 +337,49 @@ export default function SyringeProductionEntry() {
       {errors.length > 0 && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
           {errors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
+        </div>
+      )}
+
+      {!isShiftSettlementMode && (
+        <div className="rounded-2xl border border-brand/30 bg-brand/5 p-5 space-y-4">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-brand">Licznik godzin</div>
+              <div className="mt-1 text-2xl font-bold text-white">
+                Godzina {currentHourNo}/{entryLimit}
+              </div>
+              {currentHourBlock && <div className="mt-1 text-sm font-bold text-brand">{currentHourBlock}</div>}
+            </div>
+            <div className="rounded-xl border border-navy-700 bg-navy-900 px-4 py-3 text-right">
+              <div className="text-xs text-navy-500">zapisane wpisy</div>
+              <div className="text-xl font-bold text-brand">{completedHours}/{entryLimit}</div>
+            </div>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+              <div className="text-navy-500">Czas od startu</div>
+              <div className="text-white font-bold">{fmtMin(shiftElapsedMin)}</div>
+            </div>
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+              <div className="text-navy-500">Od ostatniego wpisu</div>
+              <div className={entryElapsedMin >= 60 ? 'text-amber-300 font-bold' : 'text-white font-bold'}>
+                {fmtMin(entryElapsedMin)}
+              </div>
+            </div>
+            <div className="rounded-xl border border-navy-700 bg-navy-900 p-3">
+              <div className="text-navy-500">Zostało wpisów</div>
+              <div className="text-white font-bold">{remainingHours}</div>
+            </div>
+          </div>
+          <div className={`rounded-xl border px-4 py-3 text-sm ${
+            entryElapsedMin >= 60
+              ? 'border-amber-500/40 bg-amber-500/10 text-amber-200'
+              : 'border-navy-700 bg-navy-900 text-navy-300'
+          }`}>
+            {entryElapsedMin >= 60
+              ? 'Ten wpis jest już należny. Zapisz wynik za bieżącą godzinę.'
+              : `Do kolejnego wpisu zostało około ${minutesToNextEntry} min.`}
+          </div>
         </div>
       )}
 

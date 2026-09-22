@@ -8,7 +8,9 @@ import { invalidateSyringe } from '@/lib/syringeApi'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
-import type { SaChangeover } from '@/types/database'
+import { useClock } from '@/hooks/useClock'
+import { getShiftEndAt } from '@/lib/utils'
+import type { SaChangeover, ShiftType } from '@/types/database'
 
 async function fetchActiveDowntime(sessionId: string) {
   const { data, error } = await supabase
@@ -35,6 +37,16 @@ async function fetchLastCounter(sessionId: string) {
   return data ?? null
 }
 
+async function fetchEntryCount(sessionId: string) {
+  const { count, error } = await supabase
+    .from('sa_production_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('session_id', sessionId)
+    .eq('is_cancelled', false)
+  if (error) throw error
+  return count ?? 0
+}
+
 async function fetchActiveChangeover(sessionId: string) {
   const { data, error } = await supabase
     .from('sa_changeovers')
@@ -51,6 +63,7 @@ export default function SyringeShiftHandover() {
   const navigate = useNavigate()
   const qc = useQueryClient()
   const command = useSyringeCommand()
+  const { now } = useClock()
 
   const [activeIssues, setActiveIssues] = useState('')
   const [adjustmentsMade, setAdjustmentsMade] = useState('')
@@ -62,6 +75,7 @@ export default function SyringeShiftHandover() {
   const [errors, setErrors] = useState<string[]>([])
   const [handoverCreated, setHandoverCreated] = useState(false)
   const [showDetails, setShowDetails] = useState(false)
+  const [earlyEndConfirmed, setEarlyEndConfirmed] = useState(false)
 
   const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
@@ -83,15 +97,31 @@ export default function SyringeShiftHandover() {
     enabled: !!session?.id
   })
 
+  const { data: entryCount = 0, isLoading: entryCountLoading, error: entryCountError } = useQuery({
+    queryKey: ['sa_handover_entry_count', session?.id],
+    queryFn: () => fetchEntryCount(session!.id),
+    enabled: !!session?.id
+  })
+
   const isShiftSettlementMode = isShiftSettlementAssortment(session?.assortment?.code)
   const savedFinalPrint = lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0
   const savedFinalAssembly = lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0
+  const expectedEntries = isShiftSettlementMode ? 1 : 8
+  const missingEntryCount = Math.max(0, expectedEntries - entryCount)
+  const shiftEndAt = session ? getShiftEndAt(session.session_date, session.shift_type as ShiftType) : null
+  const beforeShiftEnd = shiftEndAt ? now.getTime() < shiftEndAt.getTime() : false
+  const earlyCloseRequired = beforeShiftEnd || missingEntryCount > 0
+  const EARLY_END_MIN_REASON_LENGTH = 15
 
   function validate(): string[] {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
     if (activeChangeover) errs.push('Najpierw zakończ aktywne przezbrojenie.')
     if (!comment.trim()) errs.push('Podaj powód zamknięcia zmiany w komentarzu końcowym.')
+    if (earlyCloseRequired && !earlyEndConfirmed) errs.push('Potwierdź, że zamykasz zmianę przedwcześnie.')
+    if (earlyCloseRequired && comment.trim().length < EARLY_END_MIN_REASON_LENGTH) {
+      errs.push(`Podaj konkretny powód przedwczesnego zamknięcia, minimum ${EARLY_END_MIN_REASON_LENGTH} znaków.`)
+    }
     return errs
   }
 
@@ -111,7 +141,9 @@ export default function SyringeShiftHandover() {
         quality_info: qualityInfo,
         component_status: componentStatus,
         recommendations,
-        comment
+        comment,
+        ended_early: earlyCloseRequired,
+        early_end_reason: earlyCloseRequired ? comment.trim() : null
       })
     },
     onSuccess: () => {
@@ -179,8 +211,9 @@ export default function SyringeShiftHandover() {
         </div>
       )}
 
-      {errors.length > 0 && (
+      {(entryCountError || errors.length > 0) && (
         <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
+          {entryCountError && <p className="text-sm text-red-300">• Nie udało się odczytać licznika wpisów: {entryCountError.message}</p>}
           {errors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
         </div>
       )}
@@ -208,7 +241,44 @@ export default function SyringeShiftHandover() {
             </div>
           </div>
         </div>
+        <div className="mt-4 rounded-xl border border-navy-700 bg-navy-900 p-3 text-sm">
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-navy-400">{isShiftSettlementMode ? 'Rozliczenie końcowe' : 'Licznik godzin'}</span>
+            <span className="font-bold text-white">{entryCount}/{expectedEntries}</span>
+          </div>
+          {shiftEndAt && (
+            <div className="mt-1 text-xs text-navy-500">
+              Planowy koniec zmiany: {shiftEndAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
+            </div>
+          )}
+        </div>
       </div>
+
+      {earlyCloseRequired && (
+        <div className="rounded-2xl border border-amber-500/40 bg-amber-500/10 p-5 space-y-3">
+          <div className="text-sm font-bold text-amber-200">Zamknięcie przedwczesne</div>
+          <div className="text-sm text-amber-100">
+            {beforeShiftEnd && shiftEndAt
+              ? `Zmiana kończy się planowo o ${shiftEndAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}. `
+              : ''}
+            {missingEntryCount > 0
+              ? `Brakuje jeszcze ${missingEntryCount} ${missingEntryCount === 1 ? 'wpisu' : 'wpisów'} produkcyjnych. `
+              : ''}
+            System zapisze tę zmianę jako zamkniętą przed czasem.
+          </div>
+          <label className="flex items-start gap-3 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={earlyEndConfirmed}
+              onChange={e => setEarlyEndConfirmed(e.target.checked)}
+              className="mt-0.5 w-5 h-5 rounded accent-brand"
+            />
+            <span className="text-sm text-amber-100">
+              Potwierdzam przedwczesne zamknięcie i wpisuję konkretny powód poniżej.
+            </span>
+          </label>
+        </div>
+      )}
 
       <div className="border border-navy-700 bg-navy-800 p-5 space-y-3">
         <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Wynik całej zmiany'}</h2>
@@ -304,7 +374,7 @@ export default function SyringeShiftHandover() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); handoverMutation.mutate() }}
-          disabled={countersLoading || !!countersError || handoverMutation.isPending || !!activeDowntime || !!activeChangeover}
+          disabled={countersLoading || entryCountLoading || !!countersError || !!entryCountError || handoverMutation.isPending || !!activeDowntime || !!activeChangeover}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
           {handoverMutation.isPending ? 'Zapisywanie...' : lastCounter ? 'Zakończ zmianę' : 'Zakończ bez produkcji'}

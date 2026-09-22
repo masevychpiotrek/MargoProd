@@ -9,7 +9,8 @@ import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { syringeRate, stoppedMinutes } from '@/lib/syringeMetrics'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { useClock } from '@/hooks/useClock'
-import type { SaMachineStatus, SaProductionEntry, SaDowntimeEvent } from '@/types/database'
+import { formatHourBlock, SHIFT_HOURS } from '@/lib/utils'
+import type { SaMachineStatus, SaProductionEntry, SaDowntimeEvent, ShiftType } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; color: string; bg: string; border: string }> = {
   production:       { label: 'Produkcja',           color: 'text-green-300',  bg: 'bg-green-500/15',  border: 'border-green-500/40' },
@@ -43,7 +44,7 @@ async function fetchLastEntries(sessionId: string) {
     .eq('is_cancelled', false)
     .order('recorded_at', { ascending: false })
     .order('created_at', { ascending: false }).order('id', { ascending: false })
-    .limit(5)
+    .limit(8)
   if (error) throw error
   return data as SaProductionEntry[] ?? []
 }
@@ -142,6 +143,7 @@ export default function SyringeDashboard() {
   const statusCfg = STATUS_CONFIG[session.machine_status]
   const isShiftSettlementMode = isShiftSettlementAssortment(session.assortment?.code)
   const lastEntry = entries[0]
+  const entryCount = entries.length
   const totalGood = session.total_good ?? 0
   const totalReject = session.total_reject ?? 0
   const totalProduced = session.total_produced ?? 0
@@ -168,6 +170,12 @@ export default function SyringeDashboard() {
   const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
   const minSinceEntry = Math.floor((Date.now() - lastEntryAt) / 60000)
   const entryDue = !isShiftSettlementMode && minSinceEntry >= 60
+  const entryLimit = isShiftSettlementMode ? 1 : 8
+  const currentHourNo = isShiftSettlementMode ? 1 : Math.min(entryLimit, entryCount + 1)
+  const remainingEntryCount = Math.max(0, entryLimit - entryCount)
+  const shiftHours = SHIFT_HOURS[session.shift_type as ShiftType] ?? []
+  const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
+  const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -269,8 +277,23 @@ export default function SyringeDashboard() {
           value={nominal ? nominal.toLocaleString('pl') : '—'}
           sub="szt/h"
         />
-        <KpiCard label="Czas aktywnej pracy" value={fmtMin(activeMin)} sub={`z ${fmtMin(elapsedMin)} zmiany`} />
+        <KpiCard
+          label={isShiftSettlementMode ? 'Rozliczenie' : 'Licznik godzin'}
+          value={isShiftSettlementMode ? '1/1' : `${currentHourNo}/${entryLimit}`}
+          sub={isShiftSettlementMode ? 'wpis na koniec zmiany' : `${currentHourBlock ?? 'blok godziny'} · zostało ${remainingEntryCount}`}
+          highlight={!isShiftSettlementMode && entryDue}
+        />
         <KpiCard label="Czas przestojów" value={fmtMin(downtimeMin)} sub={elapsedMin > 0 ? `${Math.round(downtimeMin / elapsedMin * 100)}% zmiany` : ''} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <KpiCard label="Czas aktywnej pracy" value={fmtMin(activeMin)} sub={`z ${fmtMin(elapsedMin)} zmiany`} />
+        <KpiCard
+          label="Od ostatniego wpisu"
+          value={fmtMin(minSinceEntry)}
+          sub={isShiftSettlementMode ? 'rozliczenie końcowe' : entryDue ? 'wpis jest należny' : `do wpisu ok. ${Math.max(0, 60 - minSinceEntry)} min`}
+          highlight={!isShiftSettlementMode && entryDue}
+        />
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">

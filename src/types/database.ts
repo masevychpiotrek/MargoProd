@@ -507,6 +507,8 @@ export interface SaSession {
   plan_pct: number | null
   avg_per_hour: number | null
   summary_notes: string | null
+  ended_early?: boolean
+  early_end_reason?: string | null
   handover_confirmed_by: string | null
   handover_confirmed_at: string | null
   created_at: string
