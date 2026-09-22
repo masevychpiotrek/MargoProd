@@ -20,6 +20,10 @@ const OPERATORS = [
   'Konrad Wabik','Michał Caban','Jakub Wadowski'
 ]
 
+function shouldTryCreateUserRpcFallback(message: string, role: UserRole) {
+  return role === 'syringe_operator' && /rola|role/i.test(message)
+}
+
 export default function AdminUsers() {
   const [users, setUsers] = useState<UserRow[]>([])
   const [loading, setLoading] = useState(true)
@@ -117,17 +121,30 @@ export default function AdminUsers() {
         role: newRole
       }
     })
-    if (createResult?.error) {
-      setAddUserError(createResult.error)
-      setSaving(false)
-      return
+    let createdId = createResult?.id
+    const createErrorMessage = createResult?.error || error?.message || ''
+
+    if (createErrorMessage) {
+      if (shouldTryCreateUserRpcFallback(createErrorMessage, newRole)) {
+        const { data: fallbackId, error: fallbackError } = await supabase.rpc('admin_create_user_with_profile', {
+          p_email: email,
+          p_password: newPass,
+          p_name: newName.trim(),
+          p_role: newRole
+        })
+        if (fallbackError || !fallbackId) {
+          setAddUserError(fallbackError?.message || createErrorMessage || 'Nie udalo sie utworzyc konta.')
+          setSaving(false)
+          return
+        }
+        createdId = String(fallbackId)
+      } else {
+        setAddUserError(createErrorMessage || 'Nie udalo sie utworzyc konta.')
+        setSaving(false)
+        return
+      }
     }
-    if (error) {
-      setAddUserError(error.message || 'Nie udalo sie utworzyc konta.')
-      setSaving(false)
-      return
-    }
-    await logAudit('user_create', 'profiles', createResult?.id, undefined, { full_name: newName.trim(), email, role: newRole })
+    await logAudit('user_create', 'profiles', createdId, undefined, { full_name: newName.trim(), email, role: newRole })
     setMsg(`Uzytkownik ${newName.trim()} zostal dodany. Przy pierwszym logowaniu system wymusi zmiane hasla.`)
     setShowAdd(false)
     setNewName(''); setNewEmail(''); setNewPass('Margomed123'); setNewRole('operator')
