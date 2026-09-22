@@ -7,6 +7,7 @@ import { useSyringeCommand } from '@/hooks/useSyringeCommand'
 import { invalidateSyringe } from '@/lib/syringeApi'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { syringeRate, stoppedMinutes } from '@/lib/syringeMetrics'
+import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { useClock } from '@/hooks/useClock'
 import type { SaMachineStatus, SaProductionEntry, SaDowntimeEvent } from '@/types/database'
 
@@ -139,6 +140,7 @@ export default function SyringeDashboard() {
   }
 
   const statusCfg = STATUS_CONFIG[session.machine_status]
+  const isShiftSettlementMode = isShiftSettlementAssortment(session.assortment?.code)
   const lastEntry = entries[0]
   const totalGood = session.total_good ?? 0
   const totalReject = session.total_reject ?? 0
@@ -165,7 +167,7 @@ export default function SyringeDashboard() {
   // Przypomnienie o wpisie co 2h
   const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
   const minSinceEntry = Math.floor((Date.now() - lastEntryAt) / 60000)
-  const entryDue = minSinceEntry >= 120
+  const entryDue = !isShiftSettlementMode && minSinceEntry >= 120
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -203,6 +205,23 @@ export default function SyringeDashboard() {
             className="shrink-0 rounded-xl border border-amber-500/40 bg-amber-500/20 px-4 py-2 text-sm font-bold text-amber-300"
           >
             Wpisz produkcję
+          </button>
+        </div>
+      )}
+
+      {isShiftSettlementMode && !lastEntry && !activeDowntime && (
+        <div className="rounded-xl border-2 border-brand/35 bg-brand/10 p-4 flex items-center justify-between gap-4">
+          <div>
+            <div className="font-bold text-brand">Rozliczenie na koniec zmiany</div>
+            <div className="text-sm text-navy-200 mt-0.5">
+              Dla tego asortymentu wynik wpisujesz raz: dobre sztuki, braki i kategorie braków.
+            </div>
+          </div>
+          <button
+            onClick={() => navigate('/syringe/entry')}
+            className="shrink-0 rounded-xl border border-brand/40 bg-brand/20 px-4 py-2 text-sm font-bold text-brand"
+          >
+            Wpisz rozliczenie
           </button>
         </div>
       )}
@@ -311,29 +330,43 @@ export default function SyringeDashboard() {
       {lastEntry && (
         <div className="rounded-xl border border-navy-700 bg-navy-800 p-4">
           <div className="flex flex-wrap justify-between gap-3 mb-3">
-            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Ostatni wpis produkcyjny</div>
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">
+              {isShiftSettlementMode ? 'Rozliczenie zmiany' : 'Ostatni wpis produkcyjny'}
+            </div>
             <button className="btn-secondary" onClick={() => navigate('/syringe/entry?edit=last')}>Popraw ostatni wpis</button>
           </div>
-          <div className="grid grid-cols-2 sm:grid-cols-5 gap-3 text-sm">
+          <div className={`grid grid-cols-2 ${isShiftSettlementMode ? 'sm:grid-cols-4' : 'sm:grid-cols-5'} gap-3 text-sm`}>
             <div>
               <div className="text-navy-500">Godzina</div>
               <div className="text-white font-medium">{new Date(lastEntry.recorded_at).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit' })}</div>
             </div>
-            <div>
-              <div className="text-navy-500">Licznik druk</div>
-              <div className="text-white font-medium">{(lastEntry.counter_print_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
-            </div>
-            <div>
-              <div className="text-navy-500">Licznik montaż</div>
-              <div className="text-white font-medium">{(lastEntry.counter_assembly_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
-            </div>
+            {!isShiftSettlementMode && (
+              <>
+                <div>
+                  <div className="text-navy-500">Licznik druk</div>
+                  <div className="text-white font-medium">{(lastEntry.counter_print_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
+                </div>
+                <div>
+                  <div className="text-navy-500">Licznik montaż</div>
+                  <div className="text-white font-medium">{(lastEntry.counter_assembly_value ?? lastEntry.counter_value).toLocaleString('pl')}</div>
+                </div>
+              </>
+            )}
+            {isShiftSettlementMode && (
+              <div>
+                <div className="text-navy-500">Dobre</div>
+                <div className="text-white font-medium">{lastEntry.good_qty.toLocaleString('pl')}</div>
+              </div>
+            )}
             <div>
               <div className="text-navy-500">Braki</div>
               <div className="text-white font-medium">{lastEntry.reject_qty.toLocaleString('pl')}</div>
             </div>
             <div>
-              <div className="text-navy-500">Wydajność</div>
-              <div className="text-white font-medium">{lastEntry.per_hour !== null ? `${Math.round(lastEntry.per_hour).toLocaleString('pl')} szt/h` : '—'}</div>
+              <div className="text-navy-500">{isShiftSettlementMode ? 'Razem' : 'Wydajność'}</div>
+              <div className="text-white font-medium">
+                {isShiftSettlementMode ? lastEntry.produced_qty.toLocaleString('pl') : lastEntry.per_hour !== null ? `${Math.round(lastEntry.per_hour).toLocaleString('pl')} szt/h` : '—'}
+              </div>
             </div>
           </div>
         </div>
@@ -347,8 +380,8 @@ export default function SyringeDashboard() {
           className="rounded-2xl border-2 border-brand bg-brand/10 p-5 text-left transition-all hover:bg-brand/20 disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <div className="text-brand text-2xl mb-2">+</div>
-          <div className="font-bold text-white">Wpisz produkcję</div>
-          <div className="text-xs text-navy-400 mt-1">Stan licznika i braki</div>
+          <div className="font-bold text-white">{isShiftSettlementMode ? 'Rozlicz zmianę' : 'Wpisz produkcję'}</div>
+          <div className="text-xs text-navy-400 mt-1">{isShiftSettlementMode ? 'Dobre sztuki i braki' : 'Stan licznika i braki'}</div>
         </button>
 
         <button

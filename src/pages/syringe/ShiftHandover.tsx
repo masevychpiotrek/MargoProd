@@ -6,6 +6,7 @@ import { useSyringeSession } from '@/hooks/useSyringeSession'
 import { useSyringeCommand } from '@/hooks/useSyringeCommand'
 import { invalidateSyringe } from '@/lib/syringeApi'
 import { wholeQuantity } from '@/lib/syringeMetrics'
+import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 
@@ -23,7 +24,7 @@ async function fetchActiveDowntime(sessionId: string) {
 async function fetchLastCounter(sessionId: string) {
   const { data, error } = await supabase
     .from('sa_production_entries')
-    .select('counter_value, counter_print_value, counter_assembly_value')
+    .select('counter_value, counter_print_value, counter_assembly_value, produced_qty, good_qty, reject_qty, recorded_at')
     .eq('session_id', sessionId)
     .eq('is_cancelled', false)
     .order('recorded_at', { ascending: false })
@@ -66,13 +67,20 @@ export default function SyringeShiftHandover() {
     enabled: !!session?.id
   })
 
+  const isShiftSettlementMode = isShiftSettlementAssortment(session?.assortment?.code)
+  const savedFinalPrint = lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0
+  const savedFinalAssembly = lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0
+
   function validate(): string[] {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
-    if (!wholeQuantity(finalCounter) || !wholeQuantity(finalPrint)) errs.push('Potwierdź końcowe stany obu liczników.')
-    if (Number(finalCounter) !== (lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0)
-      || Number(finalPrint) !== (lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0)) {
-      errs.push('Najpierw zapisz końcową produkcję wraz z kategoriami braków. Liczniki muszą odpowiadać ostatniemu wpisowi.')
+    if (isShiftSettlementMode) {
+      if (!lastCounter) errs.push('Najpierw wpisz końcowe rozliczenie zmiany: dobre sztuki, braki i kategorie braków.')
+    } else {
+      if (!wholeQuantity(finalCounter) || !wholeQuantity(finalPrint)) errs.push('Potwierdź końcowe stany obu liczników.')
+      if (Number(finalCounter) !== savedFinalAssembly || Number(finalPrint) !== savedFinalPrint) {
+        errs.push('Najpierw zapisz końcową produkcję wraz z kategoriami braków. Liczniki muszą odpowiadać ostatniemu wpisowi.')
+      }
     }
     return errs
   }
@@ -85,8 +93,8 @@ export default function SyringeShiftHandover() {
 
       await command('finish', {
         session_id: session.id,
-        final_print: finalPrint,
-        final_assembly: finalCounter,
+        final_print: isShiftSettlementMode ? String(savedFinalPrint) : finalPrint,
+        final_assembly: isShiftSettlementMode ? String(savedFinalAssembly) : finalCounter,
         active_issues: activeIssues,
         adjustments_made: adjustmentsMade,
         unresolved_failures: unresolvedFailures,
@@ -180,23 +188,53 @@ export default function SyringeShiftHandover() {
       </div>
 
       <div className="border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <h2 className="font-bold">Potwierdzenie końcowych liczników</h2>
+        <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Potwierdzenie końcowych liczników'}</h2>
         {countersError && <p role="alert" className="text-red-400">{countersError.message}</p>}
-        <p className="text-sm text-navy-400">
-          Ostatnio zapisano: druk {lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0},
-          montaż {lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0}.
-        </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <label>Druk
-            <input aria-label="Końcowy licznik druku" type="number" min={0} value={finalPrint} onChange={e => setFinalPrint(e.target.value)}
-              className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
-          </label>
-          <label>Montaż
-            <input aria-label="Końcowy licznik montażu" type="number" min={0} value={finalCounter} onChange={e => setFinalCounter(e.target.value)}
-              className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
-          </label>
-        </div>
-        <button className="btn-secondary" onClick={() => navigate('/syringe/entry')}>Zapisz końcową produkcję</button>
+        {isShiftSettlementMode ? (
+          <>
+            {lastCounter ? (
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                  <div className="text-navy-500">Dobre sztuki</div>
+                  <div className="text-green-400 font-bold text-xl">{(lastCounter.good_qty ?? 0).toLocaleString('pl')}</div>
+                </div>
+                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                  <div className="text-navy-500">Braki</div>
+                  <div className="text-red-400 font-bold text-xl">{(lastCounter.reject_qty ?? 0).toLocaleString('pl')}</div>
+                </div>
+                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                  <div className="text-navy-500">Razem</div>
+                  <div className="text-white font-bold text-xl">{(lastCounter.produced_qty ?? 0).toLocaleString('pl')}</div>
+                </div>
+              </div>
+            ) : (
+              <p className="text-sm text-amber-200">
+                Dla st 50 i st 100 zakończenie zmiany wymaga jednego końcowego rozliczenia: dobre sztuki, braki i kategorie braków.
+              </p>
+            )}
+            <button className="btn-secondary" onClick={() => navigate(lastCounter ? '/syringe/entry?edit=last' : '/syringe/entry')}>
+              {lastCounter ? 'Popraw rozliczenie zmiany' : 'Wpisz rozliczenie zmiany'}
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-sm text-navy-400">
+              Ostatnio zapisano: druk {savedFinalPrint},
+              montaż {savedFinalAssembly}.
+            </p>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <label>Druk
+                <input aria-label="Końcowy licznik druku" type="number" min={0} value={finalPrint} onChange={e => setFinalPrint(e.target.value)}
+                  className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
+              </label>
+              <label>Montaż
+                <input aria-label="Końcowy licznik montażu" type="number" min={0} value={finalCounter} onChange={e => setFinalCounter(e.target.value)}
+                  className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
+              </label>
+            </div>
+            <button className="btn-secondary" onClick={() => navigate('/syringe/entry')}>Zapisz końcową produkcję</button>
+          </>
+        )}
       </div>
 
       {/* Formularz przekazania */}

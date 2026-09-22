@@ -6,6 +6,7 @@ import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
 import { SYRINGE_RESET_EVENT, SYRINGE_RESET_STORAGE_KEY } from '@/lib/syringeApi'
+import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import ProductionJobNotifications from '@/features/notifications/ProductionJobNotifications'
 import RobotAssistant from '@/components/shared/RobotAssistant'
@@ -253,12 +254,16 @@ export default function AppLayout() {
     }
   }, [profile?.id, profile?.role])
 
+  const syringeSettlementMode = isShiftSettlementAssortment(activeSyringeSession?.assortment?.code)
+  const syringeNavItems = syringeSettlementMode
+    ? NAV_SYRINGE_OPERATOR.map(item => item.to === '/syringe/entry' ? { ...item, label: 'Rozlicz zmianę' } : item)
+    : NAV_SYRINGE_OPERATOR
   const navItems = profile?.role === 'admin'            ? NAV_ADMIN
     : profile?.role === 'specialist'      ? NAV_SPECIALIST
     : profile?.role === 'manager'         ? NAV_MANAGER
     : profile?.role === 'executive'       ? NAV_EXECUTIVE
     : profile?.role === 'viewer'          ? NAV_VIEWER
-    : profile?.role === 'syringe_operator' ? NAV_SYRINGE_OPERATOR
+    : profile?.role === 'syringe_operator' ? syringeNavItems
     : NAV_OPERATOR
   const visibleActiveShift = profile?.role === 'operator' &&
     !shiftLoading &&
