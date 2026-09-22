@@ -830,14 +830,15 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
 
     const sessionMeta = new Map(sessionList.map(s => [s.id, { machine: s.machine?.name ?? 'Nieznana linia', shift: s.shift_type, operator: s.operator?.full_name ?? '-' }]))
 
-    const [peRes, dtRes, frRes, qiRes] = await Promise.all([
+    const [peRes, dtRes, frRes, qiRes, hoRes] = await Promise.all([
       supabase.from('sa_production_entries').select('session_id, recorded_at, notes, reject_qty, produced_qty').in('session_id', sessionIds).eq('is_cancelled', false).not('notes', 'is', null),
       supabase.from('sa_downtime_events').select('session_id, started_at, description, actions_taken, category:sa_downtime_categories(name)').in('session_id', sessionIds),
       supabase.from('sa_failure_reports').select('session_id, reported_at, component_name, symptoms, priority').in('session_id', sessionIds),
       supabase.from('sa_quality_issues').select('session_id, detected_at, description, affected_qty').in('session_id', sessionIds),
+      supabase.from('sa_handovers').select('session_id, created_at, active_issues, adjustments_made, unresolved_failures, quality_info, component_status, recommendations, comment').in('session_id', sessionIds),
     ])
     if (requestId !== loadSeq.current) return
-    const eventError = peRes.error || dtRes.error || frRes.error || qiRes.error
+    const eventError = peRes.error || dtRes.error || frRes.error || qiRes.error || hoRes.error
     if (eventError) {
       setEntryEvents([])
       setError(`Nie udało się odczytać pełnego przebiegu zmian: ${eventError.message}`)
@@ -872,6 +873,27 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
       const text = `Problem jakości: ${e.description}${e.affected_qty ? ` (dot. ${e.affected_qty} szt.)` : ''}`
       events.push({ machine: meta.machine, hour: new Date(e.detected_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }), text, operator: meta.operator, shift: meta.shift })
     })
+    ;(hoRes.data ?? []).forEach((e: any) => {
+      const meta = sessionMeta.get(e.session_id)
+      if (!meta) return
+      const parts = [
+        e.active_issues ? `Aktywne problemy: ${e.active_issues}` : '',
+        e.adjustments_made ? `Regulacje: ${e.adjustments_made}` : '',
+        e.unresolved_failures ? `Nierozwiązane awarie: ${e.unresolved_failures}` : '',
+        e.quality_info ? `Jakość: ${e.quality_info}` : '',
+        e.component_status ? `Komponenty: ${e.component_status}` : '',
+        e.recommendations ? `Zalecenia: ${e.recommendations}` : '',
+        e.comment ? `Komentarz: ${e.comment}` : ''
+      ].filter(Boolean)
+      if (!parts.length) return
+      events.push({
+        machine: meta.machine,
+        hour: new Date(e.created_at).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }),
+        text: `Zamknięcie zmiany. ${parts.join('. ')}`,
+        operator: meta.operator,
+        shift: meta.shift
+      })
+    })
 
     setEntryEvents(events)
     setLoading(false)
@@ -883,6 +905,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
     const channel = supabase.channel(`sa-ai-report-${date}`)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sa_sessions' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sa_production_entries' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'sa_handovers' }, load)
       .subscribe()
     return () => { supabase.removeChannel(channel) }
   }, [date, load])

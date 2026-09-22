@@ -18,6 +18,12 @@ export type AuditAction =
   | 'manager_order_update' | 'manager_order_report_update'
   | 'ai_issue_validation'
   | 'production_job_start' | 'production_job_component_update'
+  | 'syringe_session_start' | 'syringe_session_finish' | 'syringe_status_update'
+  | 'syringe_production_save' | 'syringe_production_correction' | 'syringe_defect_assign'
+  | 'syringe_downtime_start' | 'syringe_downtime_end'
+  | 'syringe_changeover_start' | 'syringe_changeover_end' | 'syringe_checklist_update'
+  | 'syringe_failure_create' | 'syringe_quality_create'
+  | 'syringe_component_update' | 'syringe_handover_save'
 
 export interface IssueStationAllocation {
   station: string

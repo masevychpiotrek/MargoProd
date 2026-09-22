@@ -27,6 +27,21 @@ const ACTION_LABELS: Record<string, { label: string; color: string; icon: string
   manager_report_delete:    { label: 'Usun. przez kier.',      color: 'text-red-400',    icon: '✕' },
   manager_order_update:     { label: 'Aktualizacja zlecenia',  color: 'text-amber-400',  icon: '✎' },
   manager_order_report_update: { label: 'Edycja raportu zlec.', color: 'text-amber-400', icon: '✎' },
+  syringe_session_start:    { label: 'Start strzykawek',       color: 'text-green-400',  icon: '▶' },
+  syringe_session_finish:   { label: 'Koniec strzykawek',      color: 'text-navy-400',   icon: '■' },
+  syringe_status_update:    { label: 'Status strzykawek',      color: 'text-brand',      icon: '●' },
+  syringe_production_save:  { label: 'Wpis produkcji',         color: 'text-green-400',  icon: '+' },
+  syringe_production_correction: { label: 'Korekta produkcji', color: 'text-amber-400',  icon: '✎' },
+  syringe_defect_assign:    { label: 'Przypisanie braków',     color: 'text-red-400',    icon: '!' },
+  syringe_downtime_start:   { label: 'Start przestoju',        color: 'text-red-400',    icon: '!' },
+  syringe_downtime_end:     { label: 'Koniec przestoju',       color: 'text-green-400',  icon: '✓' },
+  syringe_changeover_start: { label: 'Start przezbrojenia',    color: 'text-amber-400',  icon: '↔' },
+  syringe_changeover_end:   { label: 'Koniec przezbrojenia',   color: 'text-green-400',  icon: '✓' },
+  syringe_checklist_update: { label: 'Checklist strzykawek',   color: 'text-brand',      icon: '✓' },
+  syringe_failure_create:   { label: 'Awaria strzykawek',      color: 'text-red-400',    icon: '!' },
+  syringe_quality_create:   { label: 'Jakość strzykawek',      color: 'text-red-400',    icon: '!' },
+  syringe_component_update: { label: 'Komponent strzykawek',   color: 'text-cyan-400',   icon: '+' },
+  syringe_handover_save:    { label: 'Przekazanie zmiany',     color: 'text-brand',      icon: '→' },
 }
 
 const ACTION_GROUPS: Record<string, string[]> = {
@@ -36,6 +51,14 @@ const ACTION_GROUPS: Record<string, string[]> = {
   users:   ['user_create', 'user_update', 'user_delete', 'password_change'],
   config:  ['config_change', 'manager_order_update'],
   failures: ['failure_report_create', 'failure_report_update'],
+  syringe: [
+    'syringe_session_start', 'syringe_session_finish', 'syringe_status_update',
+    'syringe_production_save', 'syringe_production_correction', 'syringe_defect_assign',
+    'syringe_downtime_start', 'syringe_downtime_end',
+    'syringe_changeover_start', 'syringe_changeover_end', 'syringe_checklist_update',
+    'syringe_failure_create', 'syringe_quality_create',
+    'syringe_component_update', 'syringe_handover_save'
+  ],
 }
 
 function asObj(value: unknown): Record<string, unknown> {
@@ -95,6 +118,41 @@ function describeAction(row: AuditRow): string {
   if (row.action === 'manager_report_delete') return 'Usunięcie raportu przez kierownika'
   if (row.action === 'failure_report_create') return `Zgłoszenie awarii: ${String(next.description ?? '').slice(0, 60)}`
   if (row.action === 'failure_report_update') return `Aktualizacja statusu awarii: ${next.status ?? ''}`
+  if (row.action === 'syringe_session_start') {
+    const plan = next.plan_qty != null ? `, plan: ${next.plan_qty} szt` : ''
+    return `Rozpoczęcie zmiany na liniach strzykawkowych, zmiana ${next.shift_type ?? ''}${plan}`
+  }
+  if (row.action === 'syringe_session_finish') {
+    const good = next.total_good != null ? `, dobre: ${next.total_good} szt` : ''
+    const reject = next.total_reject != null ? `, braki: ${next.total_reject} szt` : ''
+    return `Zakończenie zmiany strzykawkowej${good}${reject}`
+  }
+  if (row.action === 'syringe_status_update') return `Zmiana statusu automatu: ${prev.machine_status ?? '—'} → ${next.machine_status ?? '—'}`
+  if (row.action === 'syringe_production_save') {
+    const rate = next.per_hour != null ? `, wyd.: ${next.per_hour} szt/h` : ''
+    const note = typeof next.notes === 'string' && next.notes.trim() ? ` — ${next.notes}` : ''
+    return `Wpis produkcji: dobre ${next.good_qty ?? 0} szt, braki ${next.reject_qty ?? 0} szt${rate}${note}`
+  }
+  if (row.action === 'syringe_production_correction') return `Korekta/anulowanie wpisu produkcji: ${next.cancel_reason ?? 'bez opisu'}`
+  if (row.action === 'syringe_defect_assign') return `Przypisano braki: ${next.qty ?? 0} szt do kategorii ${String(next.category_id ?? '').slice(0, 8)}`
+  if (row.action === 'syringe_downtime_start') return `Rozpoczęto przestój: ${String(next.description ?? '').slice(0, 100) || 'bez opisu'}`
+  if (row.action === 'syringe_downtime_end') {
+    const resolved = next.fully_resolved === true ? ', rozwiązany' : next.fully_resolved === false ? ', nierozwiązany' : ''
+    return `Zakończono przestój: ${next.duration_min ?? 0} min${resolved}. ${String(next.actions_taken ?? '').slice(0, 80)}`
+  }
+  if (row.action === 'syringe_changeover_start') return `Rozpoczęto przezbrojenie: ${String(next.reason ?? '').slice(0, 100) || 'bez opisu'}`
+  if (row.action === 'syringe_changeover_end') return `Zakończono przezbrojenie: ${next.duration_min ?? 0} min`
+  if (row.action === 'syringe_checklist_update') return `Checklist przezbrojenia: ${next.completed ? 'potwierdzono' : 'odznaczono'} pozycję`
+  if (row.action === 'syringe_failure_create') return `Zgłoszenie awarii strzykawkowej: ${String(next.symptoms ?? '').slice(0, 100)}`
+  if (row.action === 'syringe_quality_create') return `Zgłoszenie jakościowe: ${String(next.description ?? '').slice(0, 100)}`
+  if (row.action === 'syringe_component_update') {
+    const ended = next.used_to ? 'zakończono użycie' : 'dodano'
+    return `Komponent: ${ended} ${next.component_name ?? ''}${next.batch_number ? `, partia ${next.batch_number}` : ''}`
+  }
+  if (row.action === 'syringe_handover_save') {
+    const issues = next.active_issues ? `, problemy: ${String(next.active_issues).slice(0, 80)}` : ''
+    return `Zapisano przekazanie zmiany${issues}`
+  }
 
   const direct = next.reason ?? next.downtime_reason ?? next.note ?? next.notes
   if (typeof direct === 'string' && direct.trim()) return direct.slice(0, 100)
@@ -323,7 +381,7 @@ export default function AdminAudit() {
         </div>
         <div className="h-4 w-px bg-navy-700 hidden xl:block" />
         <div className="flex flex-wrap gap-1.5">
-          {[['all', 'Wszystkie'], ['auth', 'Auth'], ['reports', 'Raporty'], ['shifts', 'Zmiany'], ['users', 'Użytkownicy'], ['config', 'Konfiguracja'], ['failures', 'Awarie']].map(([key, label]) => (
+          {[['all', 'Wszystkie'], ['auth', 'Auth'], ['reports', 'Raporty'], ['shifts', 'Zmiany'], ['syringe', 'Strzykawki'], ['users', 'Użytkownicy'], ['config', 'Konfiguracja'], ['failures', 'Awarie']].map(([key, label]) => (
             <button key={key} onClick={() => setGroupFilter(key)}
               className={cn('btn text-xs py-1.5 px-3', groupFilter === key ? 'btn-primary' : 'btn-secondary')}>
               {label}
