@@ -2,6 +2,9 @@ import { supabase } from './supabase'
 import type { QueryClient } from '@tanstack/react-query'
 import type { SaSession } from '@/types/database'
 
+export const SYRINGE_RESET_EVENT = 'margoline:syringe-reset'
+export const SYRINGE_RESET_STORAGE_KEY = 'margoline_syringe_reset_at'
+
 export async function fetchMySyringeSession(operatorId: string) {
   const { data, error } = await supabase.from('sa_sessions')
     .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
@@ -32,4 +35,15 @@ export async function syringeCommand(action: string, payload: Record<string, unk
 
 export function invalidateSyringe(qc: QueryClient) {
   return qc.invalidateQueries({ predicate: query => /^(sa_|admin_sa_)/.test(String(query.queryKey[0])) })
+}
+
+export function clearSyringeQueries(qc: QueryClient) {
+  qc.removeQueries({ predicate: query => /^(sa_|admin_sa_)/.test(String(query.queryKey[0])) })
+  return invalidateSyringe(qc)
+}
+
+export function notifySyringeReset() {
+  const stamp = String(Date.now())
+  localStorage.setItem(SYRINGE_RESET_STORAGE_KEY, stamp)
+  window.dispatchEvent(new CustomEvent(SYRINGE_RESET_EVENT, { detail: { stamp } }))
 }

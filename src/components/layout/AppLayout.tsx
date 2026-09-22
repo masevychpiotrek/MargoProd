@@ -5,6 +5,7 @@ import { useShiftStore } from '@/stores/shiftStore'
 import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
 import { cn } from '@/lib/utils'
+import { SYRINGE_RESET_EVENT, SYRINGE_RESET_STORAGE_KEY } from '@/lib/syringeApi'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import ProductionJobNotifications from '@/features/notifications/ProductionJobNotifications'
 import RobotAssistant from '@/components/shared/RobotAssistant'
@@ -236,10 +237,19 @@ export default function AppLayout() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'sa_sessions', filter: `operator_id=eq.${profile.id}` },
         () => void loadActiveSyringeSession())
       .subscribe()
-    const fallback = window.setInterval(loadActiveSyringeSession, 60000)
+    const refreshAfterReset = () => void loadActiveSyringeSession()
+    const refreshAfterStorageReset = (event: StorageEvent) => {
+      if (event.key === SYRINGE_RESET_STORAGE_KEY) void loadActiveSyringeSession()
+    }
+
+    window.addEventListener(SYRINGE_RESET_EVENT, refreshAfterReset)
+    window.addEventListener('storage', refreshAfterStorageReset)
+    const fallback = window.setInterval(loadActiveSyringeSession, 10000)
 
     return () => {
       window.clearInterval(fallback)
+      window.removeEventListener(SYRINGE_RESET_EVENT, refreshAfterReset)
+      window.removeEventListener('storage', refreshAfterStorageReset)
       supabase.removeChannel(channel)
     }
   }, [profile?.id, profile?.role])

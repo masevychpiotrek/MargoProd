@@ -1,5 +1,7 @@
 import { useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { clearSyringeQueries, notifySyringeReset } from '@/lib/syringeApi'
 import { cn } from '@/lib/utils'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 
@@ -74,6 +76,7 @@ type Group = 'ispro' | 'sa'
 
 export default function AdminReset() {
   const testMode = useTestMode()
+  const qc = useQueryClient()
   const [selectedGroup, setSelectedGroup] = useState<Group | null>(null)
   const [selected,  setSelected]  = useState<string | null>(null)
   const [confirm,   setConfirm]   = useState('')
@@ -105,6 +108,10 @@ export default function AdminReset() {
 
       const deleted = (data as { deleted?: Record<string, number> } | null)?.deleted ?? {}
       const count = Object.values(deleted).reduce((sum, value) => sum + Number(value), 0)
+      if (selectedGroup === 'sa') {
+        notifySyringeReset()
+        await clearSyringeQueries(qc)
+      }
       setMsg(`OK: ${selectedOption.label} - usunieto ${count} rekordow`)
       cancelSelection()
       setTimeout(() => setMsg(''), 5000)
