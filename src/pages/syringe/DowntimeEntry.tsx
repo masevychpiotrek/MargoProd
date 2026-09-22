@@ -63,6 +63,8 @@ export default function SyringeDowntimeEntry() {
   const [actionsTaken, setActionsTaken] = useState('')
   const [maintenanceNeeded, setMaintenanceNeeded] = useState(false)
   const [fullyResolved, setFullyResolved] = useState<boolean | null>(null)
+  const [nextCategoryId, setNextCategoryId] = useState('')
+  const [nextDescription, setNextDescription] = useState('')
   const [endErrors, setEndErrors] = useState<string[]>([])
   const [startErrors, setStartErrors] = useState<string[]>([])
 
@@ -86,6 +88,14 @@ export default function SyringeDowntimeEntry() {
     acc[key].push(cat)
     return acc
   }, {})
+  const waitMaintenanceCategory = categories.find(cat => cat.code === 'WAIT_MAINT')
+  const maintenanceRepairCategory = categories.find(cat => cat.code === 'MAINT_REPAIR')
+
+  function pickStartCategory(category: SaDowntimeCategory, text?: string) {
+    setSelectedCategoryId(category.id)
+    setDescription(text ?? '')
+    setStartErrors([])
+  }
 
   const startMutation = useMutation({
     mutationFn: async () => {
@@ -121,6 +131,47 @@ export default function SyringeDowntimeEntry() {
       qc.invalidateQueries({ queryKey: ['sa_active_downtime'] })
       void invalidateSyringe(qc)
       navigate('/syringe')
+    },
+    onError: (e: Error) => {
+      if (e.message !== 'Walidacja') setEndErrors([e.message])
+    }
+  })
+
+  const switchMutation = useMutation({
+    mutationFn: async () => {
+      if (!activeDowntime || !session) throw new Error('Brak aktywnego przestoju.')
+      const errs: string[] = []
+      if (!nextCategoryId) errs.push('Wybierz kolejny etap przestoju.')
+      if (errs.length > 0) { setEndErrors(errs); throw new Error('Walidacja') }
+
+      const currentName = activeDowntime.category?.name ?? 'aktywny przestój'
+      const nextCategory = categories.find(cat => cat.id === nextCategoryId)
+      const nextText = nextDescription.trim()
+        || (nextCategory?.code === 'MAINT_REPAIR'
+          ? 'UR rozpoczął naprawę przy maszynie.'
+          : `Kolejny etap po: ${currentName}.`)
+
+      await command('downtime_end', {
+        session_id: session.id,
+        event_id: activeDowntime.id,
+        actions_taken: actionsTaken.trim() || `Zakończono etap: ${currentName}.`,
+        maintenance_needed: true,
+        fully_resolved: false
+      })
+      await command('downtime_start', {
+        session_id: session.id,
+        category_id: nextCategoryId,
+        description: nextText
+      })
+    },
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sa_active_downtime'] })
+      void invalidateSyringe(qc)
+      setActionsTaken('')
+      setMaintenanceNeeded(false)
+      setFullyResolved(null)
+      setNextCategoryId('')
+      setNextDescription('')
     },
     onError: (e: Error) => {
       if (e.message !== 'Walidacja') setEndErrors([e.message])
@@ -227,9 +278,59 @@ export default function SyringeDowntimeEntry() {
               </div>
             </div>
 
+            <div className="rounded-xl border border-blue-500/30 bg-blue-500/10 p-4 space-y-3">
+              <div>
+                <div className="text-sm font-bold text-blue-200">Przełącz na kolejny etap postoju</div>
+                <p className="text-xs text-navy-400 mt-1">
+                  Użyj tego, gdy kończy się samo oczekiwanie, ale postój dalej trwa, np. UR zaczyna naprawę.
+                </p>
+              </div>
+              {activeDowntime.category?.code === 'WAIT_MAINT' && maintenanceRepairCategory && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNextCategoryId(maintenanceRepairCategory.id)
+                    setNextDescription('UR rozpoczął naprawę przy maszynie.')
+                    setEndErrors([])
+                  }}
+                  className="w-full rounded-xl border-2 border-blue-500/60 bg-blue-500/15 px-4 py-3 text-left text-sm font-bold text-blue-100 hover:border-blue-400"
+                >
+                  UR jest przy maszynie, rozpocznij etap naprawy
+                </button>
+              )}
+              <label className="block">
+                <span className="text-xs font-bold uppercase tracking-wider text-navy-400">Kolejny etap</span>
+                <select
+                  value={nextCategoryId}
+                  onChange={e => setNextCategoryId(e.target.value)}
+                  className="input mt-1"
+                >
+                  <option value="">Wybierz kolejny przestój...</option>
+                  {categories.map(cat => (
+                    <option key={cat.id} value={cat.id}>{cat.name}</option>
+                  ))}
+                </select>
+              </label>
+              <textarea
+                value={nextDescription}
+                onChange={e => setNextDescription(e.target.value)}
+                rows={2}
+                placeholder="Opis kolejnego etapu, np. UR diagnozuje podajnik, wymiana czujnika..."
+                className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none"
+              />
+              <button
+                type="button"
+                onClick={() => { setEndErrors([]); switchMutation.mutate() }}
+                disabled={switchMutation.isPending || endMutation.isPending || !nextCategoryId}
+                className="w-full py-3 rounded-xl bg-blue-600 text-white font-bold text-sm disabled:opacity-40 hover:bg-blue-500 transition-all"
+              >
+                {switchMutation.isPending ? 'Przełączanie...' : 'Zakończ ten etap i rozpocznij kolejny'}
+              </button>
+            </div>
+
             <button
               onClick={() => { setEndErrors([]); endMutation.mutate() }}
-              disabled={endMutation.isPending}
+              disabled={endMutation.isPending || switchMutation.isPending}
               className="w-full py-4 rounded-2xl bg-green-600 text-white font-bold text-lg disabled:opacity-40 hover:bg-green-500 transition-all"
             >
               {endMutation.isPending ? 'Kończenie...' : 'Zakończ przestój'}
@@ -242,6 +343,45 @@ export default function SyringeDowntimeEntry() {
           {startErrors.length > 0 && (
             <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-4 space-y-1">
               {startErrors.map((e, i) => <p key={i} className="text-sm text-red-300">• {e}</p>)}
+            </div>
+          )}
+
+          {(waitMaintenanceCategory || maintenanceRepairCategory) && (
+            <div className="rounded-2xl border border-blue-500/30 bg-blue-500/10 p-5 space-y-3">
+              <div>
+                <div className="text-xs font-bold uppercase tracking-wider text-blue-200">Szybkie etapy UR</div>
+                <p className="text-xs text-navy-400 mt-1">
+                  Najpierw zapisujesz czas oczekiwania, później osobno czas naprawy.
+                </p>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {waitMaintenanceCategory && (
+                  <button
+                    type="button"
+                    onClick={() => pickStartCategory(waitMaintenanceCategory, 'Oczekiwanie na przyjazd UR.')}
+                    className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-bold transition-all ${
+                      selectedCategoryId === waitMaintenanceCategory.id
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-blue-500/40 text-blue-100 hover:border-blue-400'
+                    }`}
+                  >
+                    Czekam na UR
+                  </button>
+                )}
+                {maintenanceRepairCategory && (
+                  <button
+                    type="button"
+                    onClick={() => pickStartCategory(maintenanceRepairCategory, 'UR rozpoczął naprawę przy maszynie.')}
+                    className={`rounded-xl border-2 px-4 py-3 text-left text-sm font-bold transition-all ${
+                      selectedCategoryId === maintenanceRepairCategory.id
+                        ? 'border-brand bg-brand/10 text-brand'
+                        : 'border-blue-500/40 text-blue-100 hover:border-blue-400'
+                    }`}
+                  >
+                    UR naprawia
+                  </button>
+                )}
+              </div>
             </div>
           )}
 

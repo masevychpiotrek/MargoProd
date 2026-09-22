@@ -91,6 +91,7 @@ export default function SyringeShiftHandover() {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
     if (activeChangeover) errs.push('Najpierw zakończ aktywne przezbrojenie.')
+    if (!comment.trim()) errs.push('Podaj powód zamknięcia zmiany w komentarzu końcowym.')
     return errs
   }
 
@@ -281,14 +282,22 @@ export default function SyringeShiftHandover() {
         ))}
 
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Komentarz końcowy</div>
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Powód zamknięcia zmiany *</div>
+          {!comment.trim() && <span className="text-xs font-bold text-amber-300">wymagane</span>}
+        </div>
         <textarea
           value={comment}
           onChange={e => setComment(e.target.value)}
           rows={3}
-          placeholder="Ogólne uwagi do zmiany..."
-          className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none"
+          placeholder="Napisz dlaczego zamykasz zmianę, np. koniec zmiany, brak zlecenia, awaria, decyzja kierownika..."
+          className={`w-full bg-navy-900 border rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none ${
+            comment.trim() ? 'border-navy-600' : 'border-amber-500/60'
+          }`}
         />
+        <p className="text-xs text-navy-500">
+          Bez tego opisu system nie pozwoli zakończyć zmiany.
+        </p>
       </div>
 
       <div className="grid grid-cols-2 gap-3">
