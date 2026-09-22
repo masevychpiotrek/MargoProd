@@ -6,7 +6,7 @@ import type { SaMachine, ShiftType } from '@/types/database'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
-const SHIFTS: ShiftType[] = ['I', 'II', 'III']
+const SHIFTS: ShiftType[] = ['I', 'II']
 
 type ShiftSummary = {
   good: number; reject: number; sessions: number
@@ -129,7 +129,7 @@ function buildEmailHtml(params: {
     const totalTarget = rows.reduce((s, r) => s + (r.total.target ?? 0), 0)
     const targetPct = totalTarget > 0 ? Math.round(tt / totalTarget * 100) : null
     const kpis = [
-      { label: 'Produkcja dobra', value: `${pieces(tt)} szt.`, color: K.navy, sub: 'łącznie wszystkie zmiany' },
+      { label: 'Produkcja dobra', value: `${pieces(tt)} szt.`, color: K.navy, sub: 'łącznie zmiana I i II' },
       { label: 'Braki łącznie', value: `${pieces(to)} szt.`, color: K.red, sub: `${rejectPctVal} produkcji` },
       { label: '% odrzutu', value: `${rj}%`, color: rjColor, sub: 'wskaźnik jakości' },
       { label: 'Realizacja celu', value: targetPct !== null ? `${targetPct}%` : '—', color: K.blue, sub: totalTarget > 0 ? `cel: ${pieces(totalTarget)} szt.` : 'brak celu' },
@@ -154,7 +154,6 @@ function buildEmailHtml(params: {
   <td ${TD(pal.bg, pal.br, pal.tx, `font-weight:bold;font-size:13px`)}>${row.machineName}</td>
   <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.I)}</td>
   <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.II)}</td>
-  <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.III)}</td>
   <td align="center" style="background:${pal.ac};border:1px solid ${pal.ac};padding:10px 14px;color:#fff;font-weight:bold;font-size:16px;${F};text-align:center;vertical-align:middle">
     ${pieces(row.total.good)}<br><span style="font-size:10px;font-weight:normal;opacity:.85">szt.</span>
   </td>
@@ -164,11 +163,10 @@ function buildEmailHtml(params: {
   const prodTable = `
 <table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;${F}">
 <thead><tr>
-  <th width="22%" align="left" ${TH()}>Linia</th>
-  <th width="18%" align="center" ${TH('text-align:center')}>Zmiana I</th>
-  <th width="18%" align="center" ${TH('text-align:center')}>Zmiana II</th>
-  <th width="18%" align="center" ${TH('text-align:center')}>Zmiana III</th>
-  <th width="24%" align="center" ${TH('text-align:center')}>ŁĄCZNIE</th>
+  <th width="28%" align="left" ${TH()}>Linia</th>
+  <th width="22%" align="center" ${TH('text-align:center')}>Zmiana I</th>
+  <th width="22%" align="center" ${TH('text-align:center')}>Zmiana II</th>
+  <th width="28%" align="center" ${TH('text-align:center')}>ŁĄCZNIE</th>
 </tr></thead>
 <tbody>
 ${machineRows}
@@ -181,10 +179,6 @@ ${machineRows}
   <td align="center" ${TD(K.gray1, K.gray2, K.navy)}>
     <strong style="font-size:14px">${pieces(shiftTotals.II.good)}</strong><br>
     <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.II.reject)}</span>
-  </td>
-  <td align="center" ${TD(K.gray1, K.gray2, K.navy)}>
-    <strong style="font-size:14px">${pieces(shiftTotals.III.good)}</strong><br>
-    <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.III.reject)}</span>
   </td>
   <td align="center" style="background:${K.blue};border:1px solid ${K.blue};padding:10px 14px;color:#fff;font-weight:bold;font-size:17px;${F};text-align:center">
     ${pieces(tt)}<br><span style="font-size:10px;font-weight:normal;opacity:.85">szt.</span>
@@ -400,7 +394,7 @@ WAŻNE ZASADY:
 - Każda notatka jest już poprawna gramatycznie — nie zmieniaj liczb, nazw linii, godzin
 
 HTML KLASY (używaj dokładnie tak):
-<div class="shift-bar s1"> — dla Zmiany I (s2=II, s3=III), treść: "Zmiana X — produkcja: N szt., braki: N szt."
+<div class="shift-bar s1"> — dla Zmiany I (s2=II), treść: "Zmiana X — produkcja: N szt., braki: N szt."
 <div class="mc-box m3"> — linia (naprzemiennie m3, m4)
 <div class="mc-name"> — nazwa linii (CAPS)
 <div class="mc-body"> — treść
@@ -521,7 +515,7 @@ ${JSON.stringify(items)}`
   return {
     I: eventsByShift.I.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`I-${index}`)) })),
     II: eventsByShift.II.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`II-${index}`)) })),
-    III: eventsByShift.III.map((event, index) => ({ ...event, text: safePolishedText(event.text, byId.get(`III-${index}`)) })),
+    III: eventsByShift.III,
   }
 }
 
@@ -578,7 +572,7 @@ interface ReportModalProps {
 
 function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }: ReportModalProps) {
   const gaps: NoProductionGap[] = rows.flatMap(row =>
-    SHIFTS.filter(s => !row.shifts[s].good && !row.shifts[s].sessions).map(s => ({ machineId: row.machineId, machineName: row.machineName, shift: s }))
+    SHIFTS.filter(s => !row.shifts[s].good && row.shifts[s].notes.length === 0).map(s => ({ machineId: row.machineId, machineName: row.machineName, shift: s }))
   )
 
   const [step, setStep] = useState<'preflight' | 'loading' | 'done' | 'error'>(gaps.length > 0 ? 'preflight' : 'loading')
@@ -699,7 +693,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
           {step === 'preflight' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                <span className="font-bold">Wymagane wyjaśnienie</span> — wykryto {gaps.length} {gaps.length === 1 ? 'zmianę' : 'zmiany'} bez produkcji. Przed wygenerowaniem raportu opisz przyczynę każdego przestoju.
+                <span className="font-bold">Wymagane wyjaśnienie</span> — wykryto {gaps.length} {gaps.length === 1 ? 'pozycję' : 'pozycje'} bez produkcji na zmianie I/II. Przed wygenerowaniem raportu opisz przyczynę dla każdej linii.
               </div>
               <div className="space-y-3 max-h-72 overflow-y-auto">
                 {gaps.map(g => {
@@ -795,7 +789,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
 
 // ─── Main Component ────────────────────────────────────────────────────────────
 
-export default function SyringeAiReport() {
+export default function SyringeAiReport({ embedded = false }: { embedded?: boolean } = {}) {
   const [date, setDate] = useState(todayIso)
   const [machines, setMachines] = useState<SaMachine[]>([])
   const [sessions, setSessions] = useState<SessionRow[]>([])
@@ -956,7 +950,8 @@ export default function SyringeAiReport() {
   }
 
   const dateForHeader = new Date(`${date}T12:00:00`).toLocaleDateString('pl-PL', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })
-  const hasData = sessions.length > 0
+  const hasSessions = sessions.length > 0
+  const canGenerate = machines.length > 0
 
   return (
     <>
@@ -968,7 +963,9 @@ export default function SyringeAiReport() {
       <div className="space-y-5">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h1 className="text-2xl font-bold text-white">Raport AI — Linie strzykawkowe</h1>
+            <h1 className={embedded ? 'text-xl font-bold text-white' : 'text-2xl font-bold text-white'}>
+              Raport email — linie strzykawkowe
+            </h1>
             <p className="text-navy-400 mt-1 capitalize">{dateForHeader}</p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
@@ -976,7 +973,7 @@ export default function SyringeAiReport() {
             <input className="input w-[170px]" type="date" value={date} onChange={e => setDate(e.target.value)} />
             <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, 1))}>Następny →</button>
             <button className="btn-secondary text-xs py-2 px-3" onClick={load}>{loading ? '...' : 'Odśwież'}</button>
-            <button onClick={handleGenerateClick} disabled={loading || !hasData} className="btn-primary text-xs py-2 px-4 flex items-center gap-2 disabled:opacity-40">
+            <button onClick={handleGenerateClick} disabled={loading || !canGenerate} className="btn-primary text-xs py-2 px-4 flex items-center gap-2 disabled:opacity-40">
               <svg width="14" height="14" viewBox="0 0 22 22" fill="none">
                 <rect x="2" y="4" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M2 7l9 6 9-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -987,8 +984,10 @@ export default function SyringeAiReport() {
         </div>
 
         {error && <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">{error}</div>}
-        {!loading && !hasData && !error && (
-          <div className="rounded-xl border border-navy-700 bg-navy-800 px-4 py-3 text-sm text-navy-400">Brak sesji na liniach strzykawkowych w wybranym dniu.</div>
+        {!loading && !hasSessions && !error && (
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-4 py-3 text-sm text-amber-200">
+            Brak zapisanych sesji w wybranym dniu. Raport nadal można wygenerować, ale system poprosi o opis dla każdej aktywnej linii na zmianie I i II.
+          </div>
         )}
 
         {/* Tabela wyników wg linii i zmian */}
@@ -999,7 +998,6 @@ export default function SyringeAiReport() {
                 <th className="px-4 py-3">Linia</th>
                 <th className="px-4 py-3 text-center">Zmiana I</th>
                 <th className="px-4 py-3 text-center">Zmiana II</th>
-                <th className="px-4 py-3 text-center">Zmiana III</th>
                 <th className="px-4 py-3 text-center">Łącznie</th>
               </tr>
             </thead>

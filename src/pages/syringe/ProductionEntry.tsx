@@ -23,6 +23,16 @@ async function fetchLastEntry(sessionId: string) {
   return (data ?? []) as SaProductionEntry[]
 }
 
+async function fetchEntryCount(sessionId: string) {
+  const { count, error } = await supabase
+    .from('sa_production_entries')
+    .select('id', { count: 'exact', head: true })
+    .eq('session_id', sessionId)
+    .eq('is_cancelled', false)
+  if (error) throw error
+  return count ?? 0
+}
+
 async function fetchDefectCategories() {
   const { data, error } = await supabase
     .from('sa_defect_categories')
@@ -64,6 +74,12 @@ export default function SyringeProductionEntry() {
   const { data: recentEntries = [], isLoading: lastLoading, error: lastError, refetch: refetchLast } = useQuery({
     queryKey: ['sa_recent_counters', session?.id],
     queryFn: () => fetchLastEntry(session!.id),
+    enabled: !!session?.id
+  })
+
+  const { data: entryCount = 0, isLoading: countLoading, error: countError } = useQuery({
+    queryKey: ['sa_entry_count', session?.id],
+    queryFn: () => fetchEntryCount(session!.id),
     enabled: !!session?.id
   })
 
@@ -135,6 +151,7 @@ export default function SyringeProductionEntry() {
   function validate(): string[] {
     const errs: string[] = []
     if (editing && (!currentEntry || !correctionReason.trim())) errs.push('Podaj powód korekty ostatniego wpisu.')
+    if (!editing && entryCount >= 8) errs.push('W tej zmianie zapisano już 8 wpisów produkcji. Możesz skorygować ostatni wpis albo zakończyć zmianę.')
     if (!wholeQuantity(counterPrintValue) || !wholeQuantity(counterAssemblyValue)) errs.push('Liczniki muszą być nieujemnymi liczbami całkowitymi.')
     if (allocatedQty !== Number(rejectQty || 0)) errs.push('Suma kategorii musi odpowiadać liczbie braków, również gdy braki wynoszą zero.')
     if (!counterPrintValue) errs.push('Nie wpisano stanu licznika automatu drukującego.')
@@ -215,8 +232,8 @@ export default function SyringeProductionEntry() {
         </div>
       </div>
 
-      {(lastError || categoriesError) && <div role="alert" className="text-red-400">
-        Nie udało się odczytać danych: {lastError?.message || categoriesError?.message}
+      {(lastError || categoriesError || countError) && <div role="alert" className="text-red-400">
+        Nie udało się odczytać danych: {lastError?.message || categoriesError?.message || countError?.message}
         <button className="btn-secondary ml-2" onClick={() => invalidateSyringe(qc)}>Ponów odczyt</button>
       </div>}
       {errors.length > 0 && (
@@ -236,6 +253,16 @@ export default function SyringeProductionEntry() {
           </div>
         </div>
       )}
+
+      <div className={`rounded-xl border p-4 text-sm ${entryCount >= 8 && !editing ? 'border-amber-500/40 bg-amber-500/10 text-amber-200' : 'border-navy-700 bg-navy-800/50 text-navy-300'}`}>
+        <div className="flex items-center justify-between gap-3">
+          <span>Wpisy produkcji w tej zmianie</span>
+          <strong className="text-white text-base">{entryCount}/8</strong>
+        </div>
+        <p className="mt-1 text-xs text-navy-400">
+          System pozwala zapisać 8 wyników w trakcie zmiany. Nie wymusza konkretnej godziny wpisu.
+        </p>
+      </div>
 
       {/* Liczniki */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-4">
@@ -352,7 +379,7 @@ export default function SyringeProductionEntry() {
               <div>
                 <div className="text-navy-500">Wydajność</div>
                 <div className="font-bold text-navy-500 text-xs leading-snug">
-                  {!lastEntry ? 'dostępna od kolejnego wpisu' : 'zbyt mało czasu od poprzedniego wpisu'}
+                  {!lastEntry ? 'dostępna od kolejnego wpisu' : 'krótki odstęp, bez blokady zapisu'}
                 </div>
               </div>
             )}
@@ -455,7 +482,7 @@ export default function SyringeProductionEntry() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); saveMutation.mutate() }}
-          disabled={saveMutation.isPending || lastLoading || !!lastError || !!categoriesError}
+          disabled={saveMutation.isPending || lastLoading || countLoading || !!lastError || !!categoriesError || !!countError || (!editing && entryCount >= 8)}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
           {saveMutation.isPending ? 'Zapisywanie...' : editing ? 'Zapisz korektę' : 'Zapisz produkcję'}

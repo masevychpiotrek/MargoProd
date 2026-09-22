@@ -155,8 +155,7 @@ export default function SyringeSupervisorView() {
             Odświeżono: {new Date(dataUpdatedAt).toLocaleTimeString('pl', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
           </p>
         </div>
-        <button onClick={() => navigate('/syringe/reports')} className="btn-primary px-4 py-2">Raporty i eksport</button>
-        <button onClick={() => navigate('/syringe/ai-report')} className="btn-secondary px-4 py-2">✉️ Raport AI</button>
+        <button onClick={() => navigate('/syringe/reports')} className="btn-primary px-4 py-2">Raport SA</button>
         <div className="flex gap-2 flex-wrap">
           <button
             onClick={() => setFilterStatus('')}

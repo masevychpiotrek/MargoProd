@@ -5,6 +5,7 @@ import { syringeRange, syringeProductionDate } from '@/lib/syringeMetrics'
 import { supabase } from '@/lib/supabase'
 import { exportXlsx, exportCsv, printDocument, esc, type Sheet } from '@/lib/tpmExport'
 import type { SaSession } from '@/types/database'
+import SyringeAiReport from './AiReport'
 
 type PeriodType = 'day' | 'week' | 'month'
 
@@ -70,7 +71,7 @@ function groupSum<T>(items: T[], keyFn: (i: T) => string, valFn: (i: T) => numbe
   return [...m.entries()].sort((a, b) => b[1] - a[1])
 }
 
-export default function SyringeReports() {
+function SyringeExportReports({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const [type, setType] = useState<PeriodType>('day')
   const [anchor, setAnchor] = useState(syringeProductionDate)
@@ -85,7 +86,9 @@ export default function SyringeReports() {
   const { data: changeovers = [], isFetching: changeoversLoading, error: changeoversError } = useQuery({ queryKey: ['sa_report_changeovers', from, to, shift], queryFn: () => fetchChangeovers(from, to, shift) })
   const isLoading = sessionsLoading || downtimeLoading || defectsLoading || productionLoading || changeoversLoading
   const reportError = changeoversError || sessionsError || downtimeError || defectsError || productionError
-  const filteredSessions = shift ? sessions.filter(s => s.shift_type === shift) : sessions
+  const filteredSessions = shift
+    ? sessions.filter(s => s.shift_type === shift)
+    : sessions.filter(s => s.shift_type !== 'III')
 
   const r = useMemo(() => {
     const s = filteredSessions
@@ -111,7 +114,7 @@ export default function SyringeReports() {
   const doXlsx = () => {
     const sheets: Sheet[] = [
       { name: 'Podsumowanie', header: ['Wskaźnik', 'Wartość'], rows: [
-        ['Zakres', `${from} – ${to}`], ['Zmiana', shift || 'wszystkie'], ['Liczba zmian', r.count],
+        ['Zakres', `${from} – ${to}`], ['Zmiana', shift || 'I i II'], ['Liczba zmian', r.count],
         ['Wyprodukowano', r.produced], ['Sztuki dobre', r.good], ['Braki', r.reject], ['% braków', r.rejectPct],
         ['Plan', r.planned], ['Realizacja planu %', r.planPct ?? '—'], ['Czas przestojów (min)', r.downMin]
       ]},
@@ -141,7 +144,7 @@ export default function SyringeReports() {
       `<table><thead><tr>${head.map(h => `<th>${esc(h)}</th>`).join('')}</tr></thead><tbody>${rows.map(rr => `<tr>${rr.map(c => `<td>${esc(c)}</td>`).join('')}</tr>`).join('') || `<tr><td colspan=${head.length}>Brak</td></tr>`}</tbody></table>`
     const html = `
       <h1>Raport ${periodLabel} — linia strzykawkowa</h1>
-      <div class="muted">Zakres: ${from} – ${to} · Zmiana: ${shift || 'wszystkie'}</div>
+      <div class="muted">Zakres: ${from} – ${to} · Zmiana: ${shift || 'I i II'}</div>
       <h2>Podsumowanie</h2>
       <div class="kv">
         <div>Liczba zmian</div><div>${r.count}</div>
@@ -165,13 +168,15 @@ export default function SyringeReports() {
 
   return (
     <div className="space-y-5">
-      <div className="flex items-center justify-between flex-wrap gap-3">
-        <div>
-          <h1 className="text-xl font-bold text-white">Raporty — linia strzykawkowa</h1>
-          <p className="text-navy-400 text-sm">Zmianowe, dzienne, tygodniowe i miesięczne</p>
+      {!embedded && (
+        <div className="flex items-center justify-between flex-wrap gap-3">
+          <div>
+            <h1 className="text-xl font-bold text-white">Raport SA — linia strzykawkowa</h1>
+            <p className="text-navy-400 text-sm">Raport email i eksporty w jednym miejscu</p>
+          </div>
+          <button onClick={() => navigate('/syringe/supervisor')} className="btn-secondary px-4 py-2">← Panel nadzorczy</button>
         </div>
-        <button onClick={() => navigate('/syringe/supervisor')} className="btn-secondary px-4 py-2">← Panel nadzorczy</button>
-      </div>
+      )}
 
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-4 flex flex-wrap items-end gap-3">
         <div className="flex gap-2">
@@ -185,8 +190,8 @@ export default function SyringeReports() {
         <div>
           <label className="label">Zmiana</label>
           <select value={shift} onChange={e => setShift(e.target.value)} className="input">
-            <option value="">Wszystkie</option>
-            <option value="I">I</option><option value="II">II</option><option value="III">III</option>
+            <option value="">I i II</option>
+            <option value="I">I</option><option value="II">II</option>
           </select>
         </div>
         <div className="text-sm text-navy-400">Zakres: <span className="text-white">{from} – {to}</span></div>
@@ -226,6 +231,42 @@ export default function SyringeReports() {
           </div>
         </>
       )}
+    </div>
+  )
+}
+
+export default function SyringeReports() {
+  const navigate = useNavigate()
+  const [view, setView] = useState<'email' | 'export'>('email')
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-white">Raport SA — linie strzykawkowe</h1>
+          <p className="text-navy-400 text-sm mt-1">Raport email i eksporty są teraz w jednym miejscu</p>
+        </div>
+        <button onClick={() => navigate('/syringe/supervisor')} className="btn-secondary px-4 py-2">← Panel nadzorczy</button>
+      </div>
+
+      <div className="rounded-2xl border border-navy-700 bg-navy-900 p-1 grid grid-cols-2 gap-1">
+        <button
+          type="button"
+          onClick={() => setView('email')}
+          className={`rounded-xl px-4 py-3 text-sm font-bold transition-all ${view === 'email' ? 'bg-brand text-navy-950 shadow-lg shadow-brand/20' : 'text-navy-300 hover:bg-navy-800'}`}
+        >
+          Raport email
+        </button>
+        <button
+          type="button"
+          onClick={() => setView('export')}
+          className={`rounded-xl px-4 py-3 text-sm font-bold transition-all ${view === 'export' ? 'bg-brand text-navy-950 shadow-lg shadow-brand/20' : 'text-navy-300 hover:bg-navy-800'}`}
+        >
+          Eksport danych
+        </button>
+      </div>
+
+      {view === 'email' ? <SyringeAiReport embedded /> : <SyringeExportReports embedded />}
     </div>
   )
 }
