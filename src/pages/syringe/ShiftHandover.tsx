@@ -142,6 +142,8 @@ export default function SyringeShiftHandover() {
   }
 
   const totalGood = session.total_good ?? 0
+  const totalReject = session.total_reject ?? 0
+  const totalProduced = session.total_produced ?? totalGood + totalReject
   const planQty = session.plan_qty ?? 0
   const planPct = planQty > 0 ? Math.round(totalGood / planQty * 100) : null
 
@@ -208,24 +210,27 @@ export default function SyringeShiftHandover() {
       </div>
 
       <div className="border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Końcowy wynik zmiany'}</h2>
+        <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Wynik całej zmiany'}</h2>
         {countersError && <p role="alert" className="text-red-400">{countersError.message}</p>}
         {lastCounter ? (
           <>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
               <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
                 <div className="text-navy-500">Dobre sztuki</div>
-                <div className="text-green-400 font-bold text-xl">{(lastCounter.good_qty ?? 0).toLocaleString('pl')}</div>
+                <div className="text-green-400 font-bold text-xl">{totalGood.toLocaleString('pl')}</div>
               </div>
               <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
                 <div className="text-navy-500">Braki</div>
-                <div className="text-red-400 font-bold text-xl">{(lastCounter.reject_qty ?? 0).toLocaleString('pl')}</div>
+                <div className="text-red-400 font-bold text-xl">{totalReject.toLocaleString('pl')}</div>
               </div>
               <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
                 <div className="text-navy-500">Razem</div>
-                <div className="text-white font-bold text-xl">{(lastCounter.produced_qty ?? 0).toLocaleString('pl')}</div>
+                <div className="text-white font-bold text-xl">{totalProduced.toLocaleString('pl')}</div>
               </div>
             </div>
+            <p className="text-sm text-navy-400">
+              Dobre sztuki to suma przyrostów automatu montującego. Braki to różnica między przyrostami automatu drukującego i montującego.
+            </p>
             {!isShiftSettlementMode && (
               <p className="text-sm text-navy-400">
                 Liczniki końcowe zostaną pobrane automatycznie z ostatniego wpisu: druk {savedFinalPrint.toLocaleString('pl')}, montaż {savedFinalAssembly.toLocaleString('pl')}.
