@@ -155,7 +155,7 @@ function MachinesTab() {
               <input value={newM.location} onChange={e => setNewM({ ...newM, location: e.target.value })} className="input" placeholder="np. Hala B" />
             </div>
             <div>
-              <label className="label">Wydajność nom. (szt/h)</label>
+              <label className="label">Wydajność nom. automatu (szt/h)</label>
               <input type="number" value={newM.nominal_per_hour} onChange={e => setNewM({ ...newM, nominal_per_hour: parseInt(e.target.value) || 0 })} className="input" />
             </div>
           </div>
@@ -192,7 +192,7 @@ function MachinesTab() {
                 <input value={(e.location ?? m.location) ?? ''} onChange={ev => set(m.id, 'location', ev.target.value)} className="input" />
               </div>
               <div>
-                <label className="label">Wydajność nom. (szt/h)</label>
+                <label className="label">Wydajność nom. automatu (szt/h)</label>
                 <input type="number" value={e.nominal_per_hour ?? m.nominal_per_hour} onChange={ev => set(m.id, 'nominal_per_hour', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" />
               </div>
               <div>
@@ -282,7 +282,7 @@ function AssortmentsTab() {
             <div><label className="label">Nazwa *</label><input value={newA.name} onChange={e => setNewA({ ...newA, name: e.target.value })} className="input" placeholder="np. Strzykawka 100 ml" /></div>
             <div><label className="label">Kod *</label><input value={newA.code} onChange={e => setNewA({ ...newA, code: e.target.value })} className="input" placeholder="np. SYR_100ML" /></div>
             <div><label className="label">Pojemność (ml)</label><input type="number" value={newA.volume_ml} onChange={e => setNewA({ ...newA, volume_ml: parseFloat(e.target.value) || 0 })} className="input" /></div>
-            <div><label className="label">Wydajność nom. (szt/h)</label><input type="number" value={newA.nominal_per_hour} onChange={e => setNewA({ ...newA, nominal_per_hour: parseInt(e.target.value) || 0 })} className="input" /></div>
+            <div><label className="label">Norma asortymentu (szt/h)</label><input type="number" value={newA.nominal_per_hour} onChange={e => setNewA({ ...newA, nominal_per_hour: parseInt(e.target.value) || 0 })} className="input" /></div>
             <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={newA.shift_target_qty} onChange={e => setNewA({ ...newA, shift_target_qty: parseInt(e.target.value) || 0 })} className="input" /></div>
             <div><label className="label">Cel odrzutu (%)</label><input type="number" step="0.1" value={newA.reject_target_pct} onChange={e => setNewA({ ...newA, reject_target_pct: parseFloat(e.target.value) || 0 })} className="input" /></div>
           </div>
@@ -301,7 +301,7 @@ function AssortmentsTab() {
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
               <div><label className="label">Nazwa</label><input value={e.name ?? a.name} onChange={ev => set(a.id, 'name', ev.target.value)} className="input" /></div>
               <div><label className="label">Pojemność (ml)</label><input type="number" value={(e.volume_ml ?? a.volume_ml) ?? 0} onChange={ev => set(a.id, 'volume_ml', parseFloat(ev.target.value) || 0)} className="input" /></div>
-              <div><label className="label">Wydajność nom. (szt/h)</label><input type="number" value={e.nominal_per_hour ?? a.nominal_per_hour} onChange={ev => set(a.id, 'nominal_per_hour', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
+              <div><label className="label">Norma asortymentu (szt/h)</label><input type="number" value={e.nominal_per_hour ?? a.nominal_per_hour} onChange={ev => set(a.id, 'nominal_per_hour', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
               <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={(e.shift_target_qty ?? a.shift_target_qty) ?? 0} onChange={ev => set(a.id, 'shift_target_qty', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
               <div><label className="label">Cel odrzutu (%)</label><input type="number" step="0.1" value={e.reject_target_pct ?? a.reject_target_pct} onChange={ev => set(a.id, 'reject_target_pct', parseFloat(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
               <div><label className="label">Kolejność</label><input type="number" value={e.sort_order ?? a.sort_order} onChange={ev => set(a.id, 'sort_order', parseInt(ev.target.value) || 0)} className="input" /></div>

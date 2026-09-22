@@ -149,12 +149,12 @@ export default function SyringeDashboard() {
   const elapsedMs = Date.now() - new Date(session.started_at).getTime()
   const avgPerHour = syringeRate(totalGood, elapsedMs)
 
-  // Czas pracy vs przestojów i wydajność do nominalnej
+  // Czas pracy vs przestojów i wydajność do nominalnej automatu.
   const elapsedMin = Math.floor(elapsedMs / 60000)
   const downtimeMin = stoppedMinutes(stops, session.started_at, now.getTime())
   const activeMin = Math.max(0, elapsedMin - downtimeMin)
   const fmtMin = (m: number) => `${Math.floor(m / 60)}h ${m % 60}m`
-  const nominal = session.assortment?.nominal_per_hour ?? 0
+  const nominal = session.machine?.nominal_per_hour ?? 0
   const effPct = nominal > 0 && avgPerHour !== null ? Math.round(avgPerHour / nominal * 100) : null
 
   // Cele zmianowe na asortyment

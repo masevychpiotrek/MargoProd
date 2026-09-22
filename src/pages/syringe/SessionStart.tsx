@@ -35,6 +35,11 @@ async function fetchActiveSession(machineId: string) {
   return r.data
 }
 
+function defaultShiftPlan(assortment: SaAssortment | undefined, machine: SaMachine | undefined) {
+  const qty = assortment?.shift_target_qty ?? (machine?.nominal_per_hour ? machine.nominal_per_hour * 8 : null)
+  return qty ? String(qty) : ''
+}
+
 export default function SyringeSessionStart() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
@@ -64,6 +69,8 @@ export default function SyringeSessionStart() {
 
   const selectedAssortment = assortments.find(a => a.id === assortmentId)
   const selectedMachine = machines.find(m => m.id === machineId)
+  const defaultPlanQty = defaultShiftPlan(selectedAssortment, selectedMachine)
+  const defaultPlanLabel = defaultPlanQty ? parseInt(defaultPlanQty).toLocaleString('pl') : null
 
   const startMutation = useMutation({
     mutationFn: async () => {
@@ -144,7 +151,12 @@ export default function SyringeSessionStart() {
               return (
                 <button
                   key={m.id}
-                  onClick={() => { setMachineId(m.id); setOrderId(''); setError('') }}
+                  onClick={() => {
+                    setMachineId(m.id)
+                    setOrderId('')
+                    setError('')
+                    if (selectedAssortment) setPlanQty(defaultShiftPlan(selectedAssortment, m))
+                  }}
                   className={`rounded-xl border-2 p-4 text-left transition-all ${
                     machineId === m.id
                       ? 'border-brand bg-brand/10 text-brand'
@@ -183,7 +195,7 @@ export default function SyringeSessionStart() {
                   setAssortmentId(a.id)
                   setOrderId('')
                   setError('')
-                  setPlanQty(a.shift_target_qty == null ? '' : String(a.shift_target_qty))
+                  setPlanQty(defaultShiftPlan(a, selectedMachine))
                 }}
                 className={`rounded-xl border-2 p-4 text-left transition-all ${
                   assortmentId === a.id
@@ -193,8 +205,9 @@ export default function SyringeSessionStart() {
               >
                 <div className="font-bold text-sm">{a.name}</div>
                 <div className="text-xs text-navy-400 mt-1">
-                  {a.nominal_per_hour} szt/h nominalne
-                  {a.shift_target_qty ? ` · cel zmiany: ${a.shift_target_qty.toLocaleString('pl')} szt` : ''}
+                  {a.shift_target_qty
+                    ? `Cel zmiany: ${a.shift_target_qty.toLocaleString('pl')} szt`
+                    : 'Cel zmiany z normy automatu'}
                 </div>
               </button>
             ))}
@@ -250,14 +263,13 @@ export default function SyringeSessionStart() {
           type="number"
           value={planQty}
           onChange={e => setPlanQty(e.target.value)}
-          placeholder={selectedAssortment ? `Cel zmiany: ${(selectedAssortment.shift_target_qty ?? selectedAssortment.nominal_per_hour * 8).toLocaleString('pl')} szt` : 'np. 8000'}
+          placeholder={defaultPlanLabel ? `Cel zmiany: ${defaultPlanLabel} szt` : 'np. 8000'}
           className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-white placeholder-navy-500 focus:outline-none focus:border-brand"
           min={0}
         />
         {selectedMachine && selectedAssortment && (
           <p className="text-xs text-navy-500">
-            Nominalna wydajność: {selectedAssortment.nominal_per_hour} szt/h ·
-            Automat: {selectedMachine.nominal_per_hour} szt/h ·
+            Nominalna wydajność automatu: {selectedMachine.nominal_per_hour} szt/h ·
             Cel odrzutu: {selectedAssortment.reject_target_pct}%
           </p>
         )}

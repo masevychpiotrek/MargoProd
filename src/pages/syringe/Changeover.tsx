@@ -222,7 +222,9 @@ export default function SyringeChangeover() {
                     }`}
                   >
                     <div className="font-bold text-sm">{a.name}</div>
-                    <div className="text-xs text-navy-400 mt-1">{a.nominal_per_hour} szt/h</div>
+                    <div className="text-xs text-navy-400 mt-1">
+                      {a.shift_target_qty ? `Cel zmiany: ${a.shift_target_qty.toLocaleString('pl')} szt` : 'Brak celu zmianowego'}
+                    </div>
                   </button>
                 ))}
             </div>
