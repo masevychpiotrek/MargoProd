@@ -174,6 +174,9 @@ export default function SyringeProductionEntry() {
   const shiftHours = session ? (SHIFT_HOURS[session.shift_type as ShiftType] ?? []) : []
   const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
   const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
+  const missingBlockLabels = isShiftSettlementMode
+    ? []
+    : shiftHours.slice(Math.min(entryCount, shiftHours.length)).map(formatHourBlock)
 
   function addDefectRow(catId: string) {
     if (defects.find(d => d.category_id === catId)) return
@@ -380,6 +383,18 @@ export default function SyringeProductionEntry() {
               ? 'Ten wpis jest już należny. Zapisz wynik za bieżącą godzinę.'
               : `Do kolejnego wpisu zostało około ${minutesToNextEntry} min.`}
           </div>
+          {missingBlockLabels.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-navy-900 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">Brakujące bloki</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {missingBlockLabels.map(label => (
+                  <span key={label} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
 

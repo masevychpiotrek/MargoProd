@@ -176,6 +176,9 @@ export default function SyringeDashboard() {
   const shiftHours = SHIFT_HOURS[session.shift_type as ShiftType] ?? []
   const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
   const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
+  const missingBlockLabels = isShiftSettlementMode
+    ? []
+    : shiftHours.slice(Math.min(entryCount, shiftHours.length)).map(formatHourBlock)
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -295,6 +298,33 @@ export default function SyringeDashboard() {
           highlight={!isShiftSettlementMode && entryDue}
         />
       </div>
+
+      {missingBlockLabels.length > 0 && (
+        <div className="rounded-xl border border-amber-500/30 bg-navy-800 p-4">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">Brakujące bloki</div>
+              <div className="mt-1 text-sm text-navy-300">
+                Te wpisy trzeba jeszcze uzupełnić przed normalnym zamknięciem zmiany.
+              </div>
+            </div>
+            <button
+              onClick={() => navigate('/syringe/entry')}
+              disabled={!!activeDowntime}
+              className="rounded-xl border border-amber-500/40 bg-amber-500/10 px-4 py-2 text-sm font-bold text-amber-200 disabled:opacity-40"
+            >
+              Wpisz produkcję
+            </button>
+          </div>
+          <div className="mt-3 flex flex-wrap gap-2">
+            {missingBlockLabels.map(label => (
+              <span key={label} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                {label}
+              </span>
+            ))}
+          </div>
+        </div>
+      )}
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
         <KpiCard

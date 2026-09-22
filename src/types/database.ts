@@ -509,6 +509,7 @@ export interface SaSession {
   summary_notes: string | null
   ended_early?: boolean
   early_end_reason?: string | null
+  early_missing_blocks?: number[] | null
   handover_confirmed_by: string | null
   handover_confirmed_at: string | null
   created_at: string

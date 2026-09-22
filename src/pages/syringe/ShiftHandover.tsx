@@ -9,7 +9,7 @@ import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import { useClock } from '@/hooks/useClock'
-import { getShiftEndAt } from '@/lib/utils'
+import { formatHourBlock, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
 import type { SaChangeover, ShiftType } from '@/types/database'
 
 async function fetchActiveDowntime(sessionId: string) {
@@ -108,6 +108,9 @@ export default function SyringeShiftHandover() {
   const savedFinalAssembly = lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0
   const expectedEntries = isShiftSettlementMode ? 1 : 8
   const missingEntryCount = Math.max(0, expectedEntries - entryCount)
+  const shiftHours = session ? (SHIFT_HOURS[session.shift_type as ShiftType] ?? []) : []
+  const missingBlockHours = isShiftSettlementMode ? [] : shiftHours.slice(Math.min(entryCount, shiftHours.length))
+  const missingBlockLabels = missingBlockHours.map(formatHourBlock)
   const shiftEndAt = session ? getShiftEndAt(session.session_date, session.shift_type as ShiftType) : null
   const beforeShiftEnd = shiftEndAt ? now.getTime() < shiftEndAt.getTime() : false
   const earlyCloseRequired = beforeShiftEnd || missingEntryCount > 0
@@ -143,7 +146,8 @@ export default function SyringeShiftHandover() {
         recommendations,
         comment,
         ended_early: earlyCloseRequired,
-        early_end_reason: earlyCloseRequired ? comment.trim() : null
+        early_end_reason: earlyCloseRequired ? comment.trim() : null,
+        early_missing_blocks: missingBlockHours
       })
     },
     onSuccess: () => {
@@ -251,6 +255,18 @@ export default function SyringeShiftHandover() {
               Planowy koniec zmiany: {shiftEndAt.toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' })}
             </div>
           )}
+          {missingBlockLabels.length > 0 && (
+            <div className="mt-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">Brakujące bloki</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {missingBlockLabels.map(label => (
+                  <span key={label} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 
@@ -266,6 +282,18 @@ export default function SyringeShiftHandover() {
               : ''}
             System zapisze tę zmianę jako zamkniętą przed czasem.
           </div>
+          {missingBlockLabels.length > 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-navy-900/50 p-3">
+              <div className="text-xs font-bold uppercase tracking-wider text-amber-300">Brakujące bloki</div>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {missingBlockLabels.map(label => (
+                  <span key={label} className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1 text-xs font-bold text-amber-100">
+                    {label}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
           <label className="flex items-start gap-3 cursor-pointer">
             <input
               type="checkbox"
