@@ -451,7 +451,7 @@ export default function SyringeDashboard() {
           onClick={() => navigate('/syringe/handover')}
           className="w-full rounded-2xl border-2 border-navy-600 bg-navy-800 p-4 text-center font-bold text-navy-300 hover:border-navy-500 hover:text-white transition-all"
         >
-          Przekaż zmianę i zakończ →
+          Zamknij zmianę →
         </button>
       </div>
 

@@ -5,10 +5,10 @@ import { supabase } from '@/lib/supabase'
 import { useSyringeSession } from '@/hooks/useSyringeSession'
 import { useSyringeCommand } from '@/hooks/useSyringeCommand'
 import { invalidateSyringe } from '@/lib/syringeApi'
-import { wholeQuantity } from '@/lib/syringeMetrics'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
+import type { SaChangeover } from '@/types/database'
 
 async function fetchActiveDowntime(sessionId: string) {
   const { data, error } = await supabase
@@ -35,6 +35,17 @@ async function fetchLastCounter(sessionId: string) {
   return data ?? null
 }
 
+async function fetchActiveChangeover(sessionId: string) {
+  const { data, error } = await supabase
+    .from('sa_changeovers')
+    .select('*, to_assortment:sa_assortments!sa_changeovers_to_assortment_id_fkey(*)')
+    .eq('session_id', sessionId)
+    .is('ended_at', null)
+    .maybeSingle()
+  if (error) throw error
+  return data as (SaChangeover & { to_assortment?: { name: string } }) | null
+}
+
 export default function SyringeShiftHandover() {
   const { profile } = useAuthStore()
   const navigate = useNavigate()
@@ -48,16 +59,21 @@ export default function SyringeShiftHandover() {
   const [componentStatus, setComponentStatus] = useState('')
   const [recommendations, setRecommendations] = useState('')
   const [comment, setComment] = useState('')
-  const [finalCounter, setFinalCounter] = useState('')
-  const [finalPrint, setFinalPrint] = useState('')
   const [errors, setErrors] = useState<string[]>([])
   const [handoverCreated, setHandoverCreated] = useState(false)
+  const [showDetails, setShowDetails] = useState(false)
 
   const { data: session, isLoading, error: sessionError, refetch: refetchSession } = useSyringeSession()
 
   const { data: activeDowntime } = useQuery({
     queryKey: ['sa_active_downtime', session?.id],
     queryFn: () => fetchActiveDowntime(session!.id),
+    enabled: !!session?.id
+  })
+
+  const { data: activeChangeover } = useQuery({
+    queryKey: ['sa_active_changeover', session?.id],
+    queryFn: () => fetchActiveChangeover(session!.id),
     enabled: !!session?.id
   })
 
@@ -74,14 +90,7 @@ export default function SyringeShiftHandover() {
   function validate(): string[] {
     const errs: string[] = []
     if (activeDowntime) errs.push('Najpierw zakończ aktywny przestój.')
-    if (isShiftSettlementMode) {
-      if (!lastCounter) errs.push('Najpierw wpisz końcowe rozliczenie zmiany: dobre sztuki, braki i kategorie braków.')
-    } else {
-      if (!wholeQuantity(finalCounter) || !wholeQuantity(finalPrint)) errs.push('Potwierdź końcowe stany obu liczników.')
-      if (Number(finalCounter) !== savedFinalAssembly || Number(finalPrint) !== savedFinalPrint) {
-        errs.push('Najpierw zapisz końcową produkcję wraz z kategoriami braków. Liczniki muszą odpowiadać ostatniemu wpisowi.')
-      }
-    }
+    if (activeChangeover) errs.push('Najpierw zakończ aktywne przezbrojenie.')
     return errs
   }
 
@@ -93,8 +102,8 @@ export default function SyringeShiftHandover() {
 
       await command('finish', {
         session_id: session.id,
-        final_print: isShiftSettlementMode ? String(savedFinalPrint) : finalPrint,
-        final_assembly: isShiftSettlementMode ? String(savedFinalAssembly) : finalCounter,
+        final_print: String(savedFinalPrint),
+        final_assembly: String(savedFinalAssembly),
         active_issues: activeIssues,
         adjustments_made: adjustmentsMade,
         unresolved_failures: unresolvedFailures,
@@ -141,7 +150,7 @@ export default function SyringeShiftHandover() {
       <div className="flex items-center gap-3">
         <button onClick={() => navigate('/syringe')} className="text-navy-400 hover:text-white">←</button>
         <div>
-          <h1 className="text-xl font-bold text-white">Przekazanie zmiany</h1>
+          <h1 className="text-xl font-bold text-white">Zamknięcie zmiany</h1>
           <p className="text-navy-400 text-sm">{session.machine?.name} · Zmiana {session.shift_type}</p>
         </div>
       </div>
@@ -152,6 +161,17 @@ export default function SyringeShiftHandover() {
           <p className="text-sm text-red-300 font-medium">Najpierw zakończ aktywny przestój.</p>
           <button onClick={() => navigate('/syringe/downtime')} className="mt-2 text-sm text-red-400 underline">
             Przejdź do przestojów →
+          </button>
+        </div>
+      )}
+
+      {activeChangeover && (
+        <div className="rounded-xl border border-yellow-500/30 bg-yellow-500/10 p-4">
+          <p className="text-sm text-yellow-200 font-medium">
+            Najpierw zakończ aktywne przezbrojenie{activeChangeover.to_assortment?.name ? ` do: ${activeChangeover.to_assortment.name}` : ''}.
+          </p>
+          <button onClick={() => navigate('/syringe/changeover')} className="mt-2 text-sm text-yellow-300 underline">
+            Przejdź do przezbrojenia →
           </button>
         </div>
       )}
@@ -188,75 +208,72 @@ export default function SyringeShiftHandover() {
       </div>
 
       <div className="border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Potwierdzenie końcowych liczników'}</h2>
+        <h2 className="font-bold">{isShiftSettlementMode ? 'Rozliczenie końcowe zmiany' : 'Końcowy wynik zmiany'}</h2>
         {countersError && <p role="alert" className="text-red-400">{countersError.message}</p>}
-        {isShiftSettlementMode ? (
+        {lastCounter ? (
           <>
-            {lastCounter ? (
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
-                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
-                  <div className="text-navy-500">Dobre sztuki</div>
-                  <div className="text-green-400 font-bold text-xl">{(lastCounter.good_qty ?? 0).toLocaleString('pl')}</div>
-                </div>
-                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
-                  <div className="text-navy-500">Braki</div>
-                  <div className="text-red-400 font-bold text-xl">{(lastCounter.reject_qty ?? 0).toLocaleString('pl')}</div>
-                </div>
-                <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
-                  <div className="text-navy-500">Razem</div>
-                  <div className="text-white font-bold text-xl">{(lastCounter.produced_qty ?? 0).toLocaleString('pl')}</div>
-                </div>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-sm">
+              <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                <div className="text-navy-500">Dobre sztuki</div>
+                <div className="text-green-400 font-bold text-xl">{(lastCounter.good_qty ?? 0).toLocaleString('pl')}</div>
               </div>
-            ) : (
-              <p className="text-sm text-amber-200">
-                Dla st 50 i st 100 zakończenie zmiany wymaga jednego końcowego rozliczenia: dobre sztuki, braki i kategorie braków.
+              <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                <div className="text-navy-500">Braki</div>
+                <div className="text-red-400 font-bold text-xl">{(lastCounter.reject_qty ?? 0).toLocaleString('pl')}</div>
+              </div>
+              <div className="rounded-xl bg-navy-900 border border-navy-700 p-3">
+                <div className="text-navy-500">Razem</div>
+                <div className="text-white font-bold text-xl">{(lastCounter.produced_qty ?? 0).toLocaleString('pl')}</div>
+              </div>
+            </div>
+            {!isShiftSettlementMode && (
+              <p className="text-sm text-navy-400">
+                Liczniki końcowe zostaną pobrane automatycznie z ostatniego wpisu: druk {savedFinalPrint.toLocaleString('pl')}, montaż {savedFinalAssembly.toLocaleString('pl')}.
               </p>
             )}
-            <button className="btn-secondary" onClick={() => navigate(lastCounter ? '/syringe/entry?edit=last' : '/syringe/entry')}>
-              {lastCounter ? 'Popraw rozliczenie zmiany' : 'Wpisz rozliczenie zmiany'}
+            <button className="btn-secondary" onClick={() => navigate('/syringe/entry?edit=last')}>
+              {isShiftSettlementMode ? 'Popraw rozliczenie zmiany' : 'Popraw ostatni wpis'}
             </button>
           </>
         ) : (
-          <>
-            <p className="text-sm text-navy-400">
-              Ostatnio zapisano: druk {savedFinalPrint},
-              montaż {savedFinalAssembly}.
+          <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 space-y-3">
+            <p className="text-sm text-amber-100">
+              Nie ma jeszcze zapisanego wyniku produkcji dla tej zmiany. Możesz wpisać wynik albo zamknąć zmianę jako zmianę bez produkcji.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <label>Druk
-                <input aria-label="Końcowy licznik druku" type="number" min={0} value={finalPrint} onChange={e => setFinalPrint(e.target.value)}
-                  className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
-              </label>
-              <label>Montaż
-                <input aria-label="Końcowy licznik montażu" type="number" min={0} value={finalCounter} onChange={e => setFinalCounter(e.target.value)}
-                  className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3" />
-              </label>
-            </div>
-            <button className="btn-secondary" onClick={() => navigate('/syringe/entry')}>Zapisz końcową produkcję</button>
-          </>
+            <button className="btn-secondary" onClick={() => navigate('/syringe/entry')}>
+              {isShiftSettlementMode ? 'Wpisz rozliczenie zmiany' : 'Wpisz końcową produkcję'}
+            </button>
+          </div>
         )}
       </div>
 
-      {/* Formularz przekazania */}
-      {[
-        { label: 'Aktywne problemy', value: activeIssues, setter: setActiveIssues, placeholder: 'Opisz bieżące problemy, które nie zostały rozwiązane...' },
-        { label: 'Wykonane regulacje', value: adjustmentsMade, setter: setAdjustmentsMade, placeholder: 'Jakie regulacje zostały wykonane podczas zmiany?' },
-        { label: 'Nierozwiązane awarie', value: unresolvedFailures, setter: setUnresolvedFailures, placeholder: 'Awarie, które wymagają dalszego działania...' },
-        { label: 'Informacje jakościowe', value: qualityInfo, setter: setQualityInfo, placeholder: 'Problemy jakościowe, obserwacje, odchylenia...' },
-        { label: 'Stan komponentów', value: componentStatus, setter: setComponentStatus, placeholder: 'Ilość pozostałych komponentów, kończące się partie...' },
-        { label: 'Zalecenia dla kolejnej zmiany', value: recommendations, setter: setRecommendations, placeholder: 'Co powinien wiedzieć następny operator?' },
-      ].map(field => (
-        <div key={field.label} className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
-          <div className="text-xs font-bold uppercase tracking-wider text-navy-400">{field.label}</div>
-          <textarea
-            value={field.value}
-            onChange={e => field.setter(e.target.value)}
-            rows={3}
-            placeholder={field.placeholder}
-            className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none"
-          />
-        </div>
-      ))}
+      <button
+        type="button"
+        onClick={() => setShowDetails(v => !v)}
+        className="w-full rounded-2xl border border-navy-700 bg-navy-800 px-5 py-4 text-left font-bold text-navy-200 hover:border-navy-500"
+      >
+        {showDetails ? 'Ukryj szczegóły przekazania' : 'Dodaj szczegóły przekazania'}
+      </button>
+
+      {showDetails && [
+          { label: 'Aktywne problemy', value: activeIssues, setter: setActiveIssues, placeholder: 'Opisz bieżące problemy, które nie zostały rozwiązane...' },
+          { label: 'Wykonane regulacje', value: adjustmentsMade, setter: setAdjustmentsMade, placeholder: 'Jakie regulacje zostały wykonane podczas zmiany?' },
+          { label: 'Nierozwiązane awarie', value: unresolvedFailures, setter: setUnresolvedFailures, placeholder: 'Awarie, które wymagają dalszego działania...' },
+          { label: 'Informacje jakościowe', value: qualityInfo, setter: setQualityInfo, placeholder: 'Problemy jakościowe, obserwacje, odchylenia...' },
+          { label: 'Stan komponentów', value: componentStatus, setter: setComponentStatus, placeholder: 'Ilość pozostałych komponentów, kończące się partie...' },
+          { label: 'Zalecenia dla kolejnej zmiany', value: recommendations, setter: setRecommendations, placeholder: 'Co powinien wiedzieć następny operator?' },
+        ].map(field => (
+          <div key={field.label} className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
+            <div className="text-xs font-bold uppercase tracking-wider text-navy-400">{field.label}</div>
+            <textarea
+              value={field.value}
+              onChange={e => field.setter(e.target.value)}
+              rows={3}
+              placeholder={field.placeholder}
+              className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none"
+            />
+          </div>
+        ))}
 
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Komentarz końcowy</div>
@@ -273,10 +290,10 @@ export default function SyringeShiftHandover() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); handoverMutation.mutate() }}
-          disabled={countersLoading || !!countersError || handoverMutation.isPending || !!activeDowntime}
+          disabled={countersLoading || !!countersError || handoverMutation.isPending || !!activeDowntime || !!activeChangeover}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
-          {handoverMutation.isPending ? 'Zapisywanie...' : 'Zakończ zmianę'}
+          {handoverMutation.isPending ? 'Zapisywanie...' : lastCounter ? 'Zakończ zmianę' : 'Zakończ bez produkcji'}
         </button>
       </div>
     </div>

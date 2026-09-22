@@ -109,7 +109,7 @@ const NAV_SYRINGE_OPERATOR = [
   { to: '/syringe/quality',    label: 'Problem jakości',  icon: Icons.targets },
   { to: '/syringe/components', label: 'Komponenty',       icon: Icons.machines },
   { to: '/syringe/changeover', label: 'Przezbrojenie',    icon: Icons.reset },
-  { to: '/syringe/handover',   label: 'Przekaż zmianę',   icon: Icons.tasks },
+  { to: '/syringe/handover',   label: 'Zamknij zmianę',   icon: Icons.tasks },
   { to: '/syringe/my-reports', label: 'Moje zgłoszenia',  icon: Icons.failure },
   { to: '/syringe/history',    label: 'Historia',         icon: Icons.history },
   { to: '/password',           label: 'Zmień hasło',      icon: Icons.password },
