@@ -1,10 +1,9 @@
--- Explicit early-close tracking for syringe operator sessions.
+-- Count required syringe production blocks from the real session start.
+-- Example: a session started at 10:00 on shift I requires 10-14 blocks, not 06-14.
 
 BEGIN;
 
 ALTER TABLE public.sa_sessions
-  ADD COLUMN IF NOT EXISTS ended_early boolean NOT NULL DEFAULT false,
-  ADD COLUMN IF NOT EXISTS early_end_reason text,
   ADD COLUMN IF NOT EXISTS early_missing_blocks integer[] NOT NULL DEFAULT ARRAY[]::integer[];
 
 CREATE OR REPLACE FUNCTION public.sa_mark_early_finish()

@@ -129,6 +129,15 @@ export function getReportBlockEndAt(shiftDate: string, shiftType: ShiftType, hou
   return blockStart
 }
 
+export function getSessionEntryHours(shiftDate: string, shiftType: ShiftType, startedAt: string | Date): number[] {
+  const startMs = new Date(startedAt).getTime()
+  if (Number.isNaN(startMs)) return SHIFT_HOURS[shiftType] ?? []
+
+  return (SHIFT_HOURS[shiftType] ?? []).filter(hour => (
+    startMs < getReportBlockEndAt(shiftDate, shiftType, hour).getTime()
+  ))
+}
+
 export function getReportEntryOpenAt(shiftDate: string, shiftType: ShiftType, hourStart: number): Date {
   const openAt = getReportBlockEndAt(shiftDate, shiftType, hourStart)
   openAt.setMinutes(openAt.getMinutes() - 10)

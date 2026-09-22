@@ -10,7 +10,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { syringeRate, wholeQuantity } from '@/lib/syringeMetrics'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { useClock } from '@/hooks/useClock'
-import { formatHourBlock, SHIFT_HOURS } from '@/lib/utils'
+import { formatHourBlock, getSessionEntryHours } from '@/lib/utils'
 import type { SaProductionEntry, SaDefectCategory, ShiftType } from '@/types/database'
 
 async function fetchLastEntry(sessionId: string) {
@@ -161,7 +161,10 @@ export default function SyringeProductionEntry() {
   const rejectTotal = wholeQuantity(rejectQty) ? Number(rejectQty) : 0
   const remainingToAllocate = rejectTotal - allocatedQty
   const allocationPct = rejectTotal > 0 ? Math.min(100, Math.max(0, allocatedQty / rejectTotal * 100)) : 0
-  const entryLimit = isShiftSettlementMode ? 1 : 8
+  const sessionEntryHours = session && !isShiftSettlementMode
+    ? getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.started_at)
+    : []
+  const entryLimit = isShiftSettlementMode ? 1 : Math.max(1, sessionEntryHours.length)
   const entryLimitReached = !editing && entryCount >= entryLimit
   const liveReferenceMs = currentEntry ? new Date(currentEntry.recorded_at).getTime() : now.getTime()
   const shiftElapsedMin = Math.max(0, Math.floor((liveReferenceMs - new Date(session?.started_at ?? now).getTime()) / 60000))
@@ -171,12 +174,11 @@ export default function SyringeProductionEntry() {
   const remainingHours = Math.max(0, entryLimit - completedHours)
   const minutesToNextEntry = Math.max(0, 60 - entryElapsedMin)
   const fmtMin = (value: number) => `${Math.floor(value / 60)}h ${value % 60}m`
-  const shiftHours = session ? (SHIFT_HOURS[session.shift_type as ShiftType] ?? []) : []
-  const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
+  const currentHourStart = sessionEntryHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, sessionEntryHours.length - 1))]
   const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
   const missingBlockLabels = isShiftSettlementMode
     ? []
-    : shiftHours.slice(Math.min(entryCount, shiftHours.length)).map(formatHourBlock)
+    : sessionEntryHours.slice(Math.min(entryCount, sessionEntryHours.length)).map(formatHourBlock)
 
   function addDefectRow(catId: string) {
     if (defects.find(d => d.category_id === catId)) return

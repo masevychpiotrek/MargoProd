@@ -9,7 +9,7 @@ import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { useAuthStore } from '@/stores/authStore'
 import { useClock } from '@/hooks/useClock'
-import { formatHourBlock, getShiftEndAt, SHIFT_HOURS } from '@/lib/utils'
+import { formatHourBlock, getSessionEntryHours, getShiftEndAt } from '@/lib/utils'
 import type { SaChangeover, ShiftType } from '@/types/database'
 
 async function fetchActiveDowntime(sessionId: string) {
@@ -106,10 +106,12 @@ export default function SyringeShiftHandover() {
   const isShiftSettlementMode = isShiftSettlementAssortment(session?.assortment?.code)
   const savedFinalPrint = lastCounter?.counter_print_value ?? lastCounter?.counter_value ?? 0
   const savedFinalAssembly = lastCounter?.counter_assembly_value ?? lastCounter?.counter_value ?? 0
-  const expectedEntries = isShiftSettlementMode ? 1 : 8
+  const sessionEntryHours = session && !isShiftSettlementMode
+    ? getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.started_at)
+    : []
+  const expectedEntries = isShiftSettlementMode ? 1 : Math.max(1, sessionEntryHours.length)
   const missingEntryCount = Math.max(0, expectedEntries - entryCount)
-  const shiftHours = session ? (SHIFT_HOURS[session.shift_type as ShiftType] ?? []) : []
-  const missingBlockHours = isShiftSettlementMode ? [] : shiftHours.slice(Math.min(entryCount, shiftHours.length))
+  const missingBlockHours = isShiftSettlementMode ? [] : sessionEntryHours.slice(Math.min(entryCount, sessionEntryHours.length))
   const missingBlockLabels = missingBlockHours.map(formatHourBlock)
   const shiftEndAt = session ? getShiftEndAt(session.session_date, session.shift_type as ShiftType) : null
   const beforeShiftEnd = shiftEndAt ? now.getTime() < shiftEndAt.getTime() : false

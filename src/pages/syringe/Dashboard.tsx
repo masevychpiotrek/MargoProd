@@ -9,7 +9,7 @@ import SyringeSessionState from '@/components/shared/SyringeSessionState'
 import { syringeRate, stoppedMinutes } from '@/lib/syringeMetrics'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { useClock } from '@/hooks/useClock'
-import { formatHourBlock, SHIFT_HOURS } from '@/lib/utils'
+import { formatHourBlock, getSessionEntryHours } from '@/lib/utils'
 import type { SaMachineStatus, SaProductionEntry, SaDowntimeEvent, ShiftType } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; color: string; bg: string; border: string }> = {
@@ -170,15 +170,17 @@ export default function SyringeDashboard() {
   const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
   const minSinceEntry = Math.floor((Date.now() - lastEntryAt) / 60000)
   const entryDue = !isShiftSettlementMode && minSinceEntry >= 60
-  const entryLimit = isShiftSettlementMode ? 1 : 8
+  const sessionEntryHours = isShiftSettlementMode
+    ? []
+    : getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.started_at)
+  const entryLimit = isShiftSettlementMode ? 1 : Math.max(1, sessionEntryHours.length)
   const currentHourNo = isShiftSettlementMode ? 1 : Math.min(entryLimit, entryCount + 1)
   const remainingEntryCount = Math.max(0, entryLimit - entryCount)
-  const shiftHours = SHIFT_HOURS[session.shift_type as ShiftType] ?? []
-  const currentHourStart = shiftHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, shiftHours.length - 1))]
+  const currentHourStart = sessionEntryHours[Math.min(Math.max(0, currentHourNo - 1), Math.max(0, sessionEntryHours.length - 1))]
   const currentHourBlock = currentHourStart !== undefined ? formatHourBlock(currentHourStart) : null
   const missingBlockLabels = isShiftSettlementMode
     ? []
-    : shiftHours.slice(Math.min(entryCount, shiftHours.length)).map(formatHourBlock)
+    : sessionEntryHours.slice(Math.min(entryCount, sessionEntryHours.length)).map(formatHourBlock)
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
