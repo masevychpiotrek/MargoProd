@@ -60,10 +60,12 @@ const ROLE_COLORS: Record<string, string> = {
   admin: 'bg-purple-500/20 text-purple-300', manager: 'bg-blue-500/20 text-blue-300',
   executive: 'bg-amber-500/20 text-amber-300', operator: 'bg-green-500/20 text-green-300',
   specialist: 'bg-cyan-500/20 text-cyan-300', viewer: 'bg-navy-700/50 text-navy-300',
+  syringe_operator: 'bg-teal-500/20 text-teal-300',
 }
 const ROLE_PL: Record<string, string> = {
   admin: 'Admin', manager: 'Kierownik', executive: 'Zarząd',
-  operator: 'Operator', specialist: 'Serwis', viewer: 'Gość'
+  operator: 'Operator', specialist: 'Serwis', viewer: 'Gość',
+  syringe_operator: 'Operator linii strzykawkowych'
 }
 
 export default function AdminDashboard() {
@@ -87,7 +89,7 @@ export default function AdminDashboard() {
     const [users, inactive, operators, machines, shifts, reports, audit, activity] = await Promise.all([
       supabase.from('profiles').select('id', { count: 'exact' }).is('deleted_at', null),
       supabase.from('profiles').select('id', { count: 'exact' }).eq('is_active', false).is('deleted_at', null),
-      supabase.from('profiles').select('id', { count: 'exact' }).eq('role', 'operator').is('deleted_at', null),
+      supabase.from('profiles').select('id', { count: 'exact' }).in('role', ['operator', 'syringe_operator']).is('deleted_at', null),
       supabase.from('machines').select('id', { count: 'exact' }).eq('is_active', true).is('deleted_at', null),
       supabase.from('shifts')
         .select('*, machine:machines(name,code), operator_1:profiles!operator_1_id(full_name), operator_2:profiles!operator_2_id(full_name)')

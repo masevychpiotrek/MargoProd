@@ -32,7 +32,7 @@ export const ROLE_LABELS: Record<string, string> = {
   specialist: 'Specjalista',
   viewer: 'Gość',
   executive: 'Zarząd',
-  syringe_operator: 'Op. Automatów Strzykawkowych'
+  syringe_operator: 'Operator linii strzykawkowych'
 }
 
 export const SHIFT_HOURS: Record<ShiftType, number[]> = {

@@ -141,6 +141,18 @@ export default function SyringeProductionEntry() {
   const sessionGood = (session?.total_good ?? 0) - (currentEntry?.good_qty ?? 0)
   const goodTotalForPreview = wholeQuantity(goodQty) ? Number(goodQty) : 0
   const planPct = planQty > 0 ? Math.round((sessionGood + goodTotalForPreview) / planQty * 100) : null
+  const nominalPerHour = session?.assortment?.nominal_per_hour ?? session?.machine?.nominal_per_hour ?? 0
+  const entryReferenceMs = currentEntry ? new Date(currentEntry.recorded_at).getTime() : Date.now()
+  const entryStartMs = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session?.started_at ?? Date.now()).getTime()
+  const entryElapsedMs = Math.max(0, entryReferenceMs - entryStartMs)
+  const entryElapsedHours = entryElapsedMs / 3600000
+  const expectedGoodQty = isShiftSettlementMode
+    ? planQty
+    : nominalPerHour > 0 && entryElapsedMs >= 45 * 60000
+      ? Math.round(nominalPerHour * entryElapsedHours)
+      : 0
+  const belowExpectedOutput = expectedGoodQty > 0 && goodTotalForPreview < expectedGoodQty
+  const missingExpectedQty = belowExpectedOutput ? expectedGoodQty - goodTotalForPreview : 0
 
   const allocatedQty = defects.reduce((sum, d) => sum + (parseInt(d.qty) || 0), 0)
   const rejectTotal = wholeQuantity(rejectQty) ? Number(rejectQty) : 0
@@ -226,6 +238,9 @@ export default function SyringeProductionEntry() {
     }
 
     if (allocatedQty !== rejectTotal) errs.push('Suma kategorii musi odpowiadać liczbie braków, również gdy braki wynoszą zero.')
+    if (belowExpectedOutput && !notes.trim()) {
+      errs.push(`Wynik jest poniżej normy o ${missingExpectedQty.toLocaleString('pl')} szt. Podaj przyczynę w komentarzu operatora.`)
+    }
 
     for (const d of defects) {
       const cat = defectCategories.find(c => c.id === d.category_id)
@@ -338,8 +353,8 @@ export default function SyringeProductionEntry() {
         </div>
         <p className="mt-1 text-xs text-navy-400">
           {isShiftSettlementMode
-            ? 'Dla st 50 i st 100 operator rozpoczyna zmianę normalnie, a wynik wpisuje raz na końcu: dobre sztuki, braki i kategorie braków.'
-            : 'System pozwala zapisać 8 wyników w trakcie zmiany. Nie wymusza konkretnej godziny wpisu.'}
+            ? 'Dla st 50 i st 100 operator rozpoczyna zmianę normalnie, a wynik wpisuje raz na końcu: dobre sztuki, braki i kategorie braków. Wynik poniżej planu wymaga przyczyny.'
+            : 'System pozwala zapisać 8 wyników w trakcie zmiany. Wpisuj wynik co ok. godzinę; wynik poniżej normy wymaga przyczyny.'}
         </p>
       </div>
 
@@ -511,6 +526,16 @@ export default function SyringeProductionEntry() {
             )}
           </div>
         )}
+
+        {belowExpectedOutput && (
+          <div className="rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 text-sm text-amber-200">
+            <div className="font-bold text-amber-300">Wynik poniżej normy</div>
+            <div className="mt-1">
+              Brakuje {missingExpectedQty.toLocaleString('pl')} szt do oczekiwanych {expectedGoodQty.toLocaleString('pl')} szt.
+              Podaj przyczynę w komentarzu operatora przed zapisem.
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Kategorie braków */}
@@ -653,14 +678,18 @@ export default function SyringeProductionEntry() {
           className="w-full bg-navy-900 border border-navy-600 rounded-lg px-4 py-3 mt-2" />
       </label>}
       {/* Komentarz */}
-      <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
-        <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Komentarz operatora</div>
+      <div className={`rounded-2xl border bg-navy-800 p-5 space-y-3 ${belowExpectedOutput && !notes.trim() ? 'border-amber-500/50' : 'border-navy-700'}`}>
+        <div className={`text-xs font-bold uppercase tracking-wider ${belowExpectedOutput ? 'text-amber-300' : 'text-navy-400'}`}>
+          {belowExpectedOutput ? 'Przyczyna wyniku poniżej normy *' : 'Komentarz operatora'}
+        </div>
         <textarea
           value={notes}
-          onChange={e => setNotes(e.target.value)}
+          onChange={e => { setNotes(e.target.value); setErrors([]) }}
           rows={3}
-          placeholder="Uwagi do bieżącej rejestracji (opcjonalne)..."
-          className="w-full bg-navy-900 border border-navy-600 rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none focus:border-brand resize-none"
+          placeholder={belowExpectedOutput
+            ? 'Napisz, co nie pozwoliło osiągnąć normy, np. przestój, problem z materiałem, regulacja, awaria...'
+            : 'Uwagi do bieżącej rejestracji (opcjonalne)...'}
+          className={`w-full bg-navy-900 border rounded-xl px-4 py-3 text-sm text-white placeholder-navy-500 focus:outline-none resize-none ${belowExpectedOutput && !notes.trim() ? 'border-amber-500/60 focus:border-amber-400' : 'border-navy-600 focus:border-brand'}`}
         />
       </div>
 

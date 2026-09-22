@@ -8,6 +8,33 @@ const corsHeaders = {
 
 const ALLOWED_ROLES = new Set(['operator', 'syringe_operator', 'manager', 'specialist', 'viewer', 'executive', 'admin'])
 
+function normalizeRole(value: unknown) {
+  const raw = String(value ?? 'operator').trim()
+  if (ALLOWED_ROLES.has(raw)) return raw
+
+  const key = raw
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/\p{Diacritic}/gu, '')
+    .replace(/[^a-z0-9]+/g, '_')
+    .replace(/^_+|_+$/g, '')
+
+  const aliases: Record<string, string> = {
+    op_strzykawek: 'syringe_operator',
+    op_automatow_strzykawkowych: 'syringe_operator',
+    operator_strzykawek: 'syringe_operator',
+    operator_linii_strzykawkowych: 'syringe_operator',
+    operator_automatow_strzykawkowych: 'syringe_operator',
+    automaty_strzykawkowe: 'syringe_operator',
+    linie_strzykawkowe: 'syringe_operator',
+    syringe: 'syringe_operator',
+    syringe_operator: 'syringe_operator',
+    sa_operator: 'syringe_operator',
+  }
+
+  return aliases[key] ?? raw
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -44,7 +71,7 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim().toLowerCase()
     const password = String(body.password ?? '')
     const fullName = String(body.full_name ?? '').trim()
-    const role = String(body.role ?? 'operator').trim()
+    const role = normalizeRole(body.role)
 
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
       return json({ error: 'Wpisz poprawny adres e-mail.' })

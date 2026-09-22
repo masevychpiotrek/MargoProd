@@ -384,7 +384,7 @@ export default function AppLayout() {
         <nav className="flex-1 py-3 px-2 overflow-y-auto min-h-0">
           {sidebarOpen && (
             <div className="text-xs font-bold text-navy-500 uppercase tracking-widest px-2 mb-2">
-              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'executive' ? 'Zarząd' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : profile?.role === 'syringe_operator' ? 'Op. Strzykawek' : 'Operator'}
+              {profile?.role === 'admin' ? 'Administracja' : profile?.role === 'manager' ? 'Kierownik' : profile?.role === 'executive' ? 'Zarząd' : profile?.role === 'specialist' ? 'Specjalista' : profile?.role === 'viewer' ? 'Gość' : profile?.role === 'syringe_operator' ? 'Linie strzykawkowe' : 'Operator'}
             </div>
           )}
           {navItems.map(item => (

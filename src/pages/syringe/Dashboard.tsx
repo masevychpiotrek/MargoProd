@@ -164,10 +164,10 @@ export default function SyringeDashboard() {
   const rejectTargetPct = session.assortment?.reject_target_pct ?? null
   const rejectPctNum = totalProduced > 0 ? totalReject / totalProduced * 100 : 0
 
-  // Przypomnienie o wpisie co 2h
+  // Przypomnienie o wpisie co 1h
   const lastEntryAt = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session.started_at).getTime()
   const minSinceEntry = Math.floor((Date.now() - lastEntryAt) / 60000)
-  const entryDue = !isShiftSettlementMode && minSinceEntry >= 120
+  const entryDue = !isShiftSettlementMode && minSinceEntry >= 60
 
   return (
     <div className="space-y-4 max-w-4xl mx-auto">
@@ -191,13 +191,13 @@ export default function SyringeDashboard() {
         </div>
       </div>
 
-      {/* Przypomnienie o wpisie produkcyjnym co 2h */}
+      {/* Przypomnienie o wpisie produkcyjnym co 1h */}
       {entryDue && !activeDowntime && (
         <div className="rounded-xl border-2 border-amber-500/40 bg-amber-500/10 p-4 flex items-center justify-between gap-4">
           <div>
             <div className="font-bold text-amber-300">Czas na wpis produkcyjny</div>
             <div className="text-sm text-amber-200 mt-0.5">
-              Od ostatniego wpisu minęło {fmtMin(minSinceEntry)}. Wpisuj wynik co ok. 2h.
+              Od ostatniego wpisu minęło {fmtMin(minSinceEntry)}. Wpisuj wynik co ok. 1h.
             </div>
           </div>
           <button

@@ -144,10 +144,12 @@ const ROLE_COLORS: Record<string, string> = {
   operator:   'bg-green-500/20 text-green-300 border-green-500/30',
   specialist: 'bg-cyan-500/20 text-cyan-300 border-cyan-500/30',
   viewer:     'bg-navy-700/50 text-navy-300 border-navy-600',
+  syringe_operator: 'bg-teal-500/20 text-teal-300 border-teal-500/30',
 }
 const ROLE_LABELS_PL: Record<string, string> = {
   admin: 'Admin', manager: 'Kierownik', executive: 'Zarząd',
-  operator: 'Operator', specialist: 'Serwis', viewer: 'Gość'
+  operator: 'Operator', specialist: 'Serwis', viewer: 'Gość',
+  syringe_operator: 'Operator linii strzykawkowych'
 }
 
 function OnlinePanel() {
