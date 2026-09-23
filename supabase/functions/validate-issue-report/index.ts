@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ALLOWED_ROLES = new Set(['operator', 'syringe_operator', 'manager', 'admin'])
+const ALLOWED_ROLES = new Set(['operator', 'manager', 'admin'])
 // Sprawdzanie odpala sie automatycznie (debounce podczas pisania), wiec limit
 // musi pomiescic kilka iteracji na kazdy z 2 komentarzy w kazdym raporcie.
 const RATE_LIMIT_PER_HOUR = 40

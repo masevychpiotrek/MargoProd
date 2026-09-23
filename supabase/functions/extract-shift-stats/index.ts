@@ -6,7 +6,7 @@ const corsHeaders = {
   'Access-Control-Allow-Methods': 'POST, OPTIONS',
 }
 
-const ALLOWED_ROLES = new Set(['operator', 'syringe_operator', 'manager', 'admin'])
+const ALLOWED_ROLES = new Set(['operator', 'manager', 'admin'])
 const MAX_ATTEMPTS = 10
 
 function toBase64(bytes: Uint8Array): string {

@@ -4,7 +4,7 @@ import { useAuthStore } from '@/stores/authStore'
 import { useShiftStore } from '@/stores/shiftStore'
 import { supabase } from '@/lib/supabase'
 import { useClock } from '@/hooks/useClock'
-import { cn } from '@/lib/utils'
+import { cn, ROLE_LABELS } from '@/lib/utils'
 import { SYRINGE_RESET_EVENT, SYRINGE_RESET_STORAGE_KEY } from '@/lib/syringeApi'
 import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
@@ -154,7 +154,7 @@ const NAV_ADMIN = [
 ]
 
 export default function AppLayout() {
-  const { profile, signOut, isLoading } = useAuthStore()
+  const { profile, signOut, isLoading, refreshProfile } = useAuthStore()
   const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
   const testMode = useTestMode()
   const { time, date } = useClock()
@@ -176,6 +176,32 @@ export default function AppLayout() {
   useEffect(() => {
     loadActiveShift()
   }, [profile?.id, profile?.role, loadActiveShift])
+
+  useEffect(() => {
+    if (!profile?.id) return
+
+    const refreshCurrentProfile = () => {
+      void refreshProfile()
+    }
+
+    const channel = supabase
+      .channel(`profile-refresh-${profile.id}`)
+      .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${profile.id}` },
+        refreshCurrentProfile)
+      .subscribe()
+
+    const refreshOnFocus = () => {
+      if (document.visibilityState === 'visible') refreshCurrentProfile()
+    }
+    const fallback = window.setInterval(refreshCurrentProfile, 30000)
+    document.addEventListener('visibilitychange', refreshOnFocus)
+
+    return () => {
+      window.clearInterval(fallback)
+      document.removeEventListener('visibilitychange', refreshOnFocus)
+      supabase.removeChannel(channel)
+    }
+  }, [profile?.id, refreshProfile])
 
   useEffect(() => {
     document.documentElement.classList.toggle('theme-light', lightTheme)
@@ -420,7 +446,7 @@ export default function AppLayout() {
             {sidebarOpen && (
               <div className="flex-1 min-w-0">
                 <div className="text-xs font-semibold text-white truncate">{profile?.full_name}</div>
-                <div className="text-xs text-navy-400 capitalize">{profile?.role}</div>
+                <div className="text-xs text-navy-400">{profile?.role ? ROLE_LABELS[profile.role] ?? profile.role : ''}</div>
               </div>
             )}
           </div>
