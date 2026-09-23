@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { isSyringeCompatible } from '@/lib/syringeCompatibility'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { invalidateSyringe } from '@/lib/syringeApi'
 import { supabase, logAudit } from '@/lib/supabase'
@@ -69,7 +70,7 @@ function MachinesTab() {
   const qc = useQueryClient()
   const [msg, setMsg] = useState('')
   const [edits, setEdits] = useState<Record<string, Partial<SaMachine>>>({})
-  const [newM, setNewM] = useState({ name: '', code: '', location: '', nominal_per_hour: 1000 })
+  const [newM, setNewM] = useState({ name: '', code: '', location: '', volume_ml: 0, nominal_per_hour: 1000 })
   const [showAdd, setShowAdd] = useState(false)
 
   const { data: machines = [], isLoading } = useQuery({
@@ -87,14 +88,14 @@ function MachinesTab() {
       if (!newM.name || !newM.code) throw new Error('Nazwa i kod są wymagane.')
       const { error } = await supabase.from('sa_machines').insert({
         name: newM.name, code: newM.code, location: newM.location || null,
-        nominal_per_hour: newM.nominal_per_hour, sort_order: machines.length + 1
+        volume_ml: newM.volume_ml || null, nominal_per_hour: newM.nominal_per_hour, sort_order: machines.length + 1
       })
       if (error) throw error
       await logAudit('config_change', 'sa_machines', undefined, undefined, { name: newM.name, code: newM.code })
     },
     onSuccess: () => {
       invalidateSyringe(qc)
-      setNewM({ name: '', code: '', location: '', nominal_per_hour: 1000 })
+      setNewM({ name: '', code: '', location: '', volume_ml: 0, nominal_per_hour: 1000 })
       setShowAdd(false)
       flash('Automat dodany')
     },
@@ -151,6 +152,7 @@ function MachinesTab() {
               <input value={newM.code} onChange={e => setNewM({ ...newM, code: e.target.value })} className="input" placeholder="np. SA-01" />
             </div>
             <div>
+              <label className="label">Rozmiar linii (ml)</label><input type="number" min="0.01" step="0.01" value={newM.volume_ml} onChange={e => setNewM({ ...newM, volume_ml: Number(e.target.value) })} className="input" />
               <label className="label">Lokalizacja</label>
               <input value={newM.location} onChange={e => setNewM({ ...newM, location: e.target.value })} className="input" placeholder="np. Hala B" />
             </div>
@@ -188,6 +190,7 @@ function MachinesTab() {
                 <input value={e.name ?? m.name} onChange={ev => set(m.id, 'name', ev.target.value)} className="input" />
               </div>
               <div>
+                <label className="label">Rozmiar linii (ml)</label><input type="number" min="0.01" step="0.01" value={e.volume_ml ?? m.volume_ml ?? ''} onChange={ev => set(m.id, 'volume_ml', Number(ev.target.value))} className="input" />
                 <label className="label">Lokalizacja</label>
                 <input value={(e.location ?? m.location) ?? ''} onChange={ev => set(m.id, 'location', ev.target.value)} className="input" />
               </div>
@@ -220,7 +223,7 @@ function AssortmentsTab() {
   const qc = useQueryClient()
   const [msg, setMsg] = useState('')
   const [edits, setEdits] = useState<Record<string, Partial<SaAssortment>>>({})
-  const [newA, setNewA] = useState({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
+  const [newA, setNewA] = useState({ name: '', code: '', volume_ml: 0, variant: 'Nominał', nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
   const [showAdd, setShowAdd] = useState(false)
 
   const { data: items = [], isLoading } = useQuery({
@@ -237,7 +240,7 @@ function AssortmentsTab() {
       if (!newA.name || !newA.code) throw new Error('Nazwa i kod są wymagane.')
       const { error } = await supabase.from('sa_assortments').insert({
         name: newA.name, code: newA.code, volume_ml: newA.volume_ml || null,
-        nominal_per_hour: newA.nominal_per_hour,
+        variant: newA.variant, nominal_per_hour: newA.nominal_per_hour,
         shift_target_qty: newA.shift_target_qty || null,
         reject_target_pct: newA.reject_target_pct,
         sort_order: items.length + 1
@@ -246,7 +249,7 @@ function AssortmentsTab() {
     },
     onSuccess: () => {
       invalidateSyringe(qc)
-      setNewA({ name: '', code: '', volume_ml: 0, nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
+      setNewA({ name: '', code: '', volume_ml: 0, variant: 'Nominał', nominal_per_hour: 1000, shift_target_qty: 0, reject_target_pct: 5.0 })
       setShowAdd(false); flash('Asortyment dodany')
     },
     onError: (e: Error) => flash('Błąd: ' + e.message)
@@ -281,6 +284,7 @@ function AssortmentsTab() {
           <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
             <div><label className="label">Nazwa *</label><input value={newA.name} onChange={e => setNewA({ ...newA, name: e.target.value })} className="input" placeholder="np. Strzykawka 100 ml" /></div>
             <div><label className="label">Kod *</label><input value={newA.code} onChange={e => setNewA({ ...newA, code: e.target.value })} className="input" placeholder="np. SYR_100ML" /></div>
+            <div><label className="label">Wariant</label><select value={newA.variant} onChange={e => setNewA({ ...newA, variant: e.target.value })} className="input"><option>Nominał</option><option>Standard</option></select></div>
             <div><label className="label">Pojemność (ml)</label><input type="number" value={newA.volume_ml} onChange={e => setNewA({ ...newA, volume_ml: parseFloat(e.target.value) || 0 })} className="input" /></div>
             <div><label className="label">Norma asortymentu (szt/h)</label><input type="number" value={newA.nominal_per_hour} onChange={e => setNewA({ ...newA, nominal_per_hour: parseInt(e.target.value) || 0 })} className="input" /></div>
             <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={newA.shift_target_qty} onChange={e => setNewA({ ...newA, shift_target_qty: parseInt(e.target.value) || 0 })} className="input" /></div>
@@ -300,6 +304,7 @@ function AssortmentsTab() {
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-4">
               <div><label className="label">Nazwa</label><input value={e.name ?? a.name} onChange={ev => set(a.id, 'name', ev.target.value)} className="input" /></div>
+              <div><label className="label">Wariant</label><select value={e.variant ?? a.variant ?? ''} onChange={ev => set(a.id, 'variant', ev.target.value)} className="input"><option value="">Nieprzypisany</option><option>Nominał</option><option>Standard</option></select></div>
               <div><label className="label">Pojemność (ml)</label><input type="number" value={(e.volume_ml ?? a.volume_ml) ?? 0} onChange={ev => set(a.id, 'volume_ml', parseFloat(ev.target.value) || 0)} className="input" /></div>
               <div><label className="label">Norma asortymentu (szt/h)</label><input type="number" value={e.nominal_per_hour ?? a.nominal_per_hour} onChange={ev => set(a.id, 'nominal_per_hour', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
               <div><label className="label">Cel na zmianę (szt)</label><input type="number" value={(e.shift_target_qty ?? a.shift_target_qty) ?? 0} onChange={ev => set(a.id, 'shift_target_qty', parseInt(ev.target.value) || 0)} className="input font-bold font-mono" /></div>
@@ -635,7 +640,7 @@ function OrdersTab() {
               <label className="label">Asortyment *</label>
               <select value={form.assortment_id} onChange={e => setForm({ ...form, assortment_id: e.target.value })} className="input">
                 <option value="">— wybierz —</option>
-                {assortments.map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+                {assortments.filter(a => !form.machine_id || isSyringeCompatible(machines.find(m => m.id === form.machine_id), a)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
               </select>
             </div>
             <div>

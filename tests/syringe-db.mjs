@@ -2,7 +2,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { readFile } from 'node:fs/promises'
 import { randomUUID } from 'node:crypto'
 
-export async function createSyringeDb() {
+export async function createSyringeDb({ full = false } = {}) {
   const db = new PGlite()
   await db.exec(`
     CREATE ROLE anon; CREATE ROLE authenticated;
@@ -19,11 +19,22 @@ export async function createSyringeDb() {
   await db.exec(await readFile(new URL('../supabase/migrations/042_syringe_dual_counter_and_targets.sql', import.meta.url), 'utf8'))
   await db.exec('GRANT ALL ON ALL TABLES IN SCHEMA public TO authenticated; GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO authenticated;')
   await db.exec(await readFile(new URL('../supabase/migrations/060_syringe_workflow_hardening.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/041_syringe_machines_and_100ml.sql', import.meta.url), 'utf8'))
+  if (full) {
+    await db.exec("CREATE TYPE audit_action AS ENUM ('config_change'); CREATE TABLE audit_logs(id uuid DEFAULT gen_random_uuid(), user_id uuid, action audit_action, table_name text, record_id uuid, old_values jsonb, new_values jsonb);")
+    for (const name of ['061_syringe_production_entry_limit', '063_syringe_audit_and_norm_guard', '065_syringe_shift_closure_and_ur_flow', '066_syringe_early_shift_close', '067_syringe_session_start_blocks']) {
+      await db.exec(await readFile(new URL('../supabase/migrations/' + name + '.sql', import.meta.url), 'utf8'))
+    }
+  }
+  await db.exec(await readFile(new URL('../supabase/migrations/069_syringe_line_compatibility.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../supabase/migrations/070_syringe_changeover_segments.sql', import.meta.url), 'utf8'))
+  if (full) await db.exec(await readFile(new URL('../supabase/migrations/071_syringe_variant_norms.sql', import.meta.url), 'utf8'))
   const ids = { operator: randomUUID(), other: randomUUID(), manager: randomUUID(), machine: randomUUID(), machine2: randomUUID() }
   await db.query(`INSERT INTO profiles(id, role, full_name) VALUES ($1, 'syringe_operator', 'Operator Testowy'), ($2, 'syringe_operator', 'Drugi Operator'), ($3, 'manager', 'Kierownik Testowy')`, [ids.operator, ids.other, ids.manager])
-  await db.query(`INSERT INTO sa_machines(id, name, code, nominal_per_hour) VALUES($1, 'Linia testowa 1', 'TEST1', 2400), ($2, 'Linia testowa 2', 'TEST2', 2400)`, [ids.machine, ids.machine2])
+  await db.query(`INSERT INTO sa_machines(id, name, code, nominal_per_hour, volume_ml) VALUES($1, 'Linia testowa 1', 'TEST1', 2400, 2), ($2, 'Linia testowa 2', 'TEST2', 2400, 2)`, [ids.machine, ids.machine2])
   ids.assortment = (await db.query("SELECT id FROM sa_assortments WHERE code = 'SYR_2ML'")).rows[0].id
-  ids.assortment2 = (await db.query("SELECT id FROM sa_assortments WHERE code = 'SYR_5ML'")).rows[0].id
+  ids.incompatible = (await db.query("SELECT id FROM sa_assortments WHERE code = 'SYR_5ML'")).rows[0].id
+  ids.assortment2 = (await db.query("SELECT id FROM sa_assortments WHERE code = 'SYR_2ML_STANDARD'")).rows[0].id
   ids.defect = (await db.query("SELECT id FROM sa_defect_categories WHERE code = 'PRINT_BAD'")).rows[0].id
   ids.tech = (await db.query("SELECT id FROM sa_defect_categories WHERE code = 'TECH_STARTUP'")).rows[0].id
   ids.otherDefect = (await db.query("SELECT id FROM sa_defect_categories WHERE code = 'OTHER'")).rows[0].id

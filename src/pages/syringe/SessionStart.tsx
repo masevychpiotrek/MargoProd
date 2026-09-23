@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { isSyringeCompatible } from '@/lib/syringeCompatibility'
 import { supabase } from '@/lib/supabase'
 import { useAuthStore } from '@/stores/authStore'
 import type { SaMachine, SaAssortment, SaOrder } from '@/types/database'
@@ -69,6 +70,7 @@ export default function SyringeSessionStart() {
 
   const selectedAssortment = assortments.find(a => a.id === assortmentId)
   const selectedMachine = machines.find(m => m.id === machineId)
+  const compatibleAssortments = assortments.filter(a => isSyringeCompatible(selectedMachine, a))
   const defaultPlanQty = defaultShiftPlan(selectedAssortment, selectedMachine)
   const defaultPlanLabel = defaultPlanQty ? parseInt(defaultPlanQty).toLocaleString('pl') : null
 
@@ -76,6 +78,7 @@ export default function SyringeSessionStart() {
     mutationFn: async () => {
       if (!profile) throw new Error('Brak profilu użytkownika.')
       if (!machineId) throw new Error('Nie wybrano automatu.')
+      if (!isSyringeCompatible(selectedMachine, selectedAssortment)) throw new Error('Wybierz asortyment zgodny z rozmiarem linii.')
       if (!assortmentId) throw new Error('Nie wybrano asortymentu.')
       if (planQty && !wholeQuantity(planQty)) throw new Error('Plan musi być nieujemną liczbą całkowitą.')
 
@@ -153,9 +156,11 @@ export default function SyringeSessionStart() {
                   key={m.id}
                   onClick={() => {
                     setMachineId(m.id)
+                    setAssortmentId('')
+                    setPlanQty('')
                     setOrderId('')
                     setError('')
-                    if (selectedAssortment) setPlanQty(defaultShiftPlan(selectedAssortment, m))
+
                   }}
                   className={`rounded-xl border-2 p-4 text-left transition-all ${
                     machineId === m.id
@@ -184,11 +189,11 @@ export default function SyringeSessionStart() {
       {/* Asortyment */}
       <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
         <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Asortyment</div>
-        {assortments.length === 0 ? (
-          <p className="text-navy-500 text-sm">Brak asortymentów. Skontaktuj się z administratorem.</p>
+        {compatibleAssortments.length === 0 ? (
+          <p className="text-navy-500 text-sm">Wybierz linię. Jeśli nie ma zgodnych asortymentów, administrator musi uzupełnić konfigurację rozmiaru.</p>
         ) : (
           <div className="grid grid-cols-2 gap-3">
-            {assortments.map(a => (
+            {compatibleAssortments.map(a => (
               <button
                 key={a.id}
                 onClick={() => {

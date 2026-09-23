@@ -143,7 +143,7 @@ export default function SyringeDashboard() {
   const statusCfg = STATUS_CONFIG[session.machine_status]
   const isShiftSettlementMode = isShiftSettlementAssortment(session.assortment?.code)
   const lastEntry = entries[0]
-  const entryCount = entries.length
+  const entryCount = entries.filter(e => new Date(e.recorded_at).getTime() >= new Date(session.production_started_at ?? session.started_at).getTime()).length
   const totalGood = session.total_good ?? 0
   const totalReject = session.total_reject ?? 0
   const totalProduced = session.total_produced ?? 0
@@ -172,7 +172,7 @@ export default function SyringeDashboard() {
   const entryDue = !isShiftSettlementMode && minSinceEntry >= 60
   const sessionEntryHours = isShiftSettlementMode
     ? []
-    : getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.started_at)
+    : getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.production_started_at ?? session.started_at)
   const entryLimit = isShiftSettlementMode ? 1 : Math.max(1, sessionEntryHours.length)
   const currentHourNo = isShiftSettlementMode ? 1 : Math.min(entryLimit, entryCount + 1)
   const remainingEntryCount = Math.max(0, entryLimit - entryCount)

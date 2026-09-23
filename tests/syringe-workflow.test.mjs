@@ -55,7 +55,7 @@ test('Changeover checklist, new assortment, loss time, zero rejects validation a
   const { db, ids, command } = await createSyringeDb()
   try {
     const s = await command('start', { machine_id: ids.machine, assortment_id: ids.assortment, shift_type: 'III' })
-    const c = await command('changeover_start', { session_id: s.session_id, to_assortment_id: ids.assortment2, counter_before: '0' })
+    const c = await command('changeover_start', { session_id: s.session_id, to_assortment_id: ids.assortment2, counter_before: '0', print_before: '0' })
     await assert.rejects(command('changeover_end', { session_id: s.session_id, event_id: c.record_id }), /checklisty/)
     await assert.rejects(command('finish', { session_id: s.session_id, final_print: '0', final_assembly: '0' }), /przezbrojenie/)
     const items = (await db.query('SELECT id FROM sa_checklist_items WHERE is_required')).rows

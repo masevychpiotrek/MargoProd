@@ -437,6 +437,7 @@ export type SaDefectType = 'quality' | 'tech' | 'other'
 export type SaDowntimeCategoryType = 'planned' | 'unplanned' | 'quality' | 'logistics'
 
 export interface SaAssortment {
+  variant: 'Nominał' | 'Standard' | null
   id: string
   name: string
   code: string
@@ -452,6 +453,7 @@ export interface SaAssortment {
 }
 
 export interface SaMachine {
+  volume_ml: number | null
   id: string
   name: string
   code: string
@@ -486,6 +488,7 @@ export interface SaOrder {
 }
 
 export interface SaSession {
+  production_started_at?: string | null
   id: string
   machine_id: string
   operator_id: string

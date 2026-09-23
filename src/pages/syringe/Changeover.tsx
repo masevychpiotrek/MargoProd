@@ -1,6 +1,7 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
+import { isSyringeCompatible } from '@/lib/syringeCompatibility'
 import { supabase } from '@/lib/supabase'
 import { useSyringeSession } from '@/hooks/useSyringeSession'
 import { useSyringeCommand } from '@/hooks/useSyringeCommand'
@@ -49,6 +50,9 @@ export default function SyringeChangeover() {
   const command = useSyringeCommand()
 
   const [toAssortmentId, setToAssortmentId] = useState('')
+  const [printBefore, setPrintBefore] = useState('')
+  const [now, setNow] = useState(Date.now())
+  useEffect(() => { const timer = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(timer) }, [])
   const [counterBefore, setCounterBefore] = useState('')
   const [reason, setReason] = useState('')
   const [errors, setErrors] = useState<string[]>([])
@@ -76,10 +80,10 @@ export default function SyringeChangeover() {
     mutationFn: async () => {
       if (!session || !profile) throw new Error('Brak aktywnej sesji.')
       const errs: string[] = []
-      if (!toAssortmentId) errs.push('Wybierz nowy asortyment.')
+      if (!isSyringeCompatible(session.machine, assortments.find(a => a.id === toAssortmentId))) errs.push('Wybierz asortyment zgodny z rozmiarem linii.')
       if (errs.length > 0) { setErrors(errs); throw new Error('Walidacja') }
 
-      await command('changeover_start', { session_id: session.id, to_assortment_id: toAssortmentId, counter_before: counterBefore || '0', reason })
+      await command('changeover_start', { session_id: session.id, to_assortment_id: toAssortmentId, counter_before: counterBefore || '0', print_before: printBefore || '0', reason })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_changeover', session?.id] })
@@ -110,7 +114,7 @@ export default function SyringeChangeover() {
         throw new Error('Walidacja')
       }
 
-      await command('changeover_end', { session_id: session.id, event_id: activeChangeover.id })
+      await command('changeover_end', { session_id: session.id, event_id: activeChangeover.id, to_assortment_id: toAssortmentId || activeChangeover.to_assortment_id })
     },
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['sa_active_changeover', session?.id] })
@@ -161,6 +165,12 @@ export default function SyringeChangeover() {
             </div>
           </div>
 
+          <label className="block text-sm text-white">Asortyment po przezbrojeniu
+            <select className="input mt-2" value={toAssortmentId || activeChangeover.to_assortment_id} onChange={e => setToAssortmentId(e.target.value)}>
+              {assortments.filter(a => a.id !== session.assortment_id && isSyringeCompatible(session.machine, a)).map(a => <option key={a.id} value={a.id}>{a.name}</option>)}
+            </select>
+          </label>
+          <p className="text-yellow-300">Czas przezbrojenia: {Math.max(0, Math.floor((now - new Date(activeChangeover.started_at).getTime()) / 1000))} s</p>
           <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
             <div className="text-xs font-bold uppercase tracking-wider text-navy-400">
               Checklista przezbrojenia
@@ -210,7 +220,7 @@ export default function SyringeChangeover() {
             <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Nowy asortyment *</div>
             <div className="grid grid-cols-2 gap-3">
               {assortments
-                .filter(a => a.id !== session.assortment_id)
+                .filter(a => a.id !== session.assortment_id && isSyringeCompatible(session.machine, a))
                 .map(a => (
                   <button
                     key={a.id}
@@ -230,9 +240,13 @@ export default function SyringeChangeover() {
             </div>
           </div>
 
+          <p className="text-sm text-navy-300">Przed rozpoczęciem zapisz bieżący wynik produkcji wraz z brakami. Przezbrojenie nie zmienia rozmiaru linii.</p>
+          <label className="block text-sm text-white">Stan druku przed
+            <input type="number" min={0} value={printBefore} onChange={e => setPrintBefore(e.target.value)} placeholder="Stan druku przed" className="input mt-2" />
+          </label>
           <div className="grid grid-cols-2 gap-4">
             <div className="rounded-2xl border border-navy-700 bg-navy-800 p-5 space-y-3">
-              <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan licznika przed</div>
+              <div className="text-xs font-bold uppercase tracking-wider text-navy-400">Stan montażu przed</div>
               <input
                 type="number"
                 value={counterBefore}

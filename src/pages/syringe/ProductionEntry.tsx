@@ -26,10 +26,11 @@ async function fetchLastEntry(sessionId: string) {
   return (data ?? []) as SaProductionEntry[]
 }
 
-async function fetchEntryCount(sessionId: string) {
+async function fetchEntryCount(sessionId: string, segmentStart: string) {
   const { count, error } = await supabase
     .from('sa_production_entries')
     .select('id', { count: 'exact', head: true })
+    .gte('recorded_at', segmentStart)
     .eq('session_id', sessionId)
     .eq('is_cancelled', false)
   if (error) throw error
@@ -84,8 +85,8 @@ export default function SyringeProductionEntry() {
   })
 
   const { data: entryCount = 0, isLoading: countLoading, error: countError } = useQuery({
-    queryKey: ['sa_entry_count', session?.id],
-    queryFn: () => fetchEntryCount(session!.id),
+    queryKey: ['sa_entry_count', session?.id, session?.production_started_at],
+    queryFn: () => fetchEntryCount(session!.id, session!.production_started_at ?? session!.started_at),
     enabled: !!session?.id
   })
 
@@ -137,7 +138,7 @@ export default function SyringeProductionEntry() {
   const rejectQty = isShiftSettlementMode ? finalRejectQty : counterRejectQty
 
   const perHour = !isShiftSettlementMode && lastEntry && assemblyDelta !== null && assemblyDelta >= 0
-    ? syringeRate(assemblyDelta, (currentEntry ? new Date(currentEntry.recorded_at).getTime() : Date.now()) - new Date(lastEntry.recorded_at).getTime())
+    ? syringeRate(assemblyDelta, (currentEntry ? new Date(currentEntry.recorded_at).getTime() : Date.now()) - Math.max(new Date(lastEntry.recorded_at).getTime(), new Date(session?.production_started_at ?? session?.started_at ?? Date.now()).getTime()))
     : null
 
   const planQty = session?.plan_qty ?? 0
@@ -146,7 +147,7 @@ export default function SyringeProductionEntry() {
   const planPct = planQty > 0 ? Math.round((sessionGood + goodTotalForPreview) / planQty * 100) : null
   const nominalPerHour = session?.assortment?.nominal_per_hour ?? session?.machine?.nominal_per_hour ?? 0
   const entryReferenceMs = currentEntry ? new Date(currentEntry.recorded_at).getTime() : Date.now()
-  const entryStartMs = lastEntry ? new Date(lastEntry.recorded_at).getTime() : new Date(session?.started_at ?? Date.now()).getTime()
+  const entryStartMs = Math.max(lastEntry ? new Date(lastEntry.recorded_at).getTime() : 0, new Date(session?.production_started_at ?? session?.started_at ?? Date.now()).getTime())
   const entryElapsedMs = Math.max(0, entryReferenceMs - entryStartMs)
   const entryElapsedHours = entryElapsedMs / 3600000
   const expectedGoodQty = isShiftSettlementMode
@@ -162,7 +163,7 @@ export default function SyringeProductionEntry() {
   const remainingToAllocate = rejectTotal - allocatedQty
   const allocationPct = rejectTotal > 0 ? Math.min(100, Math.max(0, allocatedQty / rejectTotal * 100)) : 0
   const sessionEntryHours = session && !isShiftSettlementMode
-    ? getSessionEntryHours(session.session_date, session.shift_type as ShiftType, session.started_at)
+    ? getSessionEntryHours(session.session_date, session.shift_type as ShiftType, (session.production_started_at ?? session.started_at))
     : []
   const entryLimit = isShiftSettlementMode ? 1 : Math.max(1, sessionEntryHours.length)
   const entryLimitReached = !editing && entryCount >= entryLimit
@@ -228,6 +229,7 @@ export default function SyringeProductionEntry() {
   function validate(): string[] {
     const errs: string[] = []
     if (editing && (!currentEntry || !correctionReason.trim())) errs.push('Podaj powód korekty ostatniego wpisu.')
+    if (session?.machine_status === 'changeover') errs.push('Najpierw zakończ przezbrojenie.')
     if (entryLimitReached) {
       errs.push(isShiftSettlementMode
         ? 'Dla asortymentu 50/100 zapisuje się jedno rozliczenie końcowe zmiany. Możesz skorygować ostatni wpis albo zakończyć zmianę.'
@@ -771,7 +773,7 @@ export default function SyringeProductionEntry() {
         <button onClick={() => navigate('/syringe')} className="btn-secondary py-4">Anuluj</button>
         <button
           onClick={() => { setErrors([]); saveMutation.mutate() }}
-          disabled={saveMutation.isPending || lastLoading || countLoading || !!lastError || !!categoriesError || !!countError || entryLimitReached}
+          disabled={session.machine_status === 'changeover' || saveMutation.isPending || lastLoading || countLoading || !!lastError || !!categoriesError || !!countError || entryLimitReached}
           className="py-4 rounded-2xl bg-brand text-navy-900 font-bold text-lg disabled:opacity-40 hover:bg-brand/90 transition-all"
         >
           {saveMutation.isPending ? 'Zapisywanie...' : editing ? 'Zapisz korektę' : isShiftSettlementMode ? 'Zapisz rozliczenie zmiany' : 'Zapisz produkcję'}
