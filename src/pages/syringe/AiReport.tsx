@@ -1,6 +1,7 @@
-import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
+import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { rejectPercent, syringeProductionDate } from '@/lib/syringeMetrics'
+import { compareSyringeReportLines, syringeReportLine } from '@/lib/syringeReportLayout'
 import { cn } from '@/lib/utils'
 import type { SaMachine, ShiftType } from '@/types/database'
 
@@ -16,7 +17,7 @@ type ShiftSummary = {
   operators: string[]
 }
 
-type LineDayRow = {
+type LineDayRow = ReturnType<typeof syringeReportLine> & {
   machineId: string; machineName: string
   shifts: Record<ShiftType, ShiftSummary>
   total: ShiftSummary
@@ -30,7 +31,7 @@ type SessionRow = {
   plan_qty: number | null
   total_runtime_min: number | null; total_downtime_min: number | null
   summary_notes: string | null
-  machine?: { id: string; name: string }
+  machine?: { id: string; name: string; volume_ml: number | null }
   assortment?: { shift_target_qty: number | null; reject_target_pct: number } | null
   operator?: { full_name: string } | null
 }
@@ -150,8 +151,10 @@ function buildEmailHtml(params: {
 
   const machineRows = rows.map((row, idx) => {
     const pal = emailPalette[idx % emailPalette.length]
-    return `<tr>
-  <td ${TD(pal.bg, pal.br, pal.tx, `font-weight:bold;font-size:13px`)}>${row.machineName}</td>
+    const categoryHeader = idx === 0 || rows[idx - 1].category !== row.category
+      ? `<tr><td colspan="4" style="background:${K.navyMid};color:#fff;padding:12px 14px;font-weight:bold;font-size:13px;${F}">${escapeHtml(row.category)}</td></tr>` : ''
+    return `${categoryHeader}<tr>
+  <td ${TD(pal.bg, pal.br, pal.tx, `font-weight:bold;font-size:13px`)}>${escapeHtml(row.productLabel)}<br><span style="font-size:10px;font-weight:normal">${escapeHtml(row.machineName)}</span></td>
   <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.I)}</td>
   <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.II)}</td>
   <td align="center" style="background:${pal.ac};border:1px solid ${pal.ac};padding:10px 14px;color:#fff;font-weight:bold;font-size:16px;${F};text-align:center;vertical-align:middle">
@@ -338,9 +341,11 @@ function buildSystemReportHtml(eventsByShift: Record<ShiftType, ShiftEvent[]>, s
       const machineClass = index % 2 === 0 ? 'm3' : 'm4'
       const s = row.shifts[shift]
       const summaryLine = `<p class="times">Produkcja: <strong>${pieces(s.good)} szt.</strong> | Braki: <strong>${pieces(s.reject)} szt.</strong> | Czas pracy: <strong>${mins(s.runtime)}</strong></p>`
+      const categoryHeader = index === 0 || rows[index - 1].category !== row.category
+        ? `<p class="sub-h">${escapeHtml(row.category)}</p>` : ''
       if (!events.length) {
-        return `<div class="mc-box ${machineClass}">
-  <div class="mc-name">${escapeHtml(row.machineName)}</div>
+        return `${categoryHeader}<div class="mc-box ${machineClass}">
+  <div class="mc-name">${escapeHtml(row.productLabel)} — ${escapeHtml(row.machineName)}</div>
   <div class="mc-body">
     ${summaryLine}
     <em style="color:#6B7280">Brak istotnych zdarzeń do raportowania.</em>
@@ -348,8 +353,8 @@ function buildSystemReportHtml(eventsByShift: Record<ShiftType, ShiftEvent[]>, s
 </div>`
       }
       const list = `<ul>${events.map(e => `<li><strong>${escapeHtml(e.hour)}</strong>: ${escapeHtml(e.text)}</li>`).join('')}</ul>`
-      return `<div class="mc-box ${machineClass}">
-  <div class="mc-name">${escapeHtml(row.machineName)}</div>
+      return `${categoryHeader}<div class="mc-box ${machineClass}">
+  <div class="mc-name">${escapeHtml(row.productLabel)} — ${escapeHtml(row.machineName)}</div>
   <div class="mc-body">
     ${summaryLine}
     <p class="sub-h">W trakcie zmiany odnotowano:</p>
@@ -373,6 +378,8 @@ async function generateShiftNarrativeWithAi(apiKey: string, eventsByShift: Recor
       const s = r.shifts[shift]
       return {
         name: r.machineName,
+        productLabel: r.productLabel,
+        category: r.category,
         good: s.good, reject: s.reject,
         rejectPct: (s.good + s.reject) > 0 ? (s.reject / (s.good + s.reject) * 100).toFixed(1) + '%' : '0%',
         target: s.target,
@@ -385,6 +392,8 @@ async function generateShiftNarrativeWithAi(apiKey: string, eventsByShift: Recor
   const prompt = `Jesteś autorem raportu zmianowego linii strzykawkowych. Napisz profesjonalną narrację na podstawie danych poniżej.
 
 WAŻNE ZASADY:
+- Zachowaj kolejność linii z danych: rosnąco według pojemności, najpierw małe dwuczęściowe, potem duże trzyczęściowe (50 i 100 ml).
+- Przed każdą kategorią w obrębie zmiany dodaj <p class="sub-h"> z dokładną wartością category. W nagłówku mc-name umieść pełne productLabel oraz name; nie pomijaj informacji „trzyczęściowa”.
 - Pisz tylko o tym co jest w danych — zero domysłów
 - Jeśli notes jest pusta i produkcja spełnia cel (target) → "Zmiana przebiegła bez zakłóceń."
 - Jeśli notes zawiera zdarzenie: jeden fakt = jedno zdanie lub punkt listy
@@ -807,7 +816,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
     const [mRes, sRes] = await Promise.all([
       supabase.from('sa_machines').select('*').eq('is_active', true).is('deleted_at', null).order('sort_order'),
       supabase.from('sa_sessions')
-        .select('*, machine:sa_machines(id,name), assortment:sa_assortments(shift_target_qty,reject_target_pct), operator:profiles!sa_sessions_operator_id_fkey(full_name)')
+        .select('*, machine:sa_machines(id,name,volume_ml), assortment:sa_assortments(shift_target_qty,reject_target_pct), operator:profiles!sa_sessions_operator_id_fkey(full_name)')
         .eq('session_date', date)
     ])
     if (requestId !== loadSeq.current) return
@@ -912,10 +921,10 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
 
   const rows = useMemo<LineDayRow[]>(() => {
     const byMachine = new Map<string, LineDayRow>()
-    machines.forEach(m => byMachine.set(m.id, { machineId: m.id, machineName: m.name, shifts: { I: emptySummary(), II: emptySummary(), III: emptySummary() }, total: emptySummary() }))
+    machines.forEach(m => byMachine.set(m.id, { machineId: m.id, ...syringeReportLine(m), shifts: { I: emptySummary(), II: emptySummary(), III: emptySummary() }, total: emptySummary() }))
     sessions.forEach(s => {
       if (!SHIFTS.includes(s.shift_type)) return
-      const row = byMachine.get(s.machine_id) ?? { machineId: s.machine_id, machineName: s.machine?.name ?? 'Nieznana linia', shifts: { I: emptySummary(), II: emptySummary(), III: emptySummary() }, total: emptySummary() }
+      const row = byMachine.get(s.machine_id) ?? { machineId: s.machine_id, ...syringeReportLine(s.machine ?? { name: 'Nieznana linia' }), shifts: { I: emptySummary(), II: emptySummary(), III: emptySummary() }, total: emptySummary() }
       byMachine.set(s.machine_id, row)
       const shift = row.shifts[s.shift_type]
       shift.good += s.total_good ?? 0
@@ -938,7 +947,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
         row.total.target = (row.total.target ?? 0) + (s.target ?? 0)
       })
     })
-    return Array.from(byMachine.values()).sort((a, b) => a.machineName.localeCompare(b.machineName))
+    return Array.from(byMachine.values()).sort(compareSyringeReportLines)
   }, [machines, sessions])
 
   const totals = useMemo(() => rows.reduce((acc, row) => {
@@ -1025,9 +1034,13 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
               </tr>
             </thead>
             <tbody className="divide-y divide-navy-700">
-              {rows.map(row => (
-                <tr key={row.machineId}>
-                  <td className="px-4 py-3 font-bold text-white">{row.machineName}</td>
+              {rows.map((row, index) => (
+                <Fragment key={row.machineId}>
+                {(index === 0 || rows[index - 1].category !== row.category) && (
+                  <tr><td colSpan={4} className="px-4 py-3 font-bold text-brand bg-navy-900">{row.category}</td></tr>
+                )}
+                <tr>
+                  <td className="px-4 py-3 font-bold text-white">{row.productLabel}<div className="text-xs font-normal text-navy-400">{row.machineName}</div></td>
                   {SHIFTS.map(s => {
                     const sm = row.shifts[s]
                     const rj = (sm.good + sm.reject) > 0 ? (sm.reject / (sm.good + sm.reject) * 100).toFixed(1) : null
@@ -1044,6 +1057,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
                   })}
                   <td className="px-4 py-3 text-center font-bold text-brand">{pieces(row.total.good)}</td>
                 </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>
