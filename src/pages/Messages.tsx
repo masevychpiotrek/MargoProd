@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react'
 import { useInfiniteQuery, useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { ArrowLeft, Check, CheckCheck, MessageCircle, Plus, Search, Send } from 'lucide-react'
+import { ArrowLeft, Check, CheckCheck, MessageCircle, Plus, Search, Send, LockKeyhole, ArrowUpRight } from 'lucide-react'
 import { useAuthStore } from '@/stores/authStore'
 import { useChatInbox } from '@/hooks/useMessenger'
 import { chatContacts, chatMarkRead, chatMessages, chatSend } from '@/lib/messenger'
 import type { ChatContact, ChatConversation } from '@/lib/messenger'
 import { cn, ROLE_LABELS } from '@/lib/utils'
+import './Messages.css'
 
 function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map(s => s[0]).join('').toUpperCase() }
 function time(value: string) { return new Date(value).toLocaleTimeString('pl-PL', { hour: '2-digit', minute: '2-digit' }) }
@@ -13,7 +14,8 @@ function date(value: string) { return new Date(value).toLocaleDateString('pl-PL'
 function searchText(value: string) { return value.toLocaleLowerCase('pl').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/ł/g, 'l') }
 
 function Avatar({ name }: { name: string }) {
-  return <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-2xl bg-brand/15 text-sm font-bold text-brand" aria-hidden="true">{initials(name)}</span>
+  const tone = [...name].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 4
+  return <span className={`messenger-avatar messenger-avatar--${tone}`} aria-hidden="true">{initials(name)}</span>
 }
 
 function Conversation({ userId, contact, conversation, draft, requestId, setDraft, onSent, onBack }: {
@@ -31,6 +33,10 @@ function Conversation({ userId, contact, conversation, draft, requestId, setDraf
   const composer = useRef<HTMLTextAreaElement>(null)
   const readThrough = useRef(0)
   const pending = useRef(false)
+  useEffect(() => {
+    const field = composer.current
+    if (field) { field.style.height = 'auto'; field.style.height = `${Math.min(field.scrollHeight, 128)}px` }
+  }, [draft])
   const history = useInfiniteQuery({
     queryKey: ['chat', userId, 'messages', conversationId],
     queryFn: ({ pageParam }) => chatMessages(conversationId!, pageParam),
@@ -89,16 +95,17 @@ function Conversation({ userId, contact, conversation, draft, requestId, setDraf
     requestAnimationFrame(() => { if (element) element.scrollTop = top + element.scrollHeight - height })
   }
   return (
-    <section aria-label={`Rozmowa z ${contact.full_name}`} className="flex min-h-0 min-w-0 flex-1 flex-col bg-navy-950/40">
-      <header className="flex items-center gap-3 border-b border-navy-700 bg-navy-800 p-4">
-        <button type="button" onClick={onBack} aria-label="Wróć do rozmów" className="rounded-lg p-2 text-navy-300 hover:bg-navy-700 md:hidden"><ArrowLeft size={20} /></button>
+    <section aria-label={`Rozmowa z ${contact.full_name}`} className="messenger-conversation">
+      <header className="messenger-chat-header">
+        <button type="button" onClick={onBack} aria-label="Wróć do rozmów" className="messenger-icon-button md:hidden"><ArrowLeft size={20} /></button>
         <Avatar name={contact.full_name} />
-        <div className="min-w-0"><h2 className="truncate font-bold text-white">{contact.full_name}</h2><p className="text-xs text-navy-400">{ROLE_LABELS[contact.role]} · rozmowa prywatna</p></div>
+        <div className="min-w-0 flex-1"><h2 className="messenger-person-name">{contact.full_name}</h2><p className="messenger-person-role">{ROLE_LABELS[contact.role]}</p></div>
+        <span className="messenger-private" title="Rozmowę widzą tylko jej uczestnicy w aplikacji"><LockKeyhole size={14} /><span>Prywatna rozmowa</span></span>
       </header>
       <div ref={scroller} onScroll={e => {
         const el = e.currentTarget
         setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 60)
-      }} className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-6" role="log" aria-label="Historia wiadomości" aria-live="polite">
+      }} className="messenger-history" role="log" aria-label="Historia wiadomości" aria-live="polite">
         {history.hasNextPage && <button className="mx-auto mb-4 block rounded-full border border-navy-600 px-4 py-2 text-xs text-navy-200 disabled:opacity-50" disabled={history.isFetchingNextPage} onClick={() => void older()}>Wczytaj starsze wiadomości</button>}
         {conversationId && history.isPending && <p className="text-center text-sm text-navy-400">Ładowanie wiadomości…</p>}
         {history.isError && <div role="alert" className="mb-4 rounded-xl bg-red-500/10 p-3 text-sm text-red-300">{history.error.message} <button className="underline" onClick={() => void history.refetch()}>Ponów</button></div>}
@@ -107,13 +114,13 @@ function Conversation({ userId, contact, conversation, draft, requestId, setDraf
           const mine = message.sender_id === userId
           const read = mine && message.seq <= Number(conversation?.other_read_seq ?? 0)
           return <div key={message.id}>
-            {(index === 0 || date(messages[index - 1].created_at) !== date(message.created_at)) && <p className="my-5 text-center text-[11px] text-navy-400">{date(message.created_at)}</p>}
-            <div className={cn('mb-3 flex', mine ? 'justify-end' : 'justify-start')}>
-              <div className={cn('max-w-[90%] rounded-2xl border px-4 py-3 sm:max-w-[75%]', mine ? 'rounded-br-sm border-brand/25 bg-brand/10' : 'rounded-bl-sm border-navy-600 bg-navy-800')}>
-                <p className="whitespace-pre-wrap break-words text-sm leading-relaxed text-white [overflow-wrap:anywhere]">{message.body}</p>
-                <div className="mt-2 flex items-center justify-end gap-1.5 text-[10px] text-navy-400">
+            {(index === 0 || date(messages[index - 1].created_at) !== date(message.created_at)) && <div className="messenger-day"><span>{date(message.created_at)}</span></div>}
+            <div className={cn('messenger-message-row', mine && 'messenger-message-row--mine')}>
+              <div className={cn('messenger-bubble', mine && 'messenger-bubble--mine')}>
+                <p className="messenger-message-body">{message.body}</p>
+                <div className="messenger-message-meta">
                   <time dateTime={message.created_at}>{time(message.created_at)}</time>
-                  {mine && <span className={cn('inline-flex items-center gap-1', read && 'text-brand')} title={read ? 'Odczytano' : 'Wysłano'}>{read ? <CheckCheck size={14} /> : <Check size={14} />}{read ? 'Odczytano' : 'Wysłano'}</span>}
+                  {mine && <span className={cn('inline-flex items-center gap-1', read && 'messenger-read')} title={read ? 'Odczytano' : 'Wysłano'}>{read ? <CheckCheck size={15} /> : <Check size={15} />}{read ? 'Odczytano' : 'Wysłano'}</span>}
                 </div>
               </div>
             </div>
@@ -121,19 +128,19 @@ function Conversation({ userId, contact, conversation, draft, requestId, setDraf
         })}
       </div>
       {!atBottom && <button onClick={() => setAtBottom(true)} className="mx-auto mb-2 rounded-full bg-brand px-4 py-2 text-xs font-bold text-navy-950">Przejdź do najnowszych wiadomości ↓</button>}
-      <form onSubmit={e => { e.preventDefault(); submit() }} className="border-t border-navy-700 bg-navy-800 p-3 sm:p-4">
+      <form onSubmit={e => { e.preventDefault(); submit() }} className="messenger-composer">
         {send.isError && <p role="alert" className="mb-2 text-sm text-red-300">{send.error.message} Kliknij Wyślij, aby ponowić.</p>}
         {readError && <p role="status" className="mb-2 text-xs text-amber-300">{readError}</p>}
         {conversation?.can_send === false && <p className="mb-2 text-sm text-amber-300">Konto tej osoby jest nieaktywne. Historia rozmowy pozostaje dostępna.</p>}
-        <div className="flex items-end gap-2">
+        <div className="messenger-compose-box">
           <textarea ref={composer} value={draft} onChange={e => { setDraft(e.target.value); if (send.isError) send.reset() }}
             onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) { e.preventDefault(); submit() } }}
-            aria-label="Treść wiadomości" placeholder="Napisz wiadomość…" rows={2} maxLength={4000}
+            aria-label="Treść wiadomości" placeholder="Napisz wiadomość…" rows={1} maxLength={4000}
             disabled={send.isPending || conversation?.can_send === false}
-            className="input min-w-0 flex-1 resize-none disabled:opacity-50" />
-          <button type="submit" disabled={!draft.trim() || send.isPending || conversation?.can_send === false} className="btn-primary flex h-12 shrink-0 items-center gap-2 px-4 disabled:opacity-40" aria-label="Wyślij wiadomość"><Send size={18} /><span className="hidden sm:inline">{send.isPending ? 'Wysyłanie…' : 'Wyślij'}</span></button>
+            className="messenger-textarea" />
+          <button type="submit" disabled={!draft.trim() || send.isPending || conversation?.can_send === false} className="messenger-send" aria-label="Wyślij wiadomość" title="Wyślij wiadomość"><Send size={19} /><span className="hidden sm:inline">{send.isPending ? 'Wysyłanie…' : 'Wyślij'}</span></button>
         </div>
-        <div className="mt-2 flex justify-between text-[10px] text-navy-400"><span>Enter — wyślij · Shift+Enter — nowy wiersz</span><span>{draft.length}/4000</span></div>
+        <div className="messenger-compose-hint"><span className="hidden sm:inline">Enter — wyślij <span className="mx-2">·</span> Shift+Enter — nowy wiersz</span><span className="sm:hidden">Enter — wyślij wiadomość</span><span>{draft.length > 0 ? `${draft.length}/4000` : ''}</span></div>
       </form>
     </section>
   )
@@ -150,34 +157,38 @@ function Messenger({ userId }: { userId: string }) {
   const currentContact = selected ? (contacts.data?.find(c => c.id === selected.id) ?? selected) : null
   const term = searchText(search)
   const matches = (person: ChatContact) => searchText(`${person.full_name} ${ROLE_LABELS[person.role]}`).includes(term)
+  const unreadConversations = (inbox.data ?? []).filter(c => Number(c.unread_count) > 0).length
   function choose(person: ChatContact) { setSelected(person); setFindPerson(false); setSearch('') }
-  return <div className="mx-auto max-w-7xl">
-    <div className="mb-4 flex items-center justify-between gap-3"><div><h1 className="text-2xl font-bold text-white">Wiadomości</h1><p className="mt-1 text-sm text-navy-400">Porozmawiaj z operatorem, kierownikiem lub zespołem.</p></div></div>
-    <div className="flex h-[calc(100dvh-190px)] min-h-[400px] overflow-hidden rounded-2xl border border-navy-700 bg-navy-800">
-      <aside aria-label="Lista rozmów" className={cn('flex min-h-0 w-full shrink-0 flex-col border-r border-navy-700 md:w-80', selected ? 'hidden md:flex' : 'flex')}>
-        <div className="border-b border-navy-700 p-4">
-          <div className="mb-4 flex items-center justify-between"><h2 className="font-bold text-white">{findPerson ? 'Nowa rozmowa' : 'Twoje rozmowy'}</h2><button onClick={() => { setFindPerson(v => !v); setSelected(null); setSearch('') }} className="rounded-lg bg-brand/15 p-2 text-brand" aria-label={findPerson ? 'Pokaż rozmowy' : 'Nowa rozmowa'}>{findPerson ? <ArrowLeft size={18} /> : <Plus size={18} />}</button></div>
-          <label className="relative block"><Search className="absolute left-3 top-3 text-navy-400" size={16} /><input value={search} onChange={e => setSearch(e.target.value)} aria-label="Szukaj osoby" placeholder="Szukaj osoby lub roli…" className="input w-full pl-9" /></label>
+  return <div className={cn('messenger', selected && 'messenger--open')}>
+    <div className="messenger-page-heading">
+      <div><div className="messenger-eyebrow">KOMUNIKACJA ZESPOŁU</div><h1>Wiadomości</h1></div>
+      <p>Dobry kontakt.<br /><strong>Sprawniejsza zmiana.</strong></p>
+    </div>
+    <div className="messenger-shell">
+      <aside aria-label="Lista rozmów" className={cn('messenger-sidebar', selected ? 'hidden md:flex' : 'flex')}>
+        <div className="messenger-sidebar-header">
+          <div className="messenger-list-heading"><div><h2>{findPerson ? 'Nowa rozmowa' : 'Twoje rozmowy'}</h2><p>{findPerson ? 'Wybierz osobę z zespołu' : unreadConversations > 0 ? `Nieprzeczytane rozmowy: ${unreadConversations}` : 'Wszystkie rozmowy w jednym miejscu'}</p></div><button onClick={() => { setFindPerson(v => !v); setSelected(null); setSearch('') }} className="messenger-new-button" aria-label={findPerson ? 'Pokaż rozmowy' : 'Nowa rozmowa'} title={findPerson ? 'Pokaż rozmowy' : 'Nowa rozmowa'}>{findPerson ? <ArrowLeft size={20} /> : <Plus size={20} />}</button></div>
+          <label className="messenger-search"><Search size={17} /><input value={search} onChange={e => setSearch(e.target.value)} aria-label="Szukaj osoby" placeholder="Szukaj osoby lub roli…" /></label>
         </div>
-        <div className="min-h-0 flex-1 overflow-y-auto">
+        <div className="messenger-list">
           {(inbox.isError || contacts.isError) && <div role="alert" className="m-3 rounded-xl bg-red-500/10 p-3 text-sm text-red-300">{inbox.error?.message ?? contacts.error?.message}<button className="mt-2 block underline" onClick={() => { void inbox.refetch(); void contacts.refetch() }}>Spróbuj ponownie</button></div>}
           {(findPerson ? contacts.isPending : inbox.isPending) && <p className="p-4 text-sm text-navy-400">Ładowanie…</p>}
-          {findPerson ? (contacts.data ?? []).filter(matches).map(person => <button key={person.id} onClick={() => choose(person)} className="flex w-full items-center gap-3 border-b border-navy-700/50 p-4 text-left hover:bg-navy-700/50"><Avatar name={person.full_name} /><span className="min-w-0"><span className="block truncate text-sm font-semibold text-white">{person.full_name}</span><span className="text-xs text-navy-400">{ROLE_LABELS[person.role]}</span></span></button>)
-            : (inbox.data ?? []).filter(c => matches({ id: c.other_id, full_name: c.full_name, role: c.role })).map(c => <button key={c.id} onClick={() => choose({ id: c.other_id, full_name: c.full_name, role: c.role })} className={cn('flex w-full items-center gap-3 border-b border-navy-700/50 p-4 text-left hover:bg-navy-700/50', selected?.id === c.other_id && 'bg-brand/10')}>
-              <Avatar name={c.full_name} /><span className="min-w-0 flex-1"><span className="flex items-center justify-between gap-2"><span className="truncate text-sm font-semibold text-white">{c.full_name}</span><span className="shrink-0 text-[10px] text-navy-400">{new Date(c.last_message_at).toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric' })}</span></span><span className="mt-1 block truncate text-xs text-navy-400">{c.last_sender_id === userId ? 'Ty: ' : ''}{c.last_body}</span></span>
-              {Number(c.unread_count) > 0 && <span className="rounded-full bg-brand px-2 py-0.5 text-xs font-bold text-navy-950" aria-label={`${c.unread_count} nieprzeczytanych`}>{c.unread_count}</span>}
+          {findPerson ? (contacts.data ?? []).filter(matches).map(person => <button key={person.id} onClick={() => choose(person)} className="messenger-list-item"><Avatar name={person.full_name} /><span className="min-w-0 flex-1"><span className="messenger-contact-name">{person.full_name}</span><span className="messenger-contact-role">{ROLE_LABELS[person.role]}</span></span><ArrowUpRight size={16} className="messenger-contact-arrow" /></button>)
+            : (inbox.data ?? []).filter(c => matches({ id: c.other_id, full_name: c.full_name, role: c.role })).map(c => <button key={c.id} onClick={() => choose({ id: c.other_id, full_name: c.full_name, role: c.role })} aria-current={selected?.id === c.other_id ? 'true' : undefined} className={cn('messenger-list-item', selected?.id === c.other_id && 'messenger-list-item--selected', Number(c.unread_count) > 0 && 'messenger-list-item--unread')}>
+              <Avatar name={c.full_name} /><span className="min-w-0 flex-1"><span className="messenger-list-line"><span className="messenger-contact-name">{c.full_name}</span><span className="messenger-list-date">{new Date(c.last_message_at).toDateString() === new Date().toDateString() ? time(c.last_message_at) : new Date(c.last_message_at).toLocaleDateString('pl-PL', { day: 'numeric', month: 'numeric' })}</span></span><span className="messenger-contact-role">{ROLE_LABELS[c.role]}</span><span className="messenger-list-line mt-1.5"><span className="messenger-preview">{c.last_sender_id === userId ? 'Ty: ' : ''}{c.last_body}</span>{Number(c.unread_count) > 0 && <span className="messenger-unread" aria-label={`${c.unread_count} nieprzeczytanych`}>{c.unread_count > 99 ? '99+' : c.unread_count}</span>}</span></span>
             </button>)}
           {!findPerson && inbox.data?.length === 0 && <div className="p-6 text-center text-sm text-navy-400"><p>Tu pojawią się Twoje rozmowy.</p><button onClick={() => setFindPerson(true)} className="mt-4 text-brand underline">Wybierz osobę i napisz</button></div>}
           {findPerson && contacts.data && !contacts.data.some(matches) && <p className="p-6 text-sm text-navy-400">Nie znaleziono osób.</p>}
           {!findPerson && search && inbox.data && !inbox.data.some(c => matches({ id: c.other_id, full_name: c.full_name, role: c.role })) && <div className="p-6 text-sm text-navy-400">Brak takich rozmów. <button className="text-brand underline" onClick={() => setFindPerson(true)}>Szukaj wśród osób</button></div>}
         </div>
+        <div className="messenger-sidebar-footer"><LockKeyhole size={13} />Rozmowy tylko dla uczestników</div>
       </aside>
       {currentContact ? <Conversation key={`${userId}:${currentContact.id}`} userId={userId} contact={currentContact} conversation={conversation}
         draft={drafts[currentContact.id]?.body ?? ''} requestId={drafts[currentContact.id]?.id ?? ''}
         setDraft={value => setDrafts(prev => ({ ...prev, [currentContact.id]: { body: value, id: crypto.randomUUID() } }))}
         onSent={id => setDrafts(prev => prev[currentContact.id]?.id === id ? { ...prev, [currentContact.id]: { body: '', id: '' } } : prev)}
         onBack={() => setSelected(null)} />
-        : <div className="hidden flex-1 flex-col items-center justify-center px-8 text-center md:flex"><div className="mb-5 rounded-3xl bg-brand/10 p-6"><MessageCircle size={48} className="text-brand" /></div><h2 className="text-xl font-bold text-white">Jesteście w kontakcie</h2><p className="mt-3 max-w-sm text-sm leading-relaxed text-navy-400">Wybierz rozmowę lub rozpocznij nową. Wiadomości i historię widzisz tylko Ty i Twój rozmówca.</p><button onClick={() => setFindPerson(true)} className="btn-primary mt-6 flex items-center gap-2 px-5 py-3"><Plus size={18} />Nowa rozmowa</button></div>}
+        : <div className="messenger-welcome hidden md:flex"><div className="messenger-welcome-icon"><MessageCircle size={48} strokeWidth={1.3} /></div><span className="messenger-eyebrow">BLIŻEJ ZESPOŁU</span><h2>Rozmowa zaczyna się<br />od jednej wiadomości.</h2><p>Zapytaj operatora, skontaktuj się z kierownikiem<br className="hidden lg:block" /> lub przekaż ważną informację zespołowi.</p><button onClick={() => setFindPerson(true)} className="messenger-start-button"><Plus size={18} />Nowa rozmowa</button><span className="messenger-welcome-note"><LockKeyhole size={13} />Widoczna tylko dla Ciebie i rozmówcy</span></div>}
     </div>
   </div>
 }
