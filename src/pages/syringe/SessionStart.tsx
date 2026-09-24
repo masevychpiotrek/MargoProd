@@ -7,7 +7,7 @@ import { useAuthStore } from '@/stores/authStore'
 import type { SaMachine, SaAssortment, SaOrder } from '@/types/database'
 import { useSyringeSession } from '@/hooks/useSyringeSession'
 import { useSyringeCommand } from '@/hooks/useSyringeCommand'
-import { invalidateSyringe } from '@/lib/syringeApi'
+import { closeExpiredSyringeSessions, invalidateSyringe } from '@/lib/syringeApi'
 import { syringeCurrentShift, wholeQuantity } from '@/lib/syringeMetrics'
 
 type ShiftType = 'I' | 'II' | 'III'
@@ -31,6 +31,7 @@ async function fetchOpenOrders(machineId: string, assortmentId: string) {
 }
 
 async function fetchActiveSession(machineId: string) {
+  await closeExpiredSyringeSessions(machineId)
   const r = await supabase.from('sa_sessions').select('id, operator_id, shift_type, started_at').eq('machine_id', machineId).is('ended_at', null).maybeSingle()
   if (r.error) throw r.error
   return r.data
@@ -65,7 +66,8 @@ export default function SyringeSessionStart() {
   const { data: activeSession, error: activeError, isFetching: checkingActive } = useQuery({
     queryKey: ['sa_active_session', machineId],
     queryFn: () => fetchActiveSession(machineId),
-    enabled: !!machineId
+    enabled: !!machineId,
+    refetchInterval: 10000
   })
 
   const selectedAssortment = assortments.find(a => a.id === assortmentId)

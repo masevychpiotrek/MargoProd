@@ -488,6 +488,7 @@ export interface SaOrder {
 }
 
 export interface SaSession {
+  auto_closed_at?: string | null
   production_started_at?: string | null
   id: string
   machine_id: string

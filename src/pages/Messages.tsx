@@ -6,6 +6,8 @@ import { useChatInbox } from '@/hooks/useMessenger'
 import { chatContacts, chatMarkRead, chatMessages, chatSend } from '@/lib/messenger'
 import type { ChatContact, ChatConversation } from '@/lib/messenger'
 import { cn, ROLE_LABELS } from '@/lib/utils'
+import { useSearchParams } from 'react-router-dom'
+import ChatPushSettings from '@/components/shared/ChatPushSettings'
 import './Messages.css'
 
 function initials(name: string) { return name.trim().split(/\s+/).slice(0, 2).map(s => s[0]).join('').toUpperCase() }
@@ -147,6 +149,7 @@ function Conversation({ userId, contact, conversation, draft, requestId, setDraf
 }
 
 function Messenger({ userId }: { userId: string }) {
+  const [params, setParams] = useSearchParams()
   const inbox = useChatInbox()
   const contacts = useQuery({ queryKey: ['chat', userId, 'contacts'], queryFn: chatContacts, staleTime: 30000, retry: 1 })
   const [selected, setSelected] = useState<ChatContact | null>(null)
@@ -155,6 +158,18 @@ function Messenger({ userId }: { userId: string }) {
   const [drafts, setDrafts] = useState<Record<string, { body: string; id: string }>>({})
   const conversation = inbox.data?.find(c => c.other_id === selected?.id)
   const currentContact = selected ? (contacts.data?.find(c => c.id === selected.id) ?? selected) : null
+  useEffect(() => {
+    const person = params.get('person')
+    const account = params.get('account')
+    if (!person || (account && account !== userId)) return
+    const contact = contacts.data?.find(c => c.id === person)
+    const existing = inbox.data?.find(c => c.other_id === person)
+    if (contact || existing) {
+      setSelected(contact ?? { id: existing!.other_id, full_name: existing!.full_name, role: existing!.role })
+      setFindPerson(false)
+      setParams({}, { replace: true })
+    }
+  }, [params, setParams, contacts.data, inbox.data, userId])
   const term = searchText(search)
   const matches = (person: ChatContact) => searchText(`${person.full_name} ${ROLE_LABELS[person.role]}`).includes(term)
   const unreadConversations = (inbox.data ?? []).filter(c => Number(c.unread_count) > 0).length
@@ -181,6 +196,7 @@ function Messenger({ userId }: { userId: string }) {
           {findPerson && contacts.data && !contacts.data.some(matches) && <p className="p-6 text-sm text-navy-400">Nie znaleziono osób.</p>}
           {!findPerson && search && inbox.data && !inbox.data.some(c => matches({ id: c.other_id, full_name: c.full_name, role: c.role })) && <div className="p-6 text-sm text-navy-400">Brak takich rozmów. <button className="text-brand underline" onClick={() => setFindPerson(true)}>Szukaj wśród osób</button></div>}
         </div>
+        <ChatPushSettings userId={userId} />
         <div className="messenger-sidebar-footer"><LockKeyhole size={13} />Rozmowy tylko dla uczestników</div>
       </aside>
       {currentContact ? <Conversation key={`${userId}:${currentContact.id}`} userId={userId} contact={currentContact} conversation={conversation}

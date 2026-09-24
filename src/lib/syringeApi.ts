@@ -5,7 +5,14 @@ import type { SaSession } from '@/types/database'
 export const SYRINGE_RESET_EVENT = 'margoline:syringe-reset'
 export const SYRINGE_RESET_STORAGE_KEY = 'margoline_syringe_reset_at'
 
+export async function closeExpiredSyringeSessions(machineId?: string) {
+  const { error } = await supabase.rpc('sa_close_expired_sessions', { p_machine: machineId ?? null })
+  // Keep older installations usable until migration 075 is installed.
+  if (error && error.code !== 'PGRST202') throw error
+}
+
 export async function fetchMySyringeSession(operatorId: string) {
+  await closeExpiredSyringeSessions()
   const { data, error } = await supabase.from('sa_sessions')
     .select('*, machine:sa_machines(*), assortment:sa_assortments(*), order:sa_orders(*)')
     .eq('operator_id', operatorId).is('ended_at', null).order('started_at', { ascending: false })

@@ -53,6 +53,9 @@ export function RequireAuth({ children, roles }: Props) {
 
   // Nie zalogowany
   if (!user || !profile) {
+    if (location.pathname === '/messages' && new URLSearchParams(location.search).has('account')) {
+      sessionStorage.setItem('margoline-chat-push-path', location.pathname + location.search)
+    }
     return <Navigate to="/login" state={{ from: location }} replace />
   }
 

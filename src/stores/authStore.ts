@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import type { User, Session } from '@supabase/supabase-js'
 import { supabase, logAudit } from '@/lib/supabase'
 import type { Profile, UserRole } from '@/types/database'
+import { clearLocalChatPush, disableChatPush } from '@/lib/chatPush'
 
 interface AuthState {
   user: User | null
@@ -106,6 +107,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
       authListenerSet = true
       supabase.auth.onAuthStateChange((event, session) => {
         if (event === 'SIGNED_OUT') {
+          void clearLocalChatPush().catch(() => undefined)
           set({ user: null, session: null, profile: null, isInitialized: true })
           return
         }
@@ -246,6 +248,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   signOut: async () => {
+    await disableChatPush().catch(() => undefined)
     await logAudit('logout')
     await supabase.auth.signOut({ scope: 'local' })
     set({ user: null, session: null, profile: null, isInitialized: true })

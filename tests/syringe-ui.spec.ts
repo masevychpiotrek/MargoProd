@@ -16,6 +16,9 @@ test('start, two entries, downtime, handover and next shift from zero', async ({
     const headers = { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'content-type': 'application/json' }
     if (route.request().method() === 'OPTIONS') return route.fulfill({ status: 200, headers })
     try {
+      if (url.pathname.endsWith('/rpc/sa_close_expired_sessions')) {
+        return route.fulfill({ status: 404, headers, body: JSON.stringify({ code: 'PGRST202', message: 'Migration 075 not installed in legacy fixture' }) })
+      }
       if (url.pathname.endsWith('/rpc/sa_session_command')) {
         if (rejectNext) { rejectNext = false; return route.fulfill({ status: 500, headers, body: JSON.stringify({ message: 'Test: chwilowy brak połączenia' }) }) }
         const body = route.request().postDataJSON()
@@ -178,6 +181,7 @@ test('start, two entries, downtime, handover and next shift from zero', async ({
     await expect(page.getByRole('heading', { name: 'Zgłoszenie wysłane' })).toBeVisible()
     expect((await db.query('SELECT count(*) n FROM sa_failure_reports')).rows[0].n).toBe(1)
     await go('/reports')
+    await page.getByRole('button', { name: 'Eksport danych', exact: true }).click()
     await expect(page.getByText('Braki wg kategorii', { exact: true })).toBeVisible()
     await expect(page.getByRole('button', { name: 'CSV', exact: true })).toBeEnabled()
     await page.getByRole('combobox').selectOption('I')

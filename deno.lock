@@ -1,0 +1,60 @@
+{
+  "version": "5",
+  "remote": {
+    "https://esm.sh/@supabase/supabase-js@2.43.0": "d5ae39e306d0591ab0ee66abcbb75a6259e264dc6c6c3a0f06caabba12e787f2"
+  },
+  "workspace": {
+    "packageJson": {
+      "dependencies": [
+        "npm:@electric-sql/pglite@~0.5.8",
+        "npm:@hookform/resolvers@^3.3.4",
+        "npm:@playwright/test@^1.63.0",
+        "npm:@radix-ui/react-alert-dialog@^1.0.5",
+        "npm:@radix-ui/react-avatar@^1.0.4",
+        "npm:@radix-ui/react-dialog@^1.0.5",
+        "npm:@radix-ui/react-dropdown-menu@^2.0.6",
+        "npm:@radix-ui/react-label@^2.0.2",
+        "npm:@radix-ui/react-progress@^1.0.3",
+        "npm:@radix-ui/react-select@2",
+        "npm:@radix-ui/react-separator@^1.0.3",
+        "npm:@radix-ui/react-slot@^1.0.2",
+        "npm:@radix-ui/react-tabs@^1.0.4",
+        "npm:@radix-ui/react-toast@^1.1.5",
+        "npm:@radix-ui/react-tooltip@^1.0.7",
+        "npm:@supabase/supabase-js@^2.43.0",
+        "npm:@tanstack/react-query-devtools@^5.28.0",
+        "npm:@tanstack/react-query@^5.28.0",
+        "npm:@types/node@^20.11.30",
+        "npm:@types/react-dom@^18.2.22",
+        "npm:@types/react@^18.2.66",
+        "npm:@typescript-eslint/eslint-plugin@^7.2.0",
+        "npm:@typescript-eslint/parser@^7.2.0",
+        "npm:@vitejs/plugin-react@^4.2.1",
+        "npm:autoprefixer@^10.4.19",
+        "npm:chart.js@^4.4.2",
+        "npm:class-variance-authority@0.7",
+        "npm:clsx@^2.1.0",
+        "npm:date-fns@^3.6.0",
+        "npm:eslint-plugin-react-hooks@^4.6.0",
+        "npm:eslint-plugin-react-refresh@~0.4.6",
+        "npm:eslint@^8.57.0",
+        "npm:lucide-react@0.368",
+        "npm:postcss@^8.4.38",
+        "npm:react-chartjs-2@^5.2.0",
+        "npm:react-dom@^18.2.0",
+        "npm:react-hook-form@^7.51.0",
+        "npm:react-router-dom@^6.22.3",
+        "npm:react@^18.2.0",
+        "npm:tailwind-merge@^2.2.2",
+        "npm:tailwindcss-animate@^1.0.7",
+        "npm:tailwindcss@^3.4.1",
+        "npm:typescript@^5.2.2",
+        "npm:vite-plugin-pwa@~0.19.8",
+        "npm:vite@^5.2.0",
+        "npm:web-push@^3.6.7",
+        "npm:zod@^3.22.4",
+        "npm:zustand@^4.5.2"
+      ]
+    }
+  }
+}

@@ -16,22 +16,24 @@ export default defineConfig({
         theme_color: '#0f1a2e',
         background_color: '#0f1a2e',
         display: 'standalone',
-        orientation: 'landscape',
+        id: '/',
+        start_url: '/',
+        scope: '/',
+        orientation: 'any',
         icons: [
           { src: 'pwa-192x192.png', sizes: '192x192', type: 'image/png' },
           { src: 'pwa-512x512.png', sizes: '512x512', type: 'image/png' }
         ]
       },
       workbox: {
+        importScripts: ['/chat-push-sw.js'],
         globPatterns: ['**/*.{js,css,html,ico,png,svg}'],
         runtimeCaching: [
           {
+            // Authenticated responses (including private chats) must not be
+            // served from a URL-only cache after switching accounts.
             urlPattern: /^https:\/\/.*supabase\.co\/rest/,
-            handler: 'NetworkFirst',
-            options: {
-              cacheName: 'supabase-api',
-              expiration: { maxEntries: 100, maxAgeSeconds: 300 }
-            }
+            handler: 'NetworkOnly'
           }
         ]
       }

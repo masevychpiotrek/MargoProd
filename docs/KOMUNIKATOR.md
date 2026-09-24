@@ -31,8 +31,9 @@ połączenie Realtime jest niedostępne.
   otwartej strony. Odświeżenie lub opuszczenie strony usuwa niewysłane szkice.
 - Ponowienie tej samej wysyłki po utracie odpowiedzi nie tworzy duplikatu.
 - Nieaktywne konto rozmówcy blokuje nowe wiadomości, ale historia pozostaje.
-- Wersja początkowa nie obejmuje grup, zdjęć, plików, połączeń ani powiadomień
-  systemowych po zamknięciu aplikacji.
+- Moduł nie obejmuje grup, zdjęć, plików ani połączeń.
+- Opcjonalne powiadomienia systemowe po zamknięciu aplikacji wymagają konfiguracji
+  serwera i zgody użytkownika — instrukcja w `CHAT_PUSH.md`.
 
 ## Dostęp do danych
 

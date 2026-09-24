@@ -64,6 +64,7 @@ export default function SyringeHistory() {
                     <span className="font-bold text-white">{s.machine?.name}</span>
                     <span className="text-xs px-2 py-0.5 rounded-full bg-navy-700 text-navy-300">Zmiana {s.shift_type}</span>
                     {!ended && <span className="text-xs px-2 py-0.5 rounded-full bg-green-500/20 text-green-300">Aktywna</span>}
+                    {s.auto_closed_at && <span className="text-xs px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">Zamknięta automatycznie · do sprawdzenia</span>}
                   </div>
                   <div className="text-sm text-navy-400 mt-1">
                     {new Date(s.started_at).toLocaleDateString('pl', { day: '2-digit', month: '2-digit', year: 'numeric' })} ·
