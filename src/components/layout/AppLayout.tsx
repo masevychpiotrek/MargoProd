@@ -10,6 +10,7 @@ import { isShiftSettlementAssortment } from '@/lib/syringeSettlement'
 import { AlertProvider } from '@/features/notifications/AlertProvider'
 import ProductionJobNotifications from '@/features/notifications/ProductionJobNotifications'
 import RobotAssistant from '@/components/shared/RobotAssistant'
+import MessengerLink from '@/components/shared/MessengerLink'
 import type { SaSession, Shift } from '@/types/database'
 import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 import { usePresence } from '@/hooks/usePresence'
@@ -481,6 +482,7 @@ export default function AppLayout() {
             </svg>
           </button>
           <div className="flex-1" />
+          <MessengerLink />
           <button
             type="button"
             onClick={() => setLightTheme(v => !v)}

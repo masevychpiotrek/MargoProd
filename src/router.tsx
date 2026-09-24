@@ -7,6 +7,7 @@ import LoginPage from '@/pages/Login'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { useAuthStore } from '@/stores/authStore'
 const OperatorDashboard  = lazy(() => import('@/pages/operator/Dashboard'))
+const Messages = lazy(() => import('@/pages/Messages'))
 const OperatorShift      = lazy(() => import('@/pages/operator/Shift'))
 const OperatorReport     = lazy(() => import('@/pages/operator/Report'))
 const OperatorHistory    = lazy(() => import('@/pages/operator/History'))
@@ -179,6 +180,7 @@ const router = createBrowserRouter([
     ),
     children: [
       { index: true, element: <RoleRedirect /> },
+      { path: 'messages', element: <RequireAuth roles={['operator', 'syringe_operator', 'manager', 'specialist', 'executive', 'admin']}><Wrap><Messages /></Wrap></RequireAuth> },
       { path: 'password', element: <RequireAuth><Wrap><OperatorPassword /></Wrap></RequireAuth> },
       { path: 'demo', element: <RequireAuth roles={['viewer', 'admin']}><Wrap><ViewerDemo /></Wrap></RequireAuth> },
       { path: 'executive', element: <RequireAuth roles={['executive', 'admin']}><Wrap><ExecutiveDashboard /></Wrap></RequireAuth> },

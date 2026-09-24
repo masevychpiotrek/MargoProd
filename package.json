@@ -10,7 +10,9 @@
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",
     "test:syringe": "node --test tests/syringe-*.test.mjs",
-    "test:syringe:ui": "playwright test --config tests/syringe.playwright.config.ts"
+    "test:syringe:ui": "playwright test --config tests/syringe.playwright.config.ts",
+    "test:messenger": "node --test --test-isolation=none tests/messenger.test.mjs",
+    "test:messenger:ui": "playwright test --config tests/messenger.playwright.config.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.3.4",
