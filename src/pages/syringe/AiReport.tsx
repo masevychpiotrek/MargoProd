@@ -10,6 +10,7 @@ import type { SaMachine, ShiftType } from '@/types/database'
 const SHIFTS: ShiftType[] = ['I', 'II']
 
 type ShiftSummary = {
+  manual?: boolean
   good: number; reject: number; sessions: number
   runtime: number; downtime: number
   target: number | null; rejectTargetPct: number | null
@@ -24,6 +25,8 @@ type LineDayRow = ReturnType<typeof syringeReportLine> & {
 }
 
 type ShiftEvent = { machine: string; hour: string; text: string; operator: string }
+
+type ReportDraft = { good?: string; reject?: string; notes?: string }
 
 type SessionRow = {
   id: string; machine_id: string; shift_type: ShiftType; session_date: string
@@ -111,7 +114,7 @@ function buildEmailHtml(params: {
     return `style="background:${bg};border:1px solid ${br};padding:10px 14px;color:${tx};${F};vertical-align:middle;${extra}"`
   }
   function fmtCell(s: ShiftSummary) {
-    if (!s.good && !s.sessions) return `<span style="color:${K.gray3};font-size:11px;${F}">Zmiana nieprodukcyjna</span><br><span style="color:${K.gray4};font-size:10px;${F}">brak sesji w systemie</span>`
+    if (!s.good && !s.reject && !s.sessions && !s.manual) return `<span style="color:${K.gray3};font-size:11px;${F}">Zmiana nieprodukcyjna</span><br><span style="color:${K.gray4};font-size:10px;${F}">brak sesji w systemie</span>`
     const rawRejectPct = rejectPercent(s.good, s.reject)
     const rj = rawRejectPct.toFixed(1)
     const rjColor = rawRejectPct > 5 ? K.red : rawRejectPct > 2 ? K.amber : K.green
@@ -203,7 +206,7 @@ ${machineRows}
     const tmp = document.createElement('div')
     tmp.innerHTML = html
     function cn2(node: ChildNode, mc: string): string {
-      if (node.nodeType === 3) return (node as Text).textContent || ''
+      if (node.nodeType === 3) return escapeHtml((node as Text).textContent || '')
       if (node.nodeType !== 1) return ''
       const el = node as Element
       const tag = el.tagName.toLowerCase()
@@ -806,6 +809,14 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [modalState, setModalState] = useState<'closed' | 'apikey' | 'report'>('closed')
+  const [drafts, setDrafts] = useState<Record<string, ReportDraft>>({})
+  const draftKey = (machineId: string, shift: ShiftType) => `${date}/${machineId}/${shift}`
+  function updateDraft(machineId: string, shift: ShiftType, field: keyof ReportDraft, value: string) {
+    const key = draftKey(machineId, shift)
+    setDrafts(prev => ({ ...prev, [key]: { ...prev[key], [field]: value } }))
+  }
+  const invalidResults = Object.entries(drafts).some(([key, draft]) => key.startsWith(`${date}/`) &&
+    [draft.good, draft.reject].some(value => value !== undefined && value !== '' && (!/^\d+$/.test(value) || !Number.isSafeInteger(Number(value)))))
 
   const loadSeq = useRef(0)
 
@@ -942,13 +953,24 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
       row.total = emptySummary()
       SHIFTS.forEach(shiftType => {
         const s = row.shifts[shiftType]
+        const draft = drafts[`${date}/${row.machineId}/${shiftType}`]
+        if (draft) {
+          for (const field of ['good', 'reject'] as const) {
+            const value = draft[field]
+            if (value !== undefined && value !== '' && /^\d+$/.test(value) && Number.isSafeInteger(Number(value))) {
+              s[field] = Number(value)
+              s.manual = true
+            }
+          }
+          if (draft.notes?.trim()) s.notes.push(draft.notes.trim())
+        }
         row.total.good += s.good; row.total.reject += s.reject; row.total.sessions += s.sessions
         row.total.runtime += s.runtime; row.total.downtime += s.downtime
         row.total.target = (row.total.target ?? 0) + (s.target ?? 0)
       })
     })
     return Array.from(byMachine.values()).sort(compareSyringeReportLines)
-  }, [machines, sessions])
+  }, [machines, sessions, drafts, date])
 
   const totals = useMemo(() => rows.reduce((acc, row) => {
     acc.good += row.total.good; acc.reject += row.total.reject; acc.sessions += row.total.sessions
@@ -968,11 +990,16 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
   const eventsByShift = useMemo(() => {
     const result: Record<ShiftType, ShiftEvent[]> = { I: [], II: [], III: [] }
     entryEvents.forEach(e => { result[e.shift].push({ machine: e.machine, hour: e.hour, text: e.text, operator: e.operator }) })
+    rows.forEach(row => SHIFTS.forEach(shift => {
+      const notes = drafts[`${date}/${row.machineId}/${shift}`]?.notes?.trim()
+      if (notes) result[shift].push({ machine: row.machineName, hour: 'opis zmiany', text: notes, operator: 'autor raportu' })
+    }))
     SHIFTS.forEach(s => result[s].sort((a, b) => a.hour.localeCompare(b.hour)))
     return result
-  }, [entryEvents])
+  }, [entryEvents, rows, drafts, date])
 
   function handleGenerateClick() {
+    if (loading || error || invalidResults) return
     const hasKey = !!localStorage.getItem('margoline_api_key')
     setModalState(hasKey ? 'report' : 'apikey')
   }
@@ -1005,7 +1032,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
             <input className="input w-[170px]" type="date" value={date} onChange={e => setDate(e.target.value)} />
             <button className="btn-secondary text-xs py-2 px-3" onClick={() => setDate(addDays(date, 1))}>Następny →</button>
             <button className="btn-secondary text-xs py-2 px-3" onClick={load}>{loading ? '...' : 'Odśwież'}</button>
-            <button onClick={handleGenerateClick} disabled={loading || !canGenerate} className="btn-primary text-xs py-2 px-4 flex items-center gap-2 disabled:opacity-40">
+            <button onClick={handleGenerateClick} disabled={loading || !!error || invalidResults || !canGenerate} className="btn-primary text-xs py-2 px-4 flex items-center gap-2 disabled:opacity-40">
               <svg width="14" height="14" viewBox="0 0 22 22" fill="none">
                 <rect x="2" y="4" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="1.5" />
                 <path d="M2 7l9 6 9-6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
@@ -1046,7 +1073,7 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
                     const rj = (sm.good + sm.reject) > 0 ? (sm.reject / (sm.good + sm.reject) * 100).toFixed(1) : null
                     return (
                       <td key={s} className="px-4 py-3 text-center">
-                        {sm.sessions === 0 ? <span className="text-navy-600 text-xs">brak sesji</span> : (
+                        {sm.sessions === 0 && !sm.manual ? <span className="text-navy-600 text-xs">brak sesji</span> : (
                           <>
                             <div className="text-white font-bold">{pieces(sm.good)}</div>
                             <div className="text-xs text-red-400">odrz. {pieces(sm.reject)}{rj ? ` (${rj}%)` : ''}</div>
@@ -1062,6 +1089,37 @@ export default function SyringeAiReport({ embedded = false }: { embedded?: boole
             </tbody>
           </table>
         </div>
+        <section className="rounded-2xl border border-navy-700 bg-navy-800 p-4 space-y-4">
+          <div>
+            <h2 className="font-bold text-white">Uzupełnij wyniki i przebieg zmiany</h2>
+            <p className="text-sm text-navy-400 mt-1">Wpisz końcowe wyniki dla każdej linii. Wypełnione liczby zastąpią wartości z systemu w tym raporcie; puste pola pozostawią je bez zmian. Opis zostanie dołączony do przebiegu zmiany. Wpisy są zachowane do zamknięcia lub przeładowania strony i nie zmieniają zapisów produkcyjnych.</p>
+          </div>
+          {invalidResults && <p role="alert" className="text-sm text-red-400">Produkcja i braki muszą być nieujemnymi liczbami całkowitymi.</p>}
+          {!loading && !error && rows.map(row => (
+            <div key={row.machineId} className="rounded-xl border border-navy-600 p-4 space-y-3">
+              <h3 className="font-bold text-white">{row.productLabel} — {row.machineName}</h3>
+              <div className="grid gap-4 md:grid-cols-2">
+                {SHIFTS.map(shift => {
+                  const draft = drafts[draftKey(row.machineId, shift)] ?? {}
+                  const summary = row.shifts[shift]
+                  return <fieldset key={shift} className="space-y-3 min-w-0">
+                    <legend className="text-sm font-bold text-brand">Zmiana {shift}</legend>
+                    <div className="grid grid-cols-2 gap-2">
+                      {(['good', 'reject'] as const).map(field => <label key={field} className="text-xs text-navy-300">
+                        {field === 'good' ? 'Produkcja dobra (szt.)' : 'Braki (szt.)'}
+                        <input className="input mt-1 w-full" type="text" inputMode="numeric" placeholder={String(summary[field])} value={draft[field] ?? ''} onChange={e => updateDraft(row.machineId, shift, field, e.target.value)} />
+                      </label>)}
+                    </div>
+                    <label className="block text-xs text-navy-300">Przebieg zmiany
+                      <textarea className="input mt-1 w-full" rows={4} placeholder="Opisz przebieg zmiany, postoje, awarie i podjęte działania…" value={draft.notes ?? ''} onChange={e => updateDraft(row.machineId, shift, 'notes', e.target.value)} />
+                    </label>
+                  </fieldset>
+                })}
+              </div>
+            </div>
+          ))}
+          <button onClick={handleGenerateClick} disabled={loading || !!error || invalidResults || !canGenerate} className="btn-primary disabled:opacity-40">Generuj email z uzupełnionymi danymi</button>
+        </section>
       </div>
     </>
   )
