@@ -10,7 +10,9 @@ WITH links AS (
 SELECT l.source, l.id, m.name line, m.volume_ml line_ml, a.name assortment, a.volume_ml assortment_ml
 FROM links l LEFT JOIN public.sa_machines m ON m.id = l.machine_id
 LEFT JOIN public.sa_assortments a ON a.id = l.assortment_id
-WHERE m.volume_ml IS NULL OR a.volume_ml IS NULL OR m.volume_ml <> a.volume_ml;
+WHERE m.volume_ml IS NULL OR a.volume_ml IS NULL OR m.volume_ml <> CASE
+  WHEN a.volume_ml = 60 AND a.code IN ('SYR_50ML', 'SYR_50ML_STANDARD') THEN 50
+  ELSE a.volume_ml END;
 
 SELECT id, code, name FROM public.sa_machines
 WHERE is_active AND deleted_at IS NULL AND volume_ml IS NULL;
