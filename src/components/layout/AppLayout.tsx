@@ -58,7 +58,7 @@ const NAV_OPERATOR = [
 const NAV_MANAGER = [
   { to: '/manager',              label: 'Produkcja',        icon: Icons.live,    end: true },
   { to: '/manager/monthly',      label: 'Realizacja mies.', icon: Icons.plan },
-  { to: '/manager/operators',    label: 'Ranking operatorow', icon: Icons.users },
+  { to: '/manager/operators',    label: 'Operatorzy i wyniki', icon: Icons.users },
   { to: '/manager/forecast',     label: 'Prognoza dnia',    icon: Icons.dashboard },
   { to: '/manager/day-report',   label: 'Raport dnia',      icon: Icons.report },
   { to: '/manager/period-report', label: 'Raport zbiorczy',  icon: Icons.report },
@@ -91,6 +91,7 @@ const NAV_VIEWER = [
 
 
 const NAV_EXECUTIVE = [
+  { to: '/manager/operators',    label: 'Operatorzy i wyniki', icon: Icons.users },
   { to: '/executive',            label: 'Podsumowanie',     icon: Icons.dashboard, end: true },
   { to: '/executive/charts',     label: 'Wykresy',          icon: Icons.live },
   { to: '/executive/machines',   label: 'Automaty',         icon: Icons.machines },
