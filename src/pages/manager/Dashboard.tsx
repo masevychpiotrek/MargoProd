@@ -1330,8 +1330,6 @@ export default function ManagerDashboard() {
         borderColor: '#38BDF8',
         backgroundColor: 'rgba(31,111,155,0.10)',
         tension: 0,
-        stepped: 'after' as const,
-        borderDash: [6, 4],
         pointRadius: 0,
         borderWidth: 2
       },
@@ -1341,7 +1339,6 @@ export default function ManagerDashboard() {
         borderColor: '#FBBF24',
         backgroundColor: 'rgba(249,115,22,0.10)',
         tension: 0,
-        stepped: 'after' as const,
         pointRadius: 2,
         pointHoverRadius: 6,
         borderWidth: 3,
@@ -1354,7 +1351,6 @@ export default function ManagerDashboard() {
         backgroundColor: 'rgba(22,163,74,0.10)',
         borderDash: [8, 4],
         tension: 0,
-        stepped: 'after' as const,
         pointRadius: 0,
         borderWidth: 2,
         spanGaps: false
