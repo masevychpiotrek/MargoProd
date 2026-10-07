@@ -61,18 +61,30 @@ const PERCENT_CHART_OPTS = {
 const MONTHLY_PERCENT_CHART_OPTS = {
   responsive: true,
   maintainAspectRatio: false,
-  plugins: { legend: { labels: { color: '#8892AA', font: { size: 11 }, boxWidth: 12 } } },
+  interaction: { mode: 'index' as const, intersect: false },
+  plugins: {
+    legend: { position: 'bottom' as const, labels: { color: '#94A3B8', padding: 20, font: { size: 12 }, usePointStyle: true, boxWidth: 10 } },
+    tooltip: {
+      padding: 12,
+      callbacks: {
+        title: (items: { label: string }[]) => `Dzień ${items[0]?.label ?? ''}`,
+        label: (item: { dataset: { label?: string }; parsed: { y: number | null } }) => `${item.dataset.label}: ${(item.parsed.y ?? 0).toLocaleString('pl-PL')}%`
+      }
+    }
+  },
   scales: {
     y: {
       beginAtZero: true,
-      max: 120,
-      grid: { color: 'rgba(255,255,255,0.06)' },
-      ticks: {
-        color: '#7B89A8',
-        callback: (value: string | number) => `${Number(value).toFixed(0)}%`
-      }
+      suggestedMax: 100,
+      title: { display: true, text: 'Realizacja planu [%]', color: '#94A3B8' },
+      grid: { color: 'rgba(148,163,184,0.12)' },
+      ticks: { color: '#94A3B8', stepSize: 20, callback: (value: string | number) => `${Number(value).toFixed(0)}%` }
     },
-    x: { grid: { display: false }, ticks: { color: '#7B89A8', maxRotation: 55, minRotation: 55 } }
+    x: {
+      title: { display: true, text: 'Dzień miesiąca', color: '#94A3B8' },
+      grid: { display: false },
+      ticks: { color: '#94A3B8', maxRotation: 0, minRotation: 0, maxTicksLimit: 11 }
+    }
   }
 }
 
@@ -1313,30 +1325,32 @@ export default function ManagerDashboard() {
     labels: monthlyPlan.points.map(point => point.label),
     datasets: [
       {
-        label: 'Plan idealny',
+        label: 'Plan narastająco',
         data: monthlyPlan.points.map(point => point.planPct),
-        borderColor: '#1F6F9B',
+        borderColor: '#38BDF8',
         backgroundColor: 'rgba(31,111,155,0.10)',
         tension: 0,
         stepped: 'after' as const,
-        pointRadius: 2,
+        borderDash: [6, 4],
+        pointRadius: 0,
         borderWidth: 2
       },
       {
-        label: 'Plan faktyczny',
+        label: 'Realizacja narastająco',
         data: monthlyPlan.points.map(point => point.actualPct),
-        borderColor: '#F97316',
+        borderColor: '#FBBF24',
         backgroundColor: 'rgba(249,115,22,0.10)',
         tension: 0,
         stepped: 'after' as const,
-        pointRadius: 3,
-        borderWidth: 2,
+        pointRadius: 2,
+        pointHoverRadius: 6,
+        borderWidth: 3,
         spanGaps: false
       },
       ...(monthlyPlan.previousHasData ? [{
         label: `Realizacja ${monthlyPlan.previousLabel}`,
         data: monthlyPlan.points.map(point => point.previousPct),
-        borderColor: '#16A34A',
+        borderColor: '#A78BFA',
         backgroundColor: 'rgba(22,163,74,0.10)',
         borderDash: [8, 4],
         tension: 0,
@@ -1789,8 +1803,8 @@ export default function ManagerDashboard() {
         <div className="card border-brand/20">
           <div className="card-header">
             <div>
-              <div className="card-title">Realizacja miesiaca</div>
-              <div className="card-sub">Wykres procentowy: plan idealny, plan faktyczny i porownanie poprzedniego miesiaca.</div>
+              <div className="card-title">Realizacja miesiąca</div>
+              <div className="card-sub">Postęp narastająco względem celu miesiąca. Najedź na wykres, aby porównać wyniki dnia.</div>
             </div>
             <div className="flex flex-wrap items-end gap-2">
               <label className="block w-28">
@@ -1817,45 +1831,26 @@ export default function ManagerDashboard() {
             </div>
           )}
 
-          <div className="grid gap-4 xl:grid-cols-[360px_1fr]">
-            <div className="overflow-hidden rounded-xl border border-navy-700">
-              <table className="w-full text-xs">
-                <thead className="bg-green-800 text-white">
-                  <tr>
-                    {['Data', 'Plan [%]', 'Realizacja [%]', 'Plan [szt]', 'Realizacja [szt]'].map(header => (
-                      <th key={header} className="px-2 py-2 text-left font-black">{header}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {monthlyPlan.points.map(point => (
-                    <tr key={point.date} className={cn('border-b border-navy-800', point.label.includes('W') ? 'bg-navy-800/70' : 'bg-navy-900')}>
-                      <td className="px-2 py-1.5 font-mono font-bold text-white">{point.label}</td>
-                      <td className="px-2 py-1.5 font-mono text-green-300">{point.planPct.toLocaleString('pl-PL')}%</td>
-                      <td className="px-2 py-1.5 font-mono text-amber-200">{point.actualPct == null ? '-' : `${point.actualPct.toLocaleString('pl-PL')}%`}</td>
-                      <td className="px-2 py-1.5 font-mono text-blue-200">{point.plan ? point.plan.toLocaleString('pl-PL') : '-'}</td>
-                      <td className="px-2 py-1.5 font-mono text-white">{point.actual == null ? '-' : point.actual.toLocaleString('pl-PL')}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="rounded-xl border border-navy-700 bg-navy-900 p-4">
-              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                {[
-                  { label: 'Cel miesiaca', value: monthlyTarget ? `${monthlyTarget.toLocaleString('pl-PL')} szt` : '-', color: 'text-brand' },
-                  { label: 'Jest teraz', value: `${monthlyPlan.actual.toLocaleString('pl-PL')} szt`, color: efficiencyColor(monthlyPlan.realization) },
-                  { label: 'Powinno byc', value: monthlyTarget ? `${monthlyPlan.expectedToday.toLocaleString('pl-PL')} szt` : '-', color: 'text-amber-300' },
-                  { label: 'Do konca', value: monthlyTarget ? `${monthlyPlan.remaining.toLocaleString('pl-PL')} szt` : '-', color: monthlyPlan.remaining ? 'text-cyan-300' : 'text-green-400' }
-                ].map(item => (
-                  <div key={item.label} className="rounded-xl border border-navy-700 bg-navy-800 p-3">
-                    <div className="text-xs font-bold uppercase tracking-wider text-navy-500">{item.label}</div>
-                    <div className={cn('mt-1 font-mono text-lg font-black', item.color)}>{loading ? '...' : item.value}</div>
-                  </div>
-                ))}
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+            {[
+              { label: 'Cel miesiaca', value: monthlyTarget ? `${monthlyTarget.toLocaleString('pl-PL')} szt` : '-', color: 'text-brand' },
+              { label: 'Jest teraz', value: `${monthlyPlan.actual.toLocaleString('pl-PL')} szt`, color: efficiencyColor(monthlyPlan.realization) },
+              { label: 'Powinno byc', value: monthlyTarget ? `${monthlyPlan.expectedToday.toLocaleString('pl-PL')} szt` : '-', color: 'text-amber-300' },
+              { label: 'Do konca', value: monthlyTarget ? `${monthlyPlan.remaining.toLocaleString('pl-PL')} szt` : '-', color: monthlyPlan.remaining ? 'text-cyan-300' : 'text-green-400' }
+            ].map(item => (
+              <div key={item.label} className="rounded-xl border border-navy-700 bg-navy-800 p-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-navy-500">{item.label}</div>
+                <div className={cn('mt-1 font-mono text-lg font-black', item.color)}>{loading ? '...' : item.value}</div>
               </div>
-              <div className="mt-5 h-[520px]">
+            ))}
+          </div>
+          <div className="mt-4 grid min-w-0 gap-4 lg:grid-cols-[minmax(0,1fr)_minmax(380px,0.8fr)]">
+            <div className="min-w-0 rounded-xl border border-navy-700 bg-navy-900 p-4 sm:p-5">
+              <div className="mb-4 flex flex-wrap items-center justify-between gap-2">
+                <div className="text-sm font-bold text-white">Postęp realizacji planu</div>
+                <span className="rounded-full bg-amber-400/10 px-3 py-1 text-sm font-bold text-amber-300">{monthlyTarget > 0 ? `${monthlyPlan.realization}% celu` : 'Brak planu'}</span>
+              </div>
+              <div className="h-[380px] sm:h-[440px]">
                 {monthlyTarget > 0
                   ? <Line data={monthlyLineChart} options={MONTHLY_PERCENT_CHART_OPTS as never} />
                   : <div className="flex h-full items-center justify-center text-sm text-navy-500">Wpisz plan miesieczny i zapisz, zeby zobaczyc wykres procentowy.</div>}
@@ -1865,6 +1860,28 @@ export default function ManagerDashboard() {
                   Realizacja poprzedniego miesiaca ({monthlyPlan.previousLabel}): brak danych.
                 </div>
               )}
+            </div>
+            <div className="max-h-[540px] overflow-auto rounded-xl border border-navy-700">
+              <table className="w-full text-xs tabular-nums whitespace-nowrap">
+                <thead className="sticky top-0 z-10 bg-navy-800 text-navy-300">
+                  <tr>
+                    {['Data', 'Plan [%]', 'Realizacja [%]', 'Plan [szt]', 'Realizacja [szt]'].map(header => (
+                      <th key={header} className="px-3 py-3 text-right font-semibold first:text-left">{header}</th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {monthlyPlan.points.map(point => (
+                    <tr key={point.date} className={cn('border-b border-navy-800', point.label.includes('W') ? 'bg-navy-800/70' : 'bg-navy-900')}>
+                      <td className="px-3 py-2.5 text-left font-mono font-bold text-white">{point.label}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-sky-300">{point.planPct.toLocaleString('pl-PL')}%</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-amber-200">{point.actualPct == null ? '-' : `${point.actualPct.toLocaleString('pl-PL')}%`}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-sky-300">{point.plan ? point.plan.toLocaleString('pl-PL') : '-'}</td>
+                      <td className="px-3 py-2.5 text-right font-mono text-white">{point.actual == null ? '-' : point.actual.toLocaleString('pl-PL')}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
         </div>
