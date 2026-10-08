@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { rejectPercent, syringeProductionDate } from '@/lib/syringeMetrics'
 import { compareSyringeReportLines, syringeReportLine } from '@/lib/syringeReportLayout'
 import { cn } from '@/lib/utils'
+import { includeSyringeEmailShift, requiresSyringeIdleReason } from '@/lib/syringeEmailPolicy'
 import type { SaMachine, ShiftType } from '@/types/database'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
@@ -70,7 +71,7 @@ function safePolishedText(original: string, candidate: string | undefined) {
   return cleaned
 }
 
-// ─── Email HTML builder (identyczny styl co Raport dnia — IS PRO) ────────────
+// ─── Email HTML builder — raport linii strzykawkowych ────────────
 
 function buildEmailHtml(params: {
   date: string
@@ -101,19 +102,18 @@ function buildEmailHtml(params: {
   const generatedAt = new Date().toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
   const F = 'font-family:Arial,Helvetica,sans-serif'
   const emailPalette = [
-    { bg: K.blueLt, br: K.blueBr, tx: K.blueTx, ac: K.blue },
-    { bg: K.tealLt, br: K.tealBr, tx: K.tealTx, ac: K.teal },
-    { bg: '#FFF7ED', br: '#FED7AA', tx: '#7C2D12', ac: '#EA580C' },
-    { bg: '#F5F3FF', br: '#DDD6FE', tx: '#4C1D95', ac: '#7C3AED' },
+    { bg: K.white, br: K.gray2, tx: K.navy, ac: K.blue },
+    { bg: K.gray1, br: K.gray2, tx: K.navy, ac: K.blue },
   ]
 
   function TH(extra = '') {
-    return `style="background:${K.navy};color:#fff;padding:10px 14px;font-size:11px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;${F};${extra}"`
+    return `style="background:${K.navy};color:#fff;padding:14px 16px;font-size:11px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;${F};${extra}"`
   }
   function TD(bg: string, br: string, tx: string, extra = '') {
-    return `style="background:${bg};border:1px solid ${br};padding:10px 14px;color:${tx};${F};vertical-align:middle;${extra}"`
+    return `style="background:${bg};border:1px solid ${br};padding:16px;color:${tx};${F};vertical-align:middle;${extra}"`
   }
-  function fmtCell(s: ShiftSummary) {
+  function fmtCell(s: ShiftSummary, shift?: ShiftType) {
+    if (shift && !includeSyringeEmailShift(shift, s)) return ''
     if (!s.good && !s.reject && !s.sessions && !s.manual) return `<span style="color:${K.gray3};font-size:11px;${F}">Zmiana nieprodukcyjna</span><br><span style="color:${K.gray4};font-size:10px;${F}">brak sesji w systemie</span>`
     const rawRejectPct = rejectPercent(s.good, s.reject)
     const rj = rawRejectPct.toFixed(1)
@@ -141,33 +141,33 @@ function buildEmailHtml(params: {
     const cells = kpis.map(k =>
       `<td width="25%" style="padding:0 5px 0 0;vertical-align:top">
         <table width="100%" cellpadding="0" cellspacing="0" border="0">
-          <tr><td style="background:${K.gray1};border:1px solid ${K.gray2};border-top:3px solid ${k.color};padding:12px 14px;${F}">
+          <tr><td style="background:${K.gray1};border:1px solid ${K.gray2};border-radius:12px;border-top:3px solid ${k.color};padding:18px 14px;${F}">
             <p style="margin:0 0 4px;font-size:10px;font-weight:bold;color:${K.gray3};text-transform:uppercase;letter-spacing:.5px;${F}">${k.label}</p>
-            <p style="margin:0 0 2px;font-size:18px;font-weight:bold;color:${k.color};${F}">${k.value}</p>
+            <p style="margin:0 0 2px;font-size:23px;font-weight:bold;color:${k.color};${F}">${k.value}</p>
             <p style="margin:0;font-size:10px;color:${K.gray4};${F}">${k.sub}</p>
           </td></tr>
         </table>
       </td>`
     ).join('')
-    return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:22px"><tr>${cells}<td style="padding:0"></td></tr></table>`
+    return `<table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-kpis" style="margin-bottom:28px"><tr>${cells}</tr></table>`
   }
 
   const machineRows = rows.map((row, idx) => {
     const pal = emailPalette[idx % emailPalette.length]
     const categoryHeader = idx === 0 || rows[idx - 1].category !== row.category
-      ? `<tr><td colspan="4" style="background:${K.navyMid};color:#fff;padding:12px 14px;font-weight:bold;font-size:13px;${F}">${escapeHtml(row.category)}</td></tr>` : ''
+      ? `<tr><td colspan="4" style="background:#EAF0F8;color:${K.navy};padding:13px 16px;font-weight:bold;font-size:13px;${F}">${escapeHtml(row.category)}</td></tr>` : ''
     return `${categoryHeader}<tr>
   <td ${TD(pal.bg, pal.br, pal.tx, `font-weight:bold;font-size:13px`)}>${escapeHtml(row.productLabel)}<br><span style="font-size:10px;font-weight:normal">${escapeHtml(row.machineName)}</span></td>
   <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.I)}</td>
-  <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.II)}</td>
-  <td align="center" style="background:${pal.ac};border:1px solid ${pal.ac};padding:10px 14px;color:#fff;font-weight:bold;font-size:16px;${F};text-align:center;vertical-align:middle">
+  <td align="center" ${TD(pal.bg, pal.br, pal.tx)}>${fmtCell(row.shifts.II, 'II')}</td>
+  <td align="center" style="background:${K.blueLt};border:1px solid ${K.gray2};padding:16px;color:${K.blueTx};font-weight:bold;font-size:16px;${F};text-align:center;vertical-align:middle">
     ${pieces(row.total.good)}<br><span style="font-size:10px;font-weight:normal;opacity:.85">szt.</span>
   </td>
 </tr>`
   }).join('\n')
 
   const prodTable = `
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;${F}">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-production" style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:14px;${F}">
 <thead><tr>
   <th width="28%" align="left" ${TH()}>Linia</th>
   <th width="22%" align="center" ${TH('text-align:center')}>Zmiana I</th>
@@ -183,8 +183,8 @@ ${machineRows}
     <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.I.reject)}</span>
   </td>
   <td align="center" ${TD(K.gray1, K.gray2, K.navy)}>
-    <strong style="font-size:14px">${pieces(shiftTotals.II.good)}</strong><br>
-    <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.II.reject)}</span>
+    ${shiftTotals.II.good + shiftTotals.II.reject > 0 ? `<strong style="font-size:14px">${pieces(shiftTotals.II.good)}</strong><br>
+    <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.II.reject)}</span>` : ''}
   </td>
   <td align="center" style="background:${K.blue};border:1px solid ${K.blue};padding:10px 14px;color:#fff;font-weight:bold;font-size:17px;${F};text-align:center">
     ${pieces(tt)}<br><span style="font-size:10px;font-weight:normal;opacity:.85">szt.</span>
@@ -214,14 +214,12 @@ ${machineRows}
       const curMC = cls.includes('mc-box') ? (cls.includes('m3') ? 'm3' : 'm4') : mc
       const kids = () => Array.from(el.childNodes).map(c => cn2(c, curMC)).join('')
       if (cls.includes('shift-bar')) {
-        const sc = cls.includes('s1') ? 's1' : cls.includes('s2') ? 's2' : 's3'
-        const cfg = { s1: { bg: K.s1bg, tx: K.s1tx, ac: K.s1ac }, s2: { bg: K.s2bg, tx: K.s2tx, ac: K.s2ac }, s3: { bg: K.s3bg, tx: K.s3tx, ac: K.s3ac } }[sc]
-        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 10px"><tr><td style="background:${cfg.bg};border:1px solid ${cfg.ac};border-left:5px solid ${cfg.ac};padding:10px 18px;${F}"><span style="font-size:13px;font-weight:bold;color:${cfg.tx};${F};text-transform:uppercase;letter-spacing:.4px">${kids()}</span></td></tr></table>`
+        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 10px"><tr><td style="background:${K.navy};border-radius:8px;padding:14px 18px;${F}"><span style="font-size:13px;font-weight:bold;color:${K.white};${F};text-transform:uppercase;letter-spacing:.4px">${kids()}</span></td></tr></table>`
       }
       if (cls.includes('mc-box')) {
         const isM3 = cls.includes('m3')
-        const bg = isM3 ? K.blueLt : K.tealLt, br = isM3 ? K.blueBr : K.tealBr, ac = isM3 ? K.blue : K.teal
-        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:12px"><tr><td style="background:${bg};border:1px solid ${br};border-left:4px solid ${ac};padding:14px 18px;${F}">${kids()}</td></tr></table>`
+        const br = isM3 ? K.blueBr : K.tealBr, ac = isM3 ? K.blue : K.teal
+        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin-bottom:12px"><tr><td style="background:${K.white};border:1px solid ${br};border-radius:10px;border-left:4px solid ${ac};padding:18px 20px;${F}">${kids()}</td></tr></table>`
       }
       if (cls.includes('mc-name')) {
         const ac = curMC === 'm3' ? K.blue : K.teal
@@ -248,20 +246,21 @@ ${machineRows}
 
   const emailShifts = convertShiftsToEmail(shiftsHtml)
 
-  return `<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>
-<body style="${F};color:${K.navy};margin:0;padding:0;background:#ffffff">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#ffffff"><tr><td style="padding:0">
-<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:${K.white};border-bottom:1px solid ${K.gray2}">
+  return `<!DOCTYPE html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<style>@media only screen and (max-width:600px){.email-shell{padding:8px!important}.email-content{padding:20px 12px!important}.email-header{padding:24px 16px!important}.email-brand{display:none!important}th,td{word-break:normal} .email-kpis>tbody>tr>td{display:inline-block;width:50%!important;box-sizing:border-box;padding:0 4px 8px 0!important}.email-kpis p{font-size:12px!important}.email-kpis p:nth-child(2){font-size:20px!important}.email-production th,.email-production td{padding:10px 6px!important}}</style></head>
+<body style="${F};color:${K.navy};margin:0;padding:0;background:#EDF2F7">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#EDF2F7"><tr><td class="email-shell" align="center" style="padding:32px 16px">
+<table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-container" style="max-width:900px;background:${K.white};border:1px solid ${K.gray2};border-radius:16px;overflow:hidden;text-align:left">
 
   <!-- HEADER -->
-  <tr><td style="background:#1E3A5F;padding:0">
+  <tr><td style="background:${K.navy};border-bottom:4px solid #C9A84C;padding:0">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
-      <td style="padding:18px 28px;vertical-align:middle">
+      <td class="email-header" style="padding:32px;vertical-align:middle">
         <p style="margin:0;font-size:10px;font-weight:bold;color:#93C5FD;text-transform:uppercase;letter-spacing:1.2px;${F}">Margomed S.A.</p>
-        <p style="margin:4px 0 0;font-size:17px;font-weight:bold;color:#fff;${F}">Linie strzykawkowe</p>
+        <p style="margin:4px 0 0;font-size:28px;font-weight:bold;color:#fff;${F}">Linie strzykawkowe</p>
         <p style="margin:4px 0 0;font-size:12px;color:#BAD4F5;${F}">Raport produkcyjny &bull; ${dateLong}</p>
       </td>
-      <td align="right" style="padding:18px 28px;vertical-align:middle;white-space:nowrap">
+      <td class="email-brand" align="right" style="padding:24px;vertical-align:middle;white-space:nowrap">
         <table cellpadding="0" cellspacing="0" border="0"><tr>
           <td width="34" height="34" align="center" valign="middle" style="background:#0F172A;border:1px solid #C9A84C;color:#C9A84C;font-size:11px;font-weight:bold;${F}">ML</td>
           <td style="padding-left:8px;text-align:left">
@@ -274,11 +273,11 @@ ${machineRows}
   </td></tr>
 
   <!-- BODY -->
-  <tr><td style="padding:24px 28px 32px">
+  <tr><td class="email-content" style="padding:32px">
 
     <p style="margin:0 0 20px;font-size:14px;line-height:1.9;color:${K.navy};${F}">
       Szanowni Pa&#324;stwo,<br>
-      W za&#322;&#261;czeniu przekazuj&#281; raport z wynik&#243;w produkcyjnych oraz zestawienie kluczowych zdarze&#324; na liniach strzykawkowych z dnia <strong>${dateFormatted}&nbsp;r.</strong>
+      Przekazuj&#281; podsumowanie wynik&#243;w produkcyjnych i kluczowych zdarze&#324; na liniach strzykawkowych z dnia <strong>${dateFormatted}&nbsp;r.</strong>
     </p>
 
     ${buildKpiBanner()}
@@ -319,7 +318,7 @@ ${machineRows}
   </td></tr>
 
   <!-- FOOTER -->
-  <tr><td style="background:${K.gray1};border-top:1px solid ${K.gray2};padding:12px 28px">
+  <tr><td style="background:${K.gray1};border-top:1px solid ${K.gray2};padding:18px 32px">
     <p style="margin:0;font-size:10px;color:${K.gray4};${F}">Wygenerowano automatycznie przez system MargoLine &bull; ${generatedAt} &bull; Dane za dzie&#324; ${dateFormatted}</p>
   </td></tr>
 
@@ -331,7 +330,7 @@ ${machineRows}
 // ─── Fallback bez AI (surowe zdarzenia w tym samym formacie HTML) ─────────────
 
 function buildSystemReportHtml(eventsByShift: Record<ShiftType, ShiftEvent[]>, shiftTotals: Record<ShiftType, ShiftSummary>, rows: LineDayRow[]): string {
-  return SHIFTS.map((shift, shiftIndex) => {
+  return SHIFTS.filter(shift => rows.some(row => includeSyringeEmailShift(shift, row.shifts[shift]))).map((shift, shiftIndex) => {
     const shiftClass = shiftIndex === 0 ? 's1' : shiftIndex === 1 ? 's2' : 's3'
     const st = shiftTotals[shift]
     const eventsByMachine = new Map<string, ShiftEvent[]>()
@@ -339,12 +338,13 @@ function buildSystemReportHtml(eventsByShift: Record<ShiftType, ShiftEvent[]>, s
       const name = event.machine || '-'
       eventsByMachine.set(name, [...(eventsByMachine.get(name) ?? []), event])
     })
-    const machineBlocks = rows.map((row, index) => {
+    const shiftRows = rows.filter(row => includeSyringeEmailShift(shift, row.shifts[shift]))
+    const machineBlocks = shiftRows.map((row, index) => {
       const events = eventsByMachine.get(row.machineName) ?? []
       const machineClass = index % 2 === 0 ? 'm3' : 'm4'
       const s = row.shifts[shift]
       const summaryLine = `<p class="times">Produkcja: <strong>${pieces(s.good)} szt.</strong> | Braki: <strong>${pieces(s.reject)} szt.</strong> | Czas pracy: <strong>${mins(s.runtime)}</strong></p>`
-      const categoryHeader = index === 0 || rows[index - 1].category !== row.category
+      const categoryHeader = index === 0 || shiftRows[index - 1].category !== row.category
         ? `<p class="sub-h">${escapeHtml(row.category)}</p>` : ''
       if (!events.length) {
         return `${categoryHeader}<div class="mc-box ${machineClass}">
@@ -373,11 +373,11 @@ ${machineBlocks}`
 // ─── Wywołania AI (ten sam model i mechanizm co "Raport dnia" IS PRO) ─────────
 
 async function generateShiftNarrativeWithAi(apiKey: string, eventsByShift: Record<ShiftType, ShiftEvent[]>, shiftTotals: Record<ShiftType, ShiftSummary>, rows: LineDayRow[]): Promise<string> {
-  const shiftData = SHIFTS.map(shift => {
+  const shiftData = SHIFTS.filter(shift => rows.some(row => includeSyringeEmailShift(shift, row.shifts[shift]))).map(shift => {
     const st = shiftTotals[shift]
     const byMachine = new Map<string, ShiftEvent[]>()
     eventsByShift[shift].forEach(e => byMachine.set(e.machine, [...(byMachine.get(e.machine) ?? []), e]))
-    const machines = rows.map(r => {
+    const machines = rows.filter(r => includeSyringeEmailShift(shift, r.shifts[shift])).map(r => {
       const s = r.shifts[shift]
       return {
         name: r.machineName,
@@ -452,7 +452,7 @@ async function generateAttentionSectionWithAi(apiKey: string, eventsByShift: Rec
     name: r.machineName,
     totalGood: r.total.good, totalReject: r.total.reject,
     rejectPct: (r.total.good + r.total.reject) > 0 ? (r.total.reject / (r.total.good + r.total.reject) * 100).toFixed(1) + '%' : '0%',
-    shiftBreakdown: SHIFTS.map(s => ({ shift: s, good: r.shifts[s].good, reject: r.shifts[s].reject, events: eventsByShift[s].filter(e => e.machine === r.machineName).map(e => e.text) }))
+    shiftBreakdown: SHIFTS.filter(s => includeSyringeEmailShift(s, r.shifts[s])).map(s => ({ shift: s, good: r.shifts[s].good, reject: r.shifts[s].reject, events: eventsByShift[s].filter(e => e.machine === r.machineName).map(e => e.text) }))
   }))
 
   const prompt = `Na podstawie danych z całego dnia produkcyjnego na liniach strzykawkowych napisz krótką sekcję "Zalecenia na następną zmianę".
@@ -584,7 +584,7 @@ interface ReportModalProps {
 
 function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }: ReportModalProps) {
   const gaps: NoProductionGap[] = rows.flatMap(row =>
-    SHIFTS.filter(s => !row.shifts[s].good && row.shifts[s].notes.length === 0).map(s => ({ machineId: row.machineId, machineName: row.machineName, shift: s }))
+    SHIFTS.filter(s => requiresSyringeIdleReason(s, row.shifts[s])).map(s => ({ machineId: row.machineId, machineName: row.machineName, shift: s }))
   )
 
   const [step, setStep] = useState<'preflight' | 'loading' | 'done' | 'error'>(gaps.length > 0 ? 'preflight' : 'loading')
@@ -606,7 +606,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
   function gapKey(g: NoProductionGap) { return `${g.machineId}__${g.shift}` }
 
   async function startGenerate() {
-    if (generated.current) return
+    if (generated.current || !allGapsFilled) return
     generated.current = true
     generate(gapReasons)
   }
@@ -621,7 +621,8 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
       let shiftsHtml: string
       let attentionHtml = ''
 
-      const eventsWithGaps: Record<ShiftType, ShiftEvent[]> = { ...reportEvents }
+      const activeSecondShiftMachines = new Set(rows.filter(row => includeSyringeEmailShift('II', row.shifts.II)).map(row => row.machineName))
+      const eventsWithGaps: Record<ShiftType, ShiftEvent[]> = { ...reportEvents, II: reportEvents.II.filter(event => activeSecondShiftMachines.has(event.machine)) }
       gaps.forEach(g => {
         const reason = reasons[gapKey(g)]?.trim()
         if (!reason) return
@@ -705,7 +706,7 @@ function ReportModal({ date, rows, totals, shiftTotals, eventsByShift, onClose }
           {step === 'preflight' && (
             <div className="space-y-4">
               <div className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-sm text-red-300">
-                <span className="font-bold">Wymagane wyjaśnienie</span> — wykryto {gaps.length} {gaps.length === 1 ? 'pozycję' : 'pozycje'} bez produkcji na zmianie I/II. Przed wygenerowaniem raportu opisz przyczynę dla każdej linii.
+                <span className="font-bold">Wymagane wyjaśnienie</span> — wykryto {gaps.length} {gaps.length === 1 ? 'pozycję' : 'pozycje'} bez produkcji na zmianie I. Uzupełnij przyczyny postoju. Zmiana II bez produkcji nie wymaga wyjaśnienia i jest pomijana w opisie raportu.
               </div>
               <div className="space-y-3 max-h-72 overflow-y-auto">
                 {gaps.map(g => {
