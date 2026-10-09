@@ -89,7 +89,7 @@ function buildEmailHtml(params: {
     red: '#DC2626', redLt: '#FEF2F2',
     amber: '#D97706', amberLt: '#FFFBEB',
     green: '#16A34A',
-    gray1: '#F8FAFC', gray2: '#E2E8F0', gray3: '#64748B', gray4: '#94A3B8',
+    gray1: '#F8FAFC', gray2: '#E2E8F0', gray3: '#475569', gray4: '#64748B',
     white: '#FFFFFF',
     s1bg: '#EEF2FF', s1tx: '#3730A3', s1ac: '#4F46E5',
     s2bg: '#F0FDFA', s2tx: '#134E4A', s2ac: '#0D9488',
@@ -107,7 +107,7 @@ function buildEmailHtml(params: {
   ]
 
   function TH(extra = '') {
-    return `style="background:${K.navy};color:#fff;padding:14px 16px;font-size:11px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;${F};${extra}"`
+    return `style="background:#E8EFF8;color:${K.navy};padding:14px 16px;font-size:11px;font-weight:bold;letter-spacing:.6px;text-transform:uppercase;${F};${extra}"`
   }
   function TD(bg: string, br: string, tx: string, extra = '') {
     return `style="background:${bg};border:1px solid ${br};padding:16px;color:${tx};${F};vertical-align:middle;${extra}"`
@@ -186,7 +186,7 @@ ${machineRows}
     ${shiftTotals.II.good + shiftTotals.II.reject > 0 ? `<strong style="font-size:14px">${pieces(shiftTotals.II.good)}</strong><br>
     <span style="font-size:11px;color:${K.red}">odrz. ${pieces(shiftTotals.II.reject)}</span>` : ''}
   </td>
-  <td align="center" style="background:${K.blue};border:1px solid ${K.blue};padding:10px 14px;color:#fff;font-weight:bold;font-size:17px;${F};text-align:center">
+  <td align="center" style="background:#DBEAFE;border:1px solid ${K.blueBr};padding:10px 14px;color:${K.blueTx};font-weight:bold;font-size:17px;${F};text-align:center">
     ${pieces(tt)}<br><span style="font-size:10px;font-weight:normal;opacity:.85">szt.</span>
   </td>
 </tr>
@@ -214,7 +214,7 @@ ${machineRows}
       const curMC = cls.includes('mc-box') ? (cls.includes('m3') ? 'm3' : 'm4') : mc
       const kids = () => Array.from(el.childNodes).map(c => cn2(c, curMC)).join('')
       if (cls.includes('shift-bar')) {
-        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 10px"><tr><td style="background:${K.navy};border-radius:8px;padding:14px 18px;${F}"><span style="font-size:13px;font-weight:bold;color:${K.white};${F};text-transform:uppercase;letter-spacing:.4px">${kids()}</span></td></tr></table>`
+        return `<table width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 10px"><tr><td style="background:#E8EFF8;border:1px solid ${K.gray2};border-radius:8px;padding:14px 18px;${F}"><span style="font-size:13px;font-weight:bold;color:${K.navy};${F};text-transform:uppercase;letter-spacing:.4px">${kids()}</span></td></tr></table>`
       }
       if (cls.includes('mc-box')) {
         const isM3 = cls.includes('m3')
@@ -253,19 +253,19 @@ ${machineRows}
 <table width="100%" cellpadding="0" cellspacing="0" border="0" class="email-container" style="max-width:900px;background:${K.white};border:1px solid ${K.gray2};border-radius:16px;overflow:hidden;text-align:left">
 
   <!-- HEADER -->
-  <tr><td style="background:${K.navy};border-bottom:4px solid #C9A84C;padding:0">
+  <tr><td style="background:#EFF6FF;border-bottom:4px solid #C9A84C;padding:0">
     <table width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
       <td class="email-header" style="padding:32px;vertical-align:middle">
-        <p style="margin:0;font-size:10px;font-weight:bold;color:#93C5FD;text-transform:uppercase;letter-spacing:1.2px;${F}">Margomed S.A.</p>
-        <p style="margin:4px 0 0;font-size:28px;font-weight:bold;color:#fff;${F}">Linie strzykawkowe</p>
-        <p style="margin:4px 0 0;font-size:12px;color:#BAD4F5;${F}">Raport produkcyjny &bull; ${dateLong}</p>
+        <p style="margin:0;font-size:10px;font-weight:bold;color:#475569;text-transform:uppercase;letter-spacing:1.2px;${F}">Margomed S.A.</p>
+        <p style="margin:4px 0 0;font-size:28px;font-weight:bold;color:${K.navy};${F}">Linie strzykawkowe</p>
+        <p style="margin:4px 0 0;font-size:12px;color:#475569;${F}">Raport produkcyjny &bull; ${dateLong}</p>
       </td>
       <td class="email-brand" align="right" style="padding:24px;vertical-align:middle;white-space:nowrap">
         <table cellpadding="0" cellspacing="0" border="0"><tr>
-          <td width="34" height="34" align="center" valign="middle" style="background:#0F172A;border:1px solid #C9A84C;color:#C9A84C;font-size:11px;font-weight:bold;${F}">ML</td>
+          <td width="34" height="34" align="center" valign="middle" style="background:#FFFBEB;border:1px solid #C9A84C;color:#785B18;font-size:11px;font-weight:bold;${F}">ML</td>
           <td style="padding-left:8px;text-align:left">
-            <p style="margin:0;font-size:10px;color:#93C5FD;${F}">System</p>
-            <p style="margin:2px 0 0;font-size:12px;font-weight:bold;color:#fff;${F}">MargoLine</p>
+            <p style="margin:0;font-size:10px;color:#475569;${F}">System</p>
+            <p style="margin:2px 0 0;font-size:12px;font-weight:bold;color:${K.navy};${F}">MargoLine</p>
           </td>
         </tr></table>
       </td>
