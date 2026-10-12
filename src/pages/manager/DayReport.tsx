@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
+import { distributeQuantity, correctedHourlyRate } from '@/lib/dayReportCorrection'
 import { PRODUCTION_DAY_HOURS, cn, compareProductionHours, getProductionDate } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import {
@@ -1301,6 +1302,9 @@ export default function ManagerDayReport() {
   const [shiftSummaries, setShiftSummaries] = useState<ShiftWithSummary[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [correction, setCorrection] = useState<{ row: MachineDayRow; shift: ShiftType; source: ShiftWithSummary; reports: ReportWithContext[]; good: string; reject: string; reason: string } | null>(null)
+  const [correctionSaving, setCorrectionSaving] = useState(false)
+  const [correctionError, setCorrectionError] = useState('')
   const [modalState, setModalState] = useState<'closed' | 'apikey' | 'report'>('closed')
 
   // ─── Mail zmianowy do techników ──────────────────────────────────────────
@@ -1413,6 +1417,37 @@ export default function ManagerDayReport() {
       supabase.removeChannel(channel)
     }
   }, [date, load])
+
+  function openCorrection(row: MachineDayRow, shift: ShiftType) {
+    const source = shiftSummaries.find(item => item.machine_id === row.machineId && item.shift_type === shift)
+    if (!source) { setError('Nie znaleziono zmiany. Odśwież dane.'); return }
+    setCorrectionError('')
+    setCorrection({ row, shift, source, reports: reports.filter(report => report.shift_id === source.id), good: String(row.shifts[shift].good), reject: String(row.shifts[shift].reject), reason: '' })
+  }
+  const correctionPreview = useMemo(() => {
+    if (!correction || !/^\d+$/.test(correction.good) || !/^\d+$/.test(correction.reject)) return null
+    try {
+      const good = distributeQuantity(Number(correction.good), correction.reports.map(report => report.good_count))
+      const reject = distributeQuantity(Number(correction.reject), correction.reports.map(report => correction.reports.some(item => item.reject_count > 0) ? report.reject_count : report.good_count))
+      return correction.reports.map((report, index) => ({ ...report, good_count: good[index], reject_count: reject[index] }))
+    } catch { return null }
+  }, [correction])
+  async function saveCorrection() {
+    if (!canManageShiftEmail || !correction || !correctionPreview || !correction.reason.trim() || correctionSaving) return
+    setCorrectionSaving(true); setCorrectionError('')
+    try {
+      const { error: saveError } = await supabase.rpc('correct_day_report_shift', {
+        p_shift_id: correction.source.id, p_good: Number(correction.good), p_reject: Number(correction.reject), p_reason: correction.reason.trim(),
+        p_expected_shift_updated_at: correction.source.updated_at,
+        p_reports: correctionPreview.map(report => ({ id: report.id, updated_at: report.updated_at, good_count: report.good_count, reject_count: report.reject_count }))
+      })
+      if (saveError) throw saveError
+      setCorrection(null)
+      await load()
+    } catch (saveError) {
+      setCorrectionError(saveError instanceof Error ? saveError.message : (saveError as { message?: string }).message ?? 'Nie udało się zapisać korekty.')
+    } finally { setCorrectionSaving(false) }
+  }
 
   const machineNameById = useMemo(
     () => Object.fromEntries(machines.map(m => [m.id, m.name])),
@@ -1733,6 +1768,8 @@ export default function ManagerDayReport() {
                         {row.shifts[s].reports || row.shifts[s].hasSummary ? (
                           <div>
                             <div className="font-mono text-lg font-bold text-white">{pieces(row.shifts[s].good)} szt</div>
+                            {row.shifts[s].runtime > 0 && <div className="mt-1 text-xs text-cyan-300">{pieces(correctedHourlyRate(row.shifts[s].good, row.shifts[s].runtime) ?? 0)} szt./h</div>}
+                            {canManageShiftEmail && <button type="button" className="btn-secondary mt-2 px-3 py-1 text-xs" onClick={() => openCorrection(row, s)}>Koryguj ilości</button>}
                             <div className="mt-1 text-xs text-navy-400">
                               odrzut <span className="font-mono text-red-300">{pieces(row.shifts[s].reject)}</span> | wpisy {row.shifts[s].reports}
                             </div>
@@ -1940,6 +1977,31 @@ export default function ManagerDayReport() {
           </div>
         </div>
       </div>
+      {correction && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-black/70 p-4" role="dialog" aria-modal="true" aria-labelledby="correction-title">
+          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-2xl border border-navy-600 bg-navy-800 p-6">
+            <h2 id="correction-title" className="text-xl font-bold text-white">Korekta ilości — {correction.row.machineName}</h2>
+            <p className="mt-1 text-sm text-navy-300">{date} · Zmiana {correction.shift}</p>
+            <p className="mt-4 text-sm text-navy-300">Nowe ilości zostaną rozdzielone proporcjonalnie między wpisy godzinowe. Czas pracy pozostaje bez zmian, a wydajność przeliczy się z nowych ilości.</p>
+            <div className="mt-4 grid grid-cols-2 gap-3">
+              <label className="text-sm text-navy-300">Dobre sztuki<input className="input mt-1" type="number" min="0" step="1" value={correction.good} disabled={correctionSaving} onChange={e => setCorrection({ ...correction, good: e.target.value })} /></label>
+              <label className="text-sm text-navy-300">Odrzut<input className="input mt-1" type="number" min="0" step="1" value={correction.reject} disabled={correctionSaving} onChange={e => setCorrection({ ...correction, reject: e.target.value })} /></label>
+            </div>
+            {correctionPreview && <div className="mt-4 rounded-xl bg-navy-900 p-3 text-sm text-navy-200">
+              Dobre sztuki: {pieces(correction.row.shifts[correction.shift].good)} → {pieces(Number(correction.good))}
+              {correction.row.shifts[correction.shift].runtime > 0 && <div className="mt-1 text-cyan-300">Wydajność: {pieces(correctedHourlyRate(correction.row.shifts[correction.shift].good, correction.row.shifts[correction.shift].runtime) ?? 0)} → {pieces(correctedHourlyRate(Number(correction.good), correction.row.shifts[correction.shift].runtime) ?? 0)} szt./h</div>}
+            </div>}
+            {correctionPreview && correctionPreview.length > 0 && <div className="mt-4 overflow-x-auto"><table className="w-full text-sm text-navy-200">
+              <thead><tr><th className="py-2 text-left">Godzina</th><th className="text-right">Dobre: przed → po</th><th className="text-right">Odrzut: przed → po</th><th className="text-right">% normy godzinowej: przed → po</th></tr></thead>
+              <tbody>{correctionPreview.map((report, index) => <tr key={report.id} className="border-t border-navy-700"><td className="py-2">{report.hour_block}</td><td className="text-right">{pieces(correction.reports[index].good_count)} → {pieces(report.good_count)}</td><td className="text-right">{pieces(correction.reports[index].reject_count)} → {pieces(report.reject_count)}</td><td className="pl-3 text-right">{report.target > 0 ? `${Math.round(correction.reports[index].good_count / report.target * 1000) / 10}% → ${Math.round(report.good_count / report.target * 1000) / 10}%` : '—'}</td></tr>)}</tbody>
+            </table></div>}
+            <label className="mt-4 block text-sm text-navy-300">Powód korekty<textarea className="input mt-1" value={correction.reason} disabled={correctionSaving} onChange={e => setCorrection({ ...correction, reason: e.target.value })} /></label>
+            {!correctionPreview && <p className="mt-3 text-sm text-red-300">Podaj poprawne, nieujemne całkowite ilości.</p>}
+            {correctionError && <p className="mt-3 text-sm text-red-300">{correctionError}</p>}
+            <div className="mt-5 flex justify-end gap-3"><button className="btn-secondary" disabled={correctionSaving} onClick={() => setCorrection(null)}>Anuluj</button><button className="btn-primary" disabled={correctionSaving || !correctionPreview || !correction.reason.trim()} onClick={saveCorrection}>{correctionSaving ? 'Zapisywanie…' : 'Zapisz korektę'}</button></div>
+          </div>
+        </div>
+      )}
     </>
   )
 }
