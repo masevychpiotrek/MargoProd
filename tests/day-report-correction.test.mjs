@@ -26,7 +26,8 @@ test('Atomic correction updates counters, summaries and audit; stale or unauthor
       INSERT INTO profiles VALUES(auth.uid(),'manager',true,null);
       CREATE TABLE shifts(id uuid PRIMARY KEY, updated_at timestamptz, summary_good_count int, summary_reject_count int);
       CREATE TABLE hourly_reports(id uuid PRIMARY KEY, shift_id uuid, updated_at timestamptz, deleted_at timestamptz, hour_start int, good_count int, reject_count int, counter_good int, counter_reject int, total_count int, target int DEFAULT 100, efficiency_pct numeric GENERATED ALWAYS AS (good_count::numeric/target*100) STORED);
-      CREATE TABLE audit_logs(user_id uuid,action text,table_name text,record_id uuid,old_values jsonb,new_values jsonb);
+      CREATE TYPE audit_action AS ENUM ('config_change');
+      CREATE TABLE audit_logs(user_id uuid,action audit_action,table_name text,record_id uuid,old_values jsonb,new_values jsonb);
       INSERT INTO shifts VALUES('00000000-0000-0000-0000-000000000010','2026-10-12',300,30);
       INSERT INTO hourly_reports(id,shift_id,updated_at,hour_start,good_count,reject_count) VALUES
         ('00000000-0000-0000-0000-000000000011','00000000-0000-0000-0000-000000000010','2026-10-12',23,100,10),
@@ -34,6 +35,11 @@ test('Atomic correction updates counters, summaries and audit; stale or unauthor
     await db.exec(await readFile(new URL('../supabase/migrations/077_day_report_shift_correction.sql', import.meta.url),'utf8'))
     const entries = [11,12].map((id,i)=>({id:`00000000-0000-0000-0000-0000000000${id}`,updated_at:'2026-10-12',good_count:(i+1)*50,reject_count:(i+1)*5}))
     const save = (payload=entries) => db.query("SELECT correct_day_report_shift('00000000-0000-0000-0000-000000000010',150,15,'Counter correction','2026-10-12',$1::jsonb)",[JSON.stringify(payload)])
+    await assert.rejects(save(), /invalid input value for enum audit_action/)
+    assert.equal((await db.query('SELECT summary_good_count FROM shifts')).rows[0].summary_good_count,300)
+    await db.exec(await readFile(new URL('../supabase/migrations/078_shift_correction_audit_action.sql', import.meta.url),'utf8'))
+    // Reapplying the repair is safe on databases that already contain the action.
+    await db.exec(await readFile(new URL('../supabase/migrations/078_shift_correction_audit_action.sql', import.meta.url),'utf8'))
     await save()
     assert.deepEqual((await db.query('SELECT good_count,counter_good,efficiency_pct FROM hourly_reports ORDER BY hour_start DESC')).rows, [{good_count:50,counter_good:50,efficiency_pct:'50.00000000000000000000'},{good_count:100,counter_good:150,efficiency_pct:'100.00000000000000000000'}])
     assert.equal((await db.query('SELECT summary_good_count FROM shifts')).rows[0].summary_good_count,150)
