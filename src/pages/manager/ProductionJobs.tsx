@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import { collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS } from '@/lib/productionJobs'
@@ -59,21 +59,11 @@ async function fetchJobs() {
 }
 
 async function fetchComponents(jobId: string) {
-  const { data } = await supabase
-    .from('production_job_components')
-    .select('*')
-    .eq('job_id', jobId)
-    .order('sort_order')
-  return (data ?? []) as ProductionJobComponent[]
+  return fetchComponentsForJobs([jobId])
 }
 
 async function fetchHistory(jobId: string) {
-  const { data } = await supabase
-    .from('production_job_component_history')
-    .select('*, changed_by_profile:profiles!changed_by(full_name)')
-    .eq('job_id', jobId)
-    .order('changed_at', { ascending: false })
-  return (data ?? []) as HistoryRow[]
+  return fetchHistoryForJobs([jobId])
 }
 
 // Zbiorcze pobranie dla kopiowania wielu zleceń naraz (np. całego asortymentu) - jedno
@@ -121,8 +111,6 @@ export default function ManagerProductionJobs() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterAssortment, setFilterAssortment] = useState('')
-  const [allComponents, setAllComponents] = useState<ProductionJobComponent[]>([])
-  const [allHistory, setAllHistory] = useState<HistoryRow[]>([])
   const [loadError, setLoadError] = useState('')
   const [copiedComponent, setCopiedComponent] = useState<string | null>(null)
   const [componentCopyError, setComponentCopyError] = useState(false)
@@ -131,6 +119,8 @@ export default function ManagerProductionJobs() {
   const [components, setComponents] = useState<ProductionJobComponent[]>([])
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
+  const [detailError, setDetailError] = useState('')
+  const detailRequest = useRef(0)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
   const [fallbackText, setFallbackText] = useState<string | null>(null)
 
@@ -154,28 +144,35 @@ export default function ManagerProductionJobs() {
     setLoading(true)
     setLoadError('')
     try {
-      const loadedJobs = await fetchJobs()
-      const ids = loadedJobs.map(job => job.id)
-      const [loadedComponents, loadedHistory] = await Promise.all([fetchComponentsForJobs(ids), fetchHistoryForJobs(ids)])
-      setJobs(loadedJobs)
-      setAllComponents(loadedComponents)
-      setAllHistory(loadedHistory)
+      setJobs(await fetchJobs())
     } catch {
-      setLoadError('Nie udało się pobrać zleceń i numerów serii. Spróbuj ponownie.')
+      setLoadError('Nie udało się pobrać zleceń. Spróbuj ponownie.')
     } finally {
       setLoading(false)
     }
   }
 
   const openDetail = async (job: JobRow) => {
+    const request = ++detailRequest.current
     setSelectedJob(job)
     setDetailLoading(true)
+    setDetailError('')
+    setComponents([])
+    setHistory([])
+    setCopiedComponent(null)
+    setComponentCopyError(false)
     setCopyStatus('idle')
     setFallbackText(null)
-    const [comps, hist] = await Promise.all([fetchComponents(job.id), fetchHistory(job.id)])
-    setComponents(comps)
-    setHistory(hist)
-    setDetailLoading(false)
+    try {
+      const [comps, hist] = await Promise.all([fetchComponents(job.id), fetchHistory(job.id)])
+      if (request !== detailRequest.current) return
+      setComponents(comps)
+      setHistory(hist)
+    } catch {
+      if (request === detailRequest.current) setDetailError('Nie udało się pobrać półfabrykatów tego zlecenia. Spróbuj ponownie.')
+    } finally {
+      if (request === detailRequest.current) setDetailLoading(false)
+    }
   }
 
   // Lista asortymentów do filtra brana z faktycznie załadowanych zleceń (nie ze stałej
@@ -193,11 +190,10 @@ export default function ManagerProductionJobs() {
       (one(j.machine)?.name ?? '').toLowerCase().includes(q)
   })
 
-  const visibleJobIds = new Set(filtered.map(job => job.id))
   const batchGroups = collectComponentBatches(
-    allComponents.filter(component => visibleJobIds.has(component.job_id)),
-    allHistory.filter(entry => visibleJobIds.has(entry.job_id))
-  )
+    components.filter(component => component.job_id === selectedJob?.id),
+    history.filter(entry => entry.job_id === selectedJob?.id)
+  ).filter(group => group.batches.length > 0)
 
   const copyComponentBatches = async (key: string, text: string) => {
     setCopiedComponent(null)
@@ -553,31 +549,7 @@ export default function ManagerProductionJobs() {
         </div>
       )}
 
-      <div className="card space-y-4">
-        <div>
-          <h2 className="text-lg font-bold text-white">Kształtki — numery serii</h2>
-          <p className="text-sm text-navy-400 mt-1">Serie ze wszystkich {filtered.length} zleceń zgodnych z filtrami, razem z historią wymian, bez powtórzeń. Dren obejmuje wszystkie stacje.</p>
-        </div>
-        {componentCopyError && <p role="alert" className="text-sm text-amber-300">Nie udało się skopiować. Kliknij pole z numerami, aby zaznaczyć je i skopiować ręcznie.</p>}
-        {loading ? <p className="text-navy-400">Ładowanie numerów serii...</p>
-          : loadError ? <p className="text-navy-400">Numery serii są niedostępne.</p>
-          : batchGroups.length === 0 ? <p className="text-navy-400">Brak kształtek dla wybranych filtrów.</p>
-          : batchGroups.map(group => (
-            <div key={group.key} className="flex flex-col sm:flex-row sm:items-center gap-3 border-t border-navy-700 pt-3">
-              <div className="sm:w-56 shrink-0">
-                <div className="text-sm font-semibold text-white">{group.label}</div>
-                <div className="text-xs text-navy-400">Liczba serii: {group.batches.length}</div>
-              </div>
-              <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join(', ')} rows={2}
-                placeholder="Brak wpisanych serii" onClick={event => event.currentTarget.select()}
-                className="input font-mono text-sm flex-1 min-w-0" />
-              <button className="btn-secondary shrink-0 disabled:opacity-40" disabled={!group.batches.length}
-                onClick={() => copyComponentBatches(group.key, group.batches.join(', '))}>
-                {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj serie'}
-              </button>
-            </div>
-          ))}
-      </div>
+      <p className="text-sm text-navy-400">Wybierz zlecenie z listy, aby zobaczyć użyte półfabrykaty i skopiować ich numery serii.</p>
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
@@ -628,11 +600,16 @@ export default function ManagerProductionJobs() {
                 <h2 className="text-xl font-bold text-white">{selectedJob.order_number}</h2>
                 <p className="text-navy-400 text-sm">{selectedJob.series_number}</p>
               </div>
-              <button onClick={() => setSelectedJob(null)} className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+              <button onClick={() => { detailRequest.current++; setSelectedJob(null) }} aria-label="Zamknij zlecenie" className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
             </div>
 
             {detailLoading ? (
               <div className="text-center py-8 text-navy-500">Ładowanie...</div>
+            ) : detailError ? (
+              <div role="alert" className="space-y-3 text-sm text-red-300">
+                <p>{detailError}</p>
+                <button onClick={() => openDetail(selectedJob)} className="btn-secondary">Ponów pobieranie</button>
+              </div>
             ) : (
               <div className="space-y-5">
                 <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 text-sm">
@@ -647,24 +624,22 @@ export default function ManagerProductionJobs() {
                 </div>
 
                 <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Półfabrykaty</div>
-                  <div className="space-y-1">
-                    {components.filter(c => !c.is_dren).map(c => (
-                      <div key={c.id} className="flex justify-between text-sm border-b border-navy-800 py-1.5">
-                        <span className="text-navy-300">{c.component_label}</span>
-                        <span className="font-mono text-white">{c.batch_number ?? '—'}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <div className="text-xs font-bold uppercase tracking-wider text-navy-400 mb-2">Dren</div>
-                  <div className="space-y-1">
-                    {components.filter(c => c.is_dren).map(c => (
-                      <div key={c.id} className="flex justify-between text-sm border-b border-navy-800 py-1.5">
-                        <span className="text-navy-300">{c.component_label}</span>
-                        <span className="font-mono text-white">{c.batch_number ?? '—'}</span>
+                  <h3 className="text-base font-bold text-white mb-1">Półfabrykaty użyte w tym zleceniu</h3>
+                  <p className="text-sm text-navy-400 mb-3">Wszystkie wpisane serie, także z wymian, bez powtórzeń. Dren zbiera serie ze wszystkich stacji tego zlecenia.</p>
+                  {componentCopyError && <p role="alert" className="text-sm text-amber-300 mb-3">Nie udało się skopiować. Kliknij pole z numerami i skopiuj zaznaczony tekst ręcznie.</p>}
+                  <div className="space-y-3">
+                    {batchGroups.length === 0 && <p className="text-sm text-navy-400">Nie wpisano jeszcze numerów serii półfabrykatów dla tego zlecenia.</p>}
+                    {batchGroups.map(group => (
+                      <div key={group.key} className="rounded-xl border border-navy-700 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="text-sm font-semibold text-white">{group.label}</span>
+                          <button className="btn-secondary text-xs shrink-0"
+                            onClick={() => copyComponentBatches(group.key, group.batches.join(', '))}>
+                            {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj serie'}
+                          </button>
+                        </div>
+                        <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join(', ')} rows={2}
+                          onClick={event => event.currentTarget.select()} className="input font-mono text-sm w-full" />
                       </div>
                     ))}
                   </div>
