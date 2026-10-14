@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase'
 import { invalidateSyringe } from '@/lib/syringeApi'
 import { syringeRate } from '@/lib/syringeMetrics'
 import { useClock } from '@/hooks/useClock'
+import { useAuthStore } from '@/stores/authStore'
 import type { SaSession, SaMachine, SaMachineStatus } from '@/types/database'
 
 const STATUS_CONFIG: Record<SaMachineStatus, { label: string; dot: string; badge: string }> = {
@@ -74,6 +75,45 @@ export default function SyringeSupervisorView() {
   const navigate = useNavigate()
   const { now } = useClock()
   const [filterStatus, setFilterStatus] = useState<string>('')
+  const role = useAuthStore(s => s.profile?.role)
+  const canCorrect = role === 'admin' || role === 'manager'
+  const [correction, setCorrection] = useState<SaSession | null>(null)
+  const [operatorId, setOperatorId] = useState('')
+  const [shiftDate, setShiftDate] = useState('')
+  const [shiftType, setShiftType] = useState('I')
+  const [closeSession, setCloseSession] = useState(false)
+  const [reason, setReason] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [correctionError, setCorrectionError] = useState('')
+  const [correctionMessage, setCorrectionMessage] = useState('')
+  const { data: operators = [], error: operatorsError } = useQuery({
+    queryKey: ['sa_correction_operators'], enabled: canCorrect,
+    queryFn: async () => {
+      const r = await supabase.from('profiles').select('id, full_name').eq('role', 'syringe_operator').eq('is_active', true).is('deleted_at', null).order('full_name')
+      if (r.error) throw r.error
+      return r.data ?? []
+    }
+  })
+  function openCorrection(session: SaSession) {
+    setCorrection(session); setOperatorId(session.operator_id); setShiftDate(session.session_date)
+    setShiftType(session.shift_type); setCloseSession(false); setReason(''); setCorrectionError(''); setCorrectionMessage('')
+  }
+  async function saveCorrection() {
+    if (!correction || saving) return
+    setSaving(true); setCorrectionError('')
+    try {
+      const r = await supabase.rpc('sa_correct_active_session', {
+        p_session: correction.id, p_operator: operatorId, p_date: shiftDate,
+        p_shift: shiftType, p_close: closeSession, p_reason: reason,
+        p_expected_updated_at: correction.updated_at
+      })
+      if (r.error) throw new Error(r.error.code === 'PGRST202'
+        ? 'Korekta wymaga wdrożenia aktualizacji bazy 079.' : r.error.message)
+      setCorrection(null); setCorrectionMessage(closeSession ? 'Zmiana została zakończona. Linia jest dostępna dla nowej zmiany.' : 'Korekta zmiany została zapisana.')
+      await invalidateSyringe(qc)
+    } catch (error) { setCorrectionError(error instanceof Error ? error.message : 'Nie udało się zapisać korekty.') }
+    finally { setSaving(false) }
+  }
 
 
   const { data: machines = [], error: machinesError } = useQuery({ queryKey: ['sa_machines'], queryFn: fetchMachines })
@@ -148,6 +188,26 @@ export default function SyringeSupervisorView() {
 
   return (
     <div className="space-y-5">
+      {correctionMessage && <div role="status" className="rounded-xl bg-green-500/10 p-4 text-green-300">{correctionMessage}</div>}
+      {correction && <div role="dialog" aria-modal="true" aria-label="Korekta zmiany" className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="w-full max-w-lg max-h-[90vh] overflow-auto rounded-2xl bg-navy-800 p-6 space-y-4">
+          <h2 className="text-xl font-bold text-white">Korekta zmiany — {correction.machine?.name}</h2>
+          <p className="text-sm text-navy-300">Zapisane wyniki pozostają w historii. Zmiana operatora jest możliwa tylko w sesji bez wpisów.</p>
+          <label className="flex gap-2 text-white"><input type="checkbox" checked={closeSession} disabled={saving} onChange={e => setCloseSession(e.target.checked)} />Zakończ błędnie otwartą zmianę i zwolnij linię</label>
+          {!closeSession && <>
+            <label className="block text-white">Operator<select className="input mt-1" value={operatorId} disabled={saving || !!operatorsError} onChange={e => setOperatorId(e.target.value)}>
+              <option value="">Wybierz operatora</option>
+              {operators.map(o => <option key={o.id} value={o.id}>{o.full_name}</option>)}
+            </select></label>
+            <label className="block text-white">Data produkcyjna<input className="input mt-1" type="date" value={shiftDate} disabled={saving} onChange={e => setShiftDate(e.target.value)} /></label>
+            <label className="block text-white">Numer zmiany<select className="input mt-1" value={shiftType} disabled={saving} onChange={e => setShiftType(e.target.value)}>{['I','II','III'].map(s => <option key={s}>{s}</option>)}</select></label>
+          </>}
+          {closeSession && <p className="text-sm text-amber-300">Po zamknięciu nie można dopisywać wyników do tej sesji. Najpierw zakończ aktywny przestój lub przezbrojenie.</p>}
+          <label className="block text-white">Powód korekty (minimum 15 znaków)<textarea className="input mt-1" value={reason} disabled={saving} onChange={e => setReason(e.target.value)} /></label>
+          {(correctionError || operatorsError) && <p role="alert" className="text-red-300">{correctionError || operatorsError?.message}</p>}
+          <div className="flex gap-3"><button className="btn-secondary" disabled={saving} onClick={() => setCorrection(null)}>Anuluj</button><button className="btn-primary" disabled={saving || reason.trim().length < 15 || (!closeSession && (!operatorId || !shiftDate || !!operatorsError))} onClick={() => void saveCorrection()}>{saving ? 'Zapisywanie…' : closeSession ? 'Zakończ zmianę' : 'Zapisz korektę'}</button></div>
+        </div>
+      </div>}
       <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold text-white">Panel nadzorczy — Automaty strzykawkowe</h1>
@@ -236,6 +296,7 @@ export default function SyringeSupervisorView() {
               </div>
 
               {/* Operator i asortyment */}
+              {canCorrect && <button className="btn-secondary w-full" onClick={() => openCorrection(session)}>Skoryguj zmianę</button>}
               <div className="grid grid-cols-2 gap-2 text-sm">
                 <div>
                   <div className="text-navy-500 text-xs">Operator</div>
