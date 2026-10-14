@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import { Camera } from 'lucide-react'
+import DrenBarcodeScanner from '@/components/DrenBarcodeScanner'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, logAudit } from '@/lib/supabase'
@@ -38,6 +40,7 @@ function ComponentRow({
   onConfirmWymiana: () => void
 }) {
   const hasValue = !!component.batch_number
+  const [scanning, setScanning] = useState(false)
 
   return (
     <div className="rounded-xl bg-navy-900 border border-navy-700 px-4 py-3">
@@ -59,7 +62,19 @@ function ComponentRow({
         </span>
       </div>
 
-      {!isLocked && !hasValue && (
+      {!isLocked && !hasValue && component.is_dren && (
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <button onClick={() => setScanning(true)} disabled={saving} className="btn-secondary flex items-center gap-2 disabled:opacity-40">
+            <Camera size={20} />{value ? 'Skanuj ponownie' : 'Skanuj numer serii'}
+          </button>
+          {value && <>
+            <span className="font-mono text-sm text-white break-all">{value}</span>
+            <button onClick={onSaveEntry} disabled={saving} className="btn-primary text-xs px-4 disabled:opacity-40">{saving ? 'Zapisywanie...' : 'Zapisz serię'}</button>
+          </>}
+        </div>
+      )}
+
+      {!isLocked && !hasValue && !component.is_dren && (
         <div className="flex gap-2 mt-3">
           <input
             ref={inputRef}
@@ -87,7 +102,20 @@ function ComponentRow({
         </button>
       )}
 
-      {!isLocked && hasValue && isEditing && (
+      {!isLocked && hasValue && isEditing && component.is_dren && (
+        <div className="flex flex-wrap items-center gap-2 mt-3">
+          <button onClick={() => setScanning(true)} disabled={saving} className="btn-secondary flex items-center gap-2 disabled:opacity-40">
+            <Camera size={20} />{value ? 'Skanuj ponownie' : 'Skanuj nową serię'}
+          </button>
+          {value && <>
+            <span className="font-mono text-sm text-white break-all">{value}</span>
+            <button onClick={onConfirmWymiana} disabled={saving} className="btn-primary text-xs px-4 disabled:opacity-40">{saving ? 'Zapisywanie...' : 'Zatwierdź wymianę'}</button>
+          </>}
+          <button onClick={onCancelWymiana} disabled={saving} className="btn-secondary text-xs px-3">Anuluj</button>
+        </div>
+      )}
+
+      {!isLocked && hasValue && isEditing && !component.is_dren && (
         <div className="flex gap-2 mt-3">
           <input
             value={value}
@@ -111,6 +139,11 @@ function ComponentRow({
           </button>
           <button onClick={onCancelWymiana} className="btn-secondary text-xs px-3">Anuluj</button>
         </div>
+      )}
+      {scanning && component.is_dren && !isLocked && (
+        <DrenBarcodeScanner label={component.component_label}
+          onClose={() => setScanning(false)}
+          onDetected={number => { onValueChange(number); setScanning(false) }} />
       )}
     </div>
   )
@@ -307,6 +340,8 @@ export default function OperatorProductionOrders() {
         .filter(c => c.sort_order > component.sort_order && !c.batch_number)
         .sort((a, b) => a.sort_order - b.sort_order)[0]
       if (next) requestAnimationFrame(() => inputRefs.current[next.id]?.focus())
+    } else {
+      setConfirmErrors([`Nie udało się zapisać serii dla: ${component.component_label}. Spróbuj ponownie.`])
     }
     setSavingKey(null)
   }
@@ -667,6 +702,7 @@ export default function OperatorProductionOrders() {
                 {drenFilled}/{drenComponents.length}
               </span>
             </div>
+            {!isLocked && <p className="text-sm text-navy-400">Wybierz stację i zeskanuj kod kreskowy z etykiety drenu aparatem.</p>}
             <div className="space-y-2">
               {drenComponents.map(renderComponentRow)}
             </div>
