@@ -1,6 +1,6 @@
 -- Correct or close one active session without deleting production history.
 BEGIN;
-CREATE FUNCTION public.sa_correct_active_session(
+CREATE OR REPLACE FUNCTION public.sa_correct_active_session(
   p_session uuid, p_operator uuid, p_date date, p_shift text, p_close boolean,
   p_reason text, p_expected_updated_at timestamptz
 ) RETURNS void LANGUAGE plpgsql SECURITY DEFINER SET search_path = public, pg_temp AS $$

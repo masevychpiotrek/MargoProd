@@ -54,6 +54,34 @@ export function calculateQty(labelCount: number, multiplier: number): number {
   return labelCount * multiplier
 }
 
+export function collectComponentBatches(
+  components: ProductionJobComponent[],
+  history: ProductionJobComponentHistory[]
+) {
+  const groups = new Map<string, { key: string; label: string; sortOrder: number; batches: Set<string> }>()
+  const byId = new Map(components.map(component => [component.id, component]))
+  const add = (component: ProductionJobComponent, value: string | null) => {
+    const key = component.is_dren ? 'dren' : component.component_key
+    let group = groups.get(key)
+    if (!group) {
+      group = { key, label: component.is_dren ? 'Dren' : component.component_label, sortOrder: component.sort_order, batches: new Set() }
+      groups.set(key, group)
+    }
+    const batch = value?.trim()
+    if (batch) group.batches.add(batch)
+  }
+  components.forEach(component => add(component, component.batch_number))
+  history.forEach(entry => {
+    const component = byId.get(entry.component_id)
+    if (!component) return
+    add(component, entry.previous_batch_number)
+    add(component, entry.new_batch_number)
+  })
+  return [...groups.values()]
+    .sort((a, b) => a.sortOrder - b.sortOrder)
+    .map(group => ({ key: group.key, label: group.label, batches: [...group.batches].sort((a, b) => a.localeCompare(b, 'pl', { numeric: true })) }))
+}
+
 // ─── Walidacja numeru serii/partii ──────────────────────────────────────────
 
 const BANNED_BATCH_VALUES = ['xxx', 'test', 'brak', 'nie wiem', '123', '-', 'n/a', 'brak danych', 'asdf']

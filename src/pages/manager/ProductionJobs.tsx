@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS } from '@/lib/productionJobs'
+import { collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS } from '@/lib/productionJobs'
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
 
 type JobRow = ProductionJob & {
@@ -44,12 +44,18 @@ function loadExcelJS(): Promise<EJS> {
 }
 
 async function fetchJobs() {
-  const { data } = await supabase
+  const jobs: JobRow[] = []
+  for (let offset = 0; ; offset += 1000) {
+  const { data, error } = await supabase
     .from('production_jobs')
     .select('*, machine:machines(name), operator:profiles!operator_id(full_name)')
     .order('started_at', { ascending: false })
-    .limit(200)
-  return (data ?? []) as JobRow[]
+    .order('id')
+    .range(offset, offset + 999)
+  if (error) throw error
+  jobs.push(...(data ?? []) as JobRow[])
+  if (!data || data.length < 1000) return jobs
+  }
 }
 
 async function fetchComponents(jobId: string) {
@@ -73,23 +79,41 @@ async function fetchHistory(jobId: string) {
 // Zbiorcze pobranie dla kopiowania wielu zleceń naraz (np. całego asortymentu) - jedno
 // zapytanie na wiele job_id zamiast N osobnych zapytań per zlecenie.
 async function fetchComponentsForJobs(jobIds: string[]) {
-  if (!jobIds.length) return [] as ProductionJobComponent[]
-  const { data } = await supabase
+  const rows: ProductionJobComponent[] = []
+  for (let start = 0; start < jobIds.length; start += 100) {
+  for (let offset = 0; ; offset += 1000) {
+  const { data, error } = await supabase
     .from('production_job_components')
     .select('*')
-    .in('job_id', jobIds)
+    .in('job_id', jobIds.slice(start, start + 100))
     .order('sort_order')
-  return (data ?? []) as ProductionJobComponent[]
+    .order('id')
+    .range(offset, offset + 999)
+  if (error) throw error
+  rows.push(...(data ?? []) as ProductionJobComponent[])
+  if (!data || data.length < 1000) break
+  }
+  }
+  return rows
 }
 
 async function fetchHistoryForJobs(jobIds: string[]) {
-  if (!jobIds.length) return [] as HistoryRow[]
-  const { data } = await supabase
+  const rows: HistoryRow[] = []
+  for (let start = 0; start < jobIds.length; start += 100) {
+  for (let offset = 0; ; offset += 1000) {
+  const { data, error } = await supabase
     .from('production_job_component_history')
     .select('*, changed_by_profile:profiles!changed_by(full_name)')
-    .in('job_id', jobIds)
+    .in('job_id', jobIds.slice(start, start + 100))
     .order('changed_at', { ascending: false })
-  return (data ?? []) as HistoryRow[]
+    .order('id')
+    .range(offset, offset + 999)
+  if (error) throw error
+  rows.push(...(data ?? []) as HistoryRow[])
+  if (!data || data.length < 1000) break
+  }
+  }
+  return rows
 }
 
 export default function ManagerProductionJobs() {
@@ -97,6 +121,11 @@ export default function ManagerProductionJobs() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterAssortment, setFilterAssortment] = useState('')
+  const [allComponents, setAllComponents] = useState<ProductionJobComponent[]>([])
+  const [allHistory, setAllHistory] = useState<HistoryRow[]>([])
+  const [loadError, setLoadError] = useState('')
+  const [copiedComponent, setCopiedComponent] = useState<string | null>(null)
+  const [componentCopyError, setComponentCopyError] = useState(false)
 
   const [selectedJob, setSelectedJob] = useState<JobRow | null>(null)
   const [components, setComponents] = useState<ProductionJobComponent[]>([])
@@ -123,8 +152,19 @@ export default function ManagerProductionJobs() {
 
   const load = async () => {
     setLoading(true)
-    setJobs(await fetchJobs())
-    setLoading(false)
+    setLoadError('')
+    try {
+      const loadedJobs = await fetchJobs()
+      const ids = loadedJobs.map(job => job.id)
+      const [loadedComponents, loadedHistory] = await Promise.all([fetchComponentsForJobs(ids), fetchHistoryForJobs(ids)])
+      setJobs(loadedJobs)
+      setAllComponents(loadedComponents)
+      setAllHistory(loadedHistory)
+    } catch {
+      setLoadError('Nie udało się pobrać zleceń i numerów serii. Spróbuj ponownie.')
+    } finally {
+      setLoading(false)
+    }
   }
 
   const openDetail = async (job: JobRow) => {
@@ -152,6 +192,23 @@ export default function ManagerProductionJobs() {
       j.assortment_name.toLowerCase().includes(q) ||
       (one(j.machine)?.name ?? '').toLowerCase().includes(q)
   })
+
+  const visibleJobIds = new Set(filtered.map(job => job.id))
+  const batchGroups = collectComponentBatches(
+    allComponents.filter(component => visibleJobIds.has(component.job_id)),
+    allHistory.filter(entry => visibleJobIds.has(entry.job_id))
+  )
+
+  const copyComponentBatches = async (key: string, text: string) => {
+    setCopiedComponent(null)
+    setComponentCopyError(false)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopiedComponent(key)
+    } catch {
+      setComponentCopyError(true)
+    }
+  }
 
   // Kopiuje dane WSZYSTKICH aktualnie widocznych (po filtrach: asortyment + szukajka)
   // zleceń naraz, jeden blok pod drugim - dokładnie ten sam format co pojedyncze
@@ -489,6 +546,38 @@ export default function ManagerProductionJobs() {
         <textarea readOnly value={bulkFallbackText} onClick={e => (e.target as HTMLTextAreaElement).select()}
           className="input font-mono text-xs min-h-[160px] w-full" />
       )}
+
+      {loadError && (
+        <div role="alert" className="rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-sm text-red-300">
+          {loadError} <button onClick={load} className="underline">Ponów pobieranie</button>
+        </div>
+      )}
+
+      <div className="card space-y-4">
+        <div>
+          <h2 className="text-lg font-bold text-white">Kształtki — numery serii</h2>
+          <p className="text-sm text-navy-400 mt-1">Serie ze wszystkich {filtered.length} zleceń zgodnych z filtrami, razem z historią wymian, bez powtórzeń. Dren obejmuje wszystkie stacje.</p>
+        </div>
+        {componentCopyError && <p role="alert" className="text-sm text-amber-300">Nie udało się skopiować. Kliknij pole z numerami, aby zaznaczyć je i skopiować ręcznie.</p>}
+        {loading ? <p className="text-navy-400">Ładowanie numerów serii...</p>
+          : loadError ? <p className="text-navy-400">Numery serii są niedostępne.</p>
+          : batchGroups.length === 0 ? <p className="text-navy-400">Brak kształtek dla wybranych filtrów.</p>
+          : batchGroups.map(group => (
+            <div key={group.key} className="flex flex-col sm:flex-row sm:items-center gap-3 border-t border-navy-700 pt-3">
+              <div className="sm:w-56 shrink-0">
+                <div className="text-sm font-semibold text-white">{group.label}</div>
+                <div className="text-xs text-navy-400">Liczba serii: {group.batches.length}</div>
+              </div>
+              <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join(', ')} rows={2}
+                placeholder="Brak wpisanych serii" onClick={event => event.currentTarget.select()}
+                className="input font-mono text-sm flex-1 min-w-0" />
+              <button className="btn-secondary shrink-0 disabled:opacity-40" disabled={!group.batches.length}
+                onClick={() => copyComponentBatches(group.key, group.batches.join(', '))}>
+                {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj serie'}
+              </button>
+            </div>
+          ))}
+      </div>
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
