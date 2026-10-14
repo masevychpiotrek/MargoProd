@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { X } from 'lucide-react'
 import type { IScannerControls } from '@zxing/browser'
 import { isPlausibleBatchNumber } from '@/lib/productionJobs'
+import { decodeBarcodeOrientations } from '@/lib/barcodeOrientation'
 
 export default function DrenBarcodeScanner({ label, onDetected, onClose }: {
   label: string
@@ -35,10 +36,15 @@ export default function DrenBarcodeScanner({ label, onDetected, onClose }: {
         if (disposed) return
         stream = await navigator.mediaDevices.getUserMedia({
           audio: false,
-          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 }, height: { ideal: 720 } }
+          video: { facingMode: { ideal: 'environment' }, width: { ideal: 1920 }, height: { ideal: 1080 } }
         })
         if (disposed) { stop(); return }
-        const reader = new BrowserMultiFormatOneDReader(undefined, {
+        class DrenReader extends BrowserMultiFormatOneDReader {
+          decodeFromCanvas(canvas: HTMLCanvasElement) {
+            return decodeBarcodeOrientations(canvas, frame => super.decodeFromCanvas(frame))
+          }
+        }
+        const reader = new DrenReader(undefined, {
           delayBetweenScanAttempts: 150,
           delayBetweenScanSuccess: 500
         })
@@ -92,7 +98,7 @@ export default function DrenBarcodeScanner({ label, onDetected, onClose }: {
         <p className="text-sm text-navy-300">Skieruj aparat na kod kreskowy z numerem serii. Po odczycie sprawdź numer i zatwierdź zapis.</p>
         <video ref={videoRef} muted autoPlay playsInline className="w-full rounded-xl bg-black aspect-video object-contain" />
         {!ready && !error && <p role="status" className="text-sm text-navy-300">Uruchamianie aparatu...</p>}
-        {ready && !error && <p role="status" className="text-sm text-navy-300">Umieść cały kod w kadrze i przytrzymaj telefon nieruchomo.</p>}
+        {ready && !error && <p role="status" className="text-sm text-navy-300">Umieść cały kod w kadrze, pozostaw jasny margines po obu stronach i przytrzymaj telefon nieruchomo. Kod może być poziomo lub pionowo.</p>}
         {error && <p role="alert" className="text-sm text-red-300">{error}</p>}
         {error && <button onClick={() => setAttempt(value => value + 1)} className="btn-primary w-full">Spróbuj ponownie</button>}
         <button onClick={onClose} className="btn-secondary w-full">Anuluj skanowanie</button>

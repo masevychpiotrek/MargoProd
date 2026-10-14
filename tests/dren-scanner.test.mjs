@@ -37,6 +37,7 @@ function mount({ cameraError, pendingCamera } = {}) {
       if (name === 'lucide-react') return { X: () => null }
       if (name === '@zxing/browser') return { BrowserMultiFormatOneDReader: Reader }
       if (name === '@/lib/productionJobs') return { isPlausibleBatchNumber }
+      if (name === '@/lib/barcodeOrientation') return { decodeBarcodeOrientations: (canvas, decode) => decode(canvas) }
       throw new Error(`Unexpected import: ${name}`)
     },
     window: { isSecureContext: true },
