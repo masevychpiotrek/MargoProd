@@ -43,7 +43,7 @@ function ComponentRow({
   const [scanning, setScanning] = useState(false)
 
   return (
-    <div className="rounded-xl bg-navy-900 border border-navy-700 px-4 py-3">
+    <div data-input-context className="rounded-xl bg-navy-900 border border-navy-700 px-4 py-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
         <div className="min-w-0">
           <div className="text-sm font-semibold text-white">{component.component_label}</div>
@@ -139,7 +139,7 @@ function ComponentRow({
             autoComplete="off"
             enterKeyHint="done"
             className="input text-sm flex-1"
-            autoFocus
+            autoFocus={!window.matchMedia('(any-pointer: coarse)').matches}
           />
           <button
             onClick={onConfirmWymiana}
@@ -264,7 +264,7 @@ export default function OperatorProductionOrders() {
   // Po wejsciu na strone z juz rozpoczetym zleceniem, ustaw fokus od razu na
   // pierwsza pusta pozycje - operator moze zaczac wpisywac bez klikania.
   useEffect(() => {
-    if (loading || !job) return
+    if (loading || !job || window.matchMedia('(any-pointer: coarse)').matches) return
     const firstEmpty = [...components].sort((a, b) => a.sort_order - b.sort_order).find(c => !c.batch_number)
     if (firstEmpty) requestAnimationFrame(() => inputRefs.current[firstEmpty.id]?.focus())
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -350,7 +350,10 @@ export default function OperatorProductionOrders() {
       const next = updated
         .filter(c => c.sort_order > component.sort_order && !c.batch_number)
         .sort((a, b) => a.sort_order - b.sort_order)[0]
-      if (next) requestAnimationFrame(() => inputRefs.current[next.id]?.focus())
+      if (window.matchMedia('(any-pointer: coarse)').matches) {
+        const focused = document.activeElement
+        if (focused instanceof HTMLInputElement) focused.blur()
+      } else if (next) requestAnimationFrame(() => inputRefs.current[next.id]?.focus())
     } else {
       setConfirmErrors([`Nie udało się zapisać serii dla: ${component.component_label}. Spróbuj ponownie.`])
     }
@@ -535,7 +538,7 @@ export default function OperatorProductionOrders() {
   )
 
   return (
-    <div className="max-w-3xl mx-auto space-y-5 py-2">
+    <div className="production-orders max-w-3xl mx-auto space-y-5 py-2">
       <div>
         <h1 className="text-xl font-bold text-white">Zlecenie produkcyjne</h1>
         <p className="text-navy-400 text-sm">{activeMachine.name} · Zmiana {activeShift.shift_type}</p>
@@ -565,7 +568,7 @@ export default function OperatorProductionOrders() {
                 onKeyDown={e => { if (e.key === 'Enter') orderMonthPartRef.current?.focus() }}
                 placeholder="numer"
                 inputMode="numeric"
-                autoFocus
+                autoFocus={!window.matchMedia('(any-pointer: coarse)').matches}
                 className="input font-mono w-16 text-center"
               />
               <span className="font-mono text-navy-400">/</span>
@@ -659,7 +662,7 @@ export default function OperatorProductionOrders() {
                         value={orderNumberEdit}
                         onChange={e => { setOrderNumberEdit(e.target.value); setOrderNumberEditError('') }}
                         className="input font-mono text-sm py-1.5 flex-1"
-                        autoFocus
+                        autoFocus={!window.matchMedia('(any-pointer: coarse)').matches}
                       />
                       <button onClick={handleSaveOrderNumber} disabled={savingOrderNumber}
                         className="btn-primary text-xs px-3 disabled:opacity-40">Zapisz</button>

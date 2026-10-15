@@ -75,6 +75,19 @@
   }
 }
 
+@media (any-pointer: coarse) {
+  /* 16px prevents iPad Safari from zooming the whole page when an input opens. */
+  .app-shell input, .app-shell textarea, .app-shell select { font-size: 16px; }
+  .app-toolbar { padding-top: 6px; padding-bottom: 6px; }
+  .production-orders .card { padding: 12px; }
+  .production-orders [data-input-context] { padding: 10px 12px; scroll-margin: 12px; }
+  html[data-touch-editing] .app-toolbar,
+  html[data-touch-editing] .app-assistant { display: none; }
+  html[data-touch-editing] .app-content {
+    padding-bottom: calc(var(--keyboard-inset, 0px) + 32px);
+  }
+}
+
 /* ── MargoLine animations ──────────────────────────────────────── */
 @keyframes ml-page-in {
   from { opacity: 0; transform: translateY(10px); }
