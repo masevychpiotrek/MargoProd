@@ -97,7 +97,7 @@ function rejectPct(good: number, reject: number) {
 }
 
 function isSelectableOperator(profile: Profile | null | undefined) {
-  return profile?.role === 'operator' && profile.is_active !== false && !profile.deleted_at
+  return !!profile && (profile.role === 'operator' || (profile.operator_manager_access && profile.role === 'manager')) && profile.is_active !== false && !profile.deleted_at
 }
 
 // Godziny poszczególnych zmian

@@ -43,6 +43,7 @@ export interface Profile {
   id: string
   full_name: string
   role: UserRole
+  operator_manager_access?: boolean
   is_active: boolean
   must_change_password?: boolean
   rfid_uid?: string | null

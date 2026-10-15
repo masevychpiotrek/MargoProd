@@ -16,6 +16,7 @@ import { setTestModeEnabled, useTestMode } from '@/hooks/useTestMode'
 import { usePresence } from '@/hooks/usePresence'
 import { useTabletKeyboard } from '@/hooks/useTabletKeyboard'
 import FullscreenButton from './FullscreenButton'
+import { canChooseFunction } from '@/lib/accountRoles'
 
 const Icons = {
   dashboard:  (<svg width="18" height="18" viewBox="0 0 22 22" fill="none"><rect x="2" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="2" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="2" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/><rect x="12" y="12" width="8" height="8" rx="2" stroke="currentColor" strokeWidth="1.5"/></svg>),
@@ -159,7 +160,7 @@ const NAV_ADMIN = [
 
 export default function AppLayout() {
   useTabletKeyboard()
-  const { profile, signOut, isLoading, refreshProfile } = useAuthStore()
+  const { profile, signOut, isLoading, refreshProfile, requestRoleChoice } = useAuthStore()
   const { activeShift, activeMachine, isLoading: shiftLoading, loadActiveShift } = useShiftStore()
   const testMode = useTestMode()
   const { time, date } = useClock()
@@ -477,7 +478,7 @@ export default function AppLayout() {
       </aside>
 
       <main className="flex-1 flex flex-col min-w-0">
-        <div className="app-toolbar bg-navy-800/80 backdrop-blur border-b border-navy-700 px-3 py-3 sm:px-4 md:px-6 flex items-center gap-3 sm:gap-4 sticky top-0 z-10">
+        <div className="app-toolbar bg-navy-800/80 backdrop-blur border-b border-navy-700 px-3 py-3 sm:px-4 md:px-6 flex flex-wrap items-center gap-2 sm:gap-4 sticky top-0 z-10">
           <button onClick={() => setSidebarOpen(v => !v)} className="rounded-lg p-2 -ml-2 text-navy-400 hover:bg-navy-700 hover:text-white transition-colors">
             <svg width="18" height="18" viewBox="0 0 22 22" fill="none">
               <line x1="3" y1="6" x2="19" y2="6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
@@ -486,6 +487,12 @@ export default function AppLayout() {
             </svg>
           </button>
           <div className="flex-1" />
+          {canChooseFunction(profile) && (
+            <button className="btn-secondary text-xs px-2 shrink-0" onClick={() => {
+              requestRoleChoice()
+              navigate('/choose-function')
+            }}>Zmień funkcję</button>
+          )}
           <FullscreenButton />
           <MessengerLink />
           <button

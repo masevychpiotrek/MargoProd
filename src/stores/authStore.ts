@@ -3,6 +3,7 @@ import type { User, Session } from '@supabase/supabase-js'
 import { supabase, logAudit } from '@/lib/supabase'
 import type { Profile, UserRole } from '@/types/database'
 import { clearLocalChatPush, disableChatPush } from '@/lib/chatPush'
+import { canChooseFunction, roleChoiceKey, roleChoiceState } from '@/lib/accountRoles'
 
 interface AuthState {
   user: User | null
@@ -10,6 +11,9 @@ interface AuthState {
   profile: Profile | null
   isLoading: boolean
   isInitialized: boolean
+  roleChoiceRequired: boolean
+  requestRoleChoice: () => void
+  selectFunction: (role: 'operator' | 'manager') => Promise<{ error: string | null }>
   initialize: () => Promise<void>
   signIn: (email: string, password: string) => Promise<{ error: string | null }>
   signInWithRfid: (rfidUid: string) => Promise<{ error: string | null; fullName?: string }>
@@ -20,6 +24,7 @@ interface AuthState {
 
 let authListenerSet = false
 let initInFlight: Promise<void> | null = null
+let profileRevision = 0
 const AUTH_TIMEOUT_MS = 10000
 
 function withTimeout<T>(promise: PromiseLike<T>, message: string): Promise<T> {
@@ -65,6 +70,27 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   profile: null,
   isLoading: false,
   isInitialized: false,
+  roleChoiceRequired: false,
+  requestRoleChoice: () => { if (canChooseFunction(get().profile)) set({ roleChoiceRequired: true }) },
+  selectFunction: async role => {
+    const profile = get().profile
+    if (!canChooseFunction(profile)) return { error: 'Nie masz przypisanych obu funkcji.' }
+    profileRevision++
+    try {
+      const { data, error } = await supabase.rpc('switch_operator_manager_role', { p_role: role })
+      if (error) return { error: 'Nie udało się zmienić funkcji. Sprawdź połączenie lub skontaktuj się z administratorem.' }
+      const updated = data as Profile | null
+      if (!updated || updated.id !== profile!.id || updated.role !== role || !canChooseFunction(updated)) {
+        return { error: 'Nie udało się potwierdzić wybranej funkcji. Spróbuj ponownie.' }
+      }
+      if (get().user?.id !== updated.id) return { error: 'Sesja użytkownika uległa zmianie. Zaloguj się ponownie.' }
+      sessionStorage.setItem(roleChoiceKey(updated.id), role)
+      set({ profile: updated, roleChoiceRequired: false })
+      return { error: null }
+    } catch {
+      return { error: 'Nie udało się połączyć z serwerem. Spróbuj ponownie.' }
+    }
+  },
 
   initialize: async () => {
     if (get().isInitialized) return
@@ -84,7 +110,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
             'Ladowanie profilu trwa zbyt dlugo.'
           )
           if (isUsableProfile(profile)) {
-            set({ user: session.user, session, profile })
+            set({ user: session.user, session, profile, ...roleChoiceState(profile) })
           } else {
             await supabase.auth.signOut({ scope: 'local' }).catch(() => undefined)
             set({ user: null, session: null, profile: null })
@@ -122,16 +148,20 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
           })
 
           window.setTimeout(() => {
+            const revision = profileRevision
             loadProfile(session.user.id)
               .then(profile => {
+                if (get().user?.id !== session.user.id || revision !== profileRevision) return
                 set({
                   user: session.user,
                   session,
                   profile: isUsableProfile(profile) ? profile : null,
+                  ...roleChoiceState(profile),
                   isInitialized: true
                 })
               })
               .catch(() => {
+                if (get().user?.id !== session.user.id || revision !== profileRevision) return
                 set({ user: session.user, session, profile: currentProfile?.id === session.user.id ? currentProfile : null, isInitialized: true })
               })
           }, 0)
@@ -141,6 +171,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   signIn: async (email, password) => {
+    profileRevision++
     set({
       isLoading: false,
       user: null,
@@ -168,10 +199,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: 'Konto jest nieaktywne. Skontaktuj sie z administratorem.' }
       }
 
+      sessionStorage.removeItem(roleChoiceKey(profile.id))
       set({
         user: data.user,
         session: data.session,
         profile,
+        ...roleChoiceState(profile),
         isLoading: false,
         isInitialized: true
       })
@@ -186,6 +219,7 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   signInWithRfid: async (rfidUid) => {
+    profileRevision++
     const cleanUid = rfidUid.trim()
     if (!cleanUid) return { error: 'Nie odczytano identyfikatora RFID.' }
 
@@ -230,10 +264,12 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
         return { error: 'Konto jest nieaktywne. Skontaktuj sie z administratorem.' }
       }
 
+      sessionStorage.removeItem(roleChoiceKey(profile.id))
       set({
         user: data.user,
         session: data.session,
         profile,
+        ...roleChoiceState(profile),
         isLoading: false,
         isInitialized: true
       })
@@ -248,6 +284,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   },
 
   signOut: async () => {
+    profileRevision++
+    const currentProfile = get().profile
+    if (currentProfile) sessionStorage.removeItem(roleChoiceKey(currentProfile.id))
     await disableChatPush().catch(() => undefined)
     await logAudit('logout')
     await supabase.auth.signOut({ scope: 'local' })
@@ -257,8 +296,9 @@ export const useAuthStore = create<AuthState>()((set, get) => ({
   refreshProfile: async () => {
     const { user } = get()
     if (!user) return
+    const revision = profileRevision
     const profile = await loadProfile(user.id)
-    if (profile) set({ profile })
+    if (get().user?.id === user.id && revision === profileRevision && profile) set({ profile, ...roleChoiceState(profile) })
   },
 
   hasRole: (role) => {

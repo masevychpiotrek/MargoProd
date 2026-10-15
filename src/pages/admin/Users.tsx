@@ -13,6 +13,7 @@ function isValidEmail(value: string) {
 }
 
 const ROLES: UserRole[] = ['operator', 'syringe_operator', 'manager', 'specialist', 'viewer', 'executive', 'admin']
+type RoleOption = UserRole | 'operator_manager'
 const OPERATORS = [
   'Marcel Pełczyński','Miłosz Pełczyński','Patryk Grelak','Damian Wiącek',
   'Agnieszka Kowalik','Kacper Wojciechowski','Michał Broniek','Szymon Jaślikowski',
@@ -37,11 +38,13 @@ export default function AdminUsers() {
   const [newPassword, setNewPassword] = useState('')
   const [saving, setSaving] = useState(false)
   const [msg, setMsg] = useState('')
+  const [userError, setUserError] = useState('')
+  const [savingRole, setSavingRole] = useState<string | null>(null)
 
   // New user form
   const [newName, setNewName] = useState('')
   const [newEmail, setNewEmail] = useState('')
-  const [newRole, setNewRole] = useState<UserRole>('operator')
+  const [newRole, setNewRole] = useState<RoleOption>('operator')
   const [newPass, setNewPass] = useState('Margomed123')
   const [addUserError, setAddUserError] = useState('')
 
@@ -67,11 +70,20 @@ export default function AdminUsers() {
     setTimeout(() => setMsg(''), 3000)
   }
 
-  const handleRoleChange = async (user: UserRow, role: UserRole) => {
-    await supabase.from('profiles').update({ role }).eq('id', user.id)
-    await logAudit('user_update', 'profiles', user.id, { role: user.role, full_name: user.full_name }, { role, full_name: user.full_name })
-    setMsg(`Rola ${user.full_name} zmieniona na ${ROLE_LABELS[role]}`)
-    loadUsers()
+  const handleRoleChange = async (user: UserRow, option: RoleOption) => {
+    if (savingRole) return
+    setSavingRole(user.id)
+    setUserError('')
+    const role = option === 'operator_manager' ? (user.role === 'manager' ? 'manager' : 'operator') : option
+    const payload = { role, operator_manager_access: option === 'operator_manager' }
+    try {
+      const { error } = await supabase.from('profiles').update(payload).eq('id', user.id)
+      if (error) { setUserError(`Nie udało się zmienić funkcji: ${error.message}`); return }
+      await logAudit('user_update', 'profiles', user.id, { role: user.role, operator_manager_access: user.operator_manager_access, full_name: user.full_name }, payload)
+      setMsg(`Funkcja ${user.full_name}: ${option === 'operator_manager' ? 'Operator i kierownik' : ROLE_LABELS[role]}`)
+      await loadUsers()
+    } catch { setUserError('Nie udało się zapisać funkcji. Sprawdź połączenie i spróbuj ponownie.') }
+    finally { setSavingRole(null) }
     setTimeout(() => setMsg(''), 3000)
   }
 
@@ -113,24 +125,26 @@ export default function AdminUsers() {
       return
     }
     setSaving(true)
+    setUserError('')
+    const accountRole = newRole === 'operator_manager' ? 'operator' : newRole
     const { data: createResult, error } = await supabase.functions.invoke<{ id?: string; error?: string }>('admin-create-user', {
       body: {
         email,
         password: newPass,
         full_name: newName.trim(),
-        role: newRole
+        role: accountRole
       }
     })
     let createdId = createResult?.id
     const createErrorMessage = createResult?.error || error?.message || ''
 
     if (createErrorMessage) {
-      if (shouldTryCreateUserRpcFallback(createErrorMessage, newRole)) {
+      if (shouldTryCreateUserRpcFallback(createErrorMessage, accountRole)) {
         const { data: fallbackId, error: fallbackError } = await supabase.rpc('admin_create_user_with_profile', {
           p_email: email,
           p_password: newPass,
           p_name: newName.trim(),
-          p_role: newRole
+          p_role: accountRole
         })
         if (fallbackError || !fallbackId) {
           setAddUserError(fallbackError?.message || createErrorMessage || 'Nie udalo sie utworzyc konta.')
@@ -144,7 +158,16 @@ export default function AdminUsers() {
         return
       }
     }
-    await logAudit('user_create', 'profiles', createdId, undefined, { full_name: newName.trim(), email, role: newRole })
+    if (!createdId) {
+      setAddUserError('Nie udało się potwierdzić utworzenia konta. Odśwież listę użytkowników przed ponowną próbą.')
+      setSaving(false)
+      return
+    }
+    if (newRole === 'operator_manager') {
+      const { error: accessError } = await supabase.from('profiles').update({ operator_manager_access: true }).eq('id', createdId!)
+      if (accessError) setUserError(`Konto zostało utworzone jako operator, ale nie udało się nadać funkcji kierownika: ${accessError.message}. Ustaw „Operator i kierownik” na liście użytkowników.`)
+    }
+    await logAudit('user_create', 'profiles', createdId, undefined, { full_name: newName.trim(), email, role: accountRole, requested_functions: newRole })
     setMsg(`Uzytkownik ${newName.trim()} zostal dodany. Przy pierwszym logowaniu system wymusi zmiane hasla.`)
     setShowAdd(false)
     setNewName(''); setNewEmail(''); setNewPass('Margomed123'); setNewRole('operator')
@@ -236,6 +259,7 @@ export default function AdminUsers() {
       {msg && (
         <div className="bg-green-500/10 border border-green-500/30 rounded-xl px-4 py-3 text-green-400 text-sm">{msg}</div>
       )}
+      {userError && <div role="alert" className="rounded-xl border border-red-500/30 bg-red-500/10 px-4 py-3 text-red-300 text-sm">{userError}</div>}
 
       {/* Search */}
       <input
@@ -273,13 +297,17 @@ export default function AdminUsers() {
                   </td>
                   <td className="py-3 px-4">
                     <select
-                      value={u.role}
-                      onChange={e => handleRoleChange(u, e.target.value as UserRole)}
+                      value={u.operator_manager_access ? 'operator_manager' : u.role}
+                      aria-label={`Funkcje: ${u.full_name}`}
+                      disabled={!!savingRole}
+                      onChange={e => handleRoleChange(u, e.target.value as RoleOption)}
                       className={cn('text-xs font-bold px-2.5 py-1.5 rounded-lg border cursor-pointer outline-none', roleColor(u.role))}
                       style={{ background: 'transparent' }}
                     >
                       {ROLES.map(r => <option key={r} value={r} style={{ background: '#1a2d4a' }}>{ROLE_LABELS[r]}</option>)}
+                      <option value="operator_manager" style={{ background: '#1a2d4a' }}>Operator i kierownik</option>
                     </select>
+                    {u.operator_manager_access && <div className="text-xs text-navy-400 mt-1">Aktywna funkcja: {ROLE_LABELS[u.role]}</div>}
                   </td>
                   <td className="py-3 px-4">
                     <button onClick={() => handleToggleActive(u)}
@@ -363,8 +391,9 @@ export default function AdminUsers() {
               </div>
               <div>
                 <label className="label">Rola</label>
-                <select value={newRole} onChange={e => setNewRole(e.target.value as UserRole)} className="input">
+                <select value={newRole} onChange={e => setNewRole(e.target.value as RoleOption)} className="input">
                   {ROLES.map(r => <option key={r} value={r}>{ROLE_LABELS[r]}</option>)}
+                  <option value="operator_manager">Operator i kierownik</option>
                 </select>
               </div>
               <div>

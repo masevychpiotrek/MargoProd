@@ -2,6 +2,7 @@ import { createBrowserRouter, RouterProvider, Navigate, Outlet, useRouteError } 
 import { RequireAuth, PublicOnly } from '@/features/auth/RequireAuth'
 import AppLayout from '@/components/layout/AppLayout'
 import LoginPage from '@/pages/Login'
+import ChooseFunction from '@/pages/ChooseFunction'
 
 // Lazy loaded pages
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
@@ -166,6 +167,11 @@ function RoleRedirect() {
 }
 
 const router = createBrowserRouter([
+  {
+    path: '/choose-function',
+    element: <RequireAuth><ChooseFunction /></RequireAuth>,
+    errorElement: <AppErrorBoundary />
+  },
   {
     path: '/login',
     element: <PublicOnly><LoginPage /></PublicOnly>,

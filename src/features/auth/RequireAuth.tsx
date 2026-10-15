@@ -41,7 +41,7 @@ const LOADING_SCREEN = (
 )
 
 export function RequireAuth({ children, roles }: Props) {
-  const { user, profile, isLoading, isInitialized, initialize } = useAuthStore()
+  const { user, profile, isLoading, isInitialized, initialize, roleChoiceRequired } = useAuthStore()
   const location = useLocation()
 
   useEffect(() => {
@@ -63,6 +63,10 @@ export function RequireAuth({ children, roles }: Props) {
     return <Navigate to="/password" replace />
   }
 
+  if (roleChoiceRequired && location.pathname !== '/choose-function' && location.pathname !== '/password') {
+    return <Navigate to="/choose-function" replace />
+  }
+
   // Sprawdź rolę
   if (roles) {
     const allowed = Array.isArray(roles) ? roles : [roles]
@@ -81,7 +85,7 @@ export function RequireAuth({ children, roles }: Props) {
 }
 
 export function PublicOnly({ children }: { children: React.ReactNode }) {
-  const { user, profile, isLoading, isInitialized, initialize } = useAuthStore()
+  const { user, profile, isLoading, isInitialized, initialize, roleChoiceRequired } = useAuthStore()
   const location = useLocation()
 
   useEffect(() => {
@@ -97,6 +101,7 @@ export function PublicOnly({ children }: { children: React.ReactNode }) {
 
   if (user && profile) {
     if (profile.must_change_password) return <Navigate to="/password" replace />
+    if (roleChoiceRequired) return <Navigate to="/choose-function" replace />
     if (profile.role === 'admin')   return <Navigate to="/admin"    replace />
     if (profile.role === 'manager') return <Navigate to="/manager"  replace />
     if (profile.role === 'viewer') return <Navigate to="/demo" replace />
