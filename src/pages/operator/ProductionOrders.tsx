@@ -67,8 +67,12 @@ function ComponentRow({
           <button onClick={() => setScanning(true)} disabled={saving} className="btn-secondary flex items-center gap-2 disabled:opacity-40">
             <Camera size={20} />{value ? 'Skanuj ponownie' : 'Skanuj numer serii'}
           </button>
+          <input ref={inputRef} value={value} onChange={e => onValueChange(e.target.value)}
+            onKeyDown={e => { if (e.key === 'Enter' && !saving) onSaveEntry() }}
+            aria-label={`Numer serii drenu: ${component.component_label}`}
+            placeholder="Lub wpisz numer serii ręcznie..." autoComplete="off" enterKeyHint="done"
+            disabled={saving} className="input font-mono text-sm flex-1 min-w-[180px] disabled:opacity-40" />
           {value && <>
-            <span className="font-mono text-sm text-white break-all">{value}</span>
             <button onClick={onSaveEntry} disabled={saving} className="btn-primary text-xs px-4 disabled:opacity-40">{saving ? 'Zapisywanie...' : 'Zapisz serię'}</button>
           </>}
         </div>
@@ -107,8 +111,15 @@ function ComponentRow({
           <button onClick={() => setScanning(true)} disabled={saving} className="btn-secondary flex items-center gap-2 disabled:opacity-40">
             <Camera size={20} />{value ? 'Skanuj ponownie' : 'Skanuj nową serię'}
           </button>
+          <input value={value} onChange={e => onValueChange(e.target.value)}
+            onKeyDown={e => {
+              if (e.key === 'Enter' && !saving) onConfirmWymiana()
+              if (e.key === 'Escape' && !saving) onCancelWymiana()
+            }}
+            aria-label={`Nowy numer serii drenu: ${component.component_label}`}
+            placeholder="Lub wpisz nową serię ręcznie..." autoComplete="off" enterKeyHint="done"
+            disabled={saving} className="input font-mono text-sm flex-1 min-w-[180px] disabled:opacity-40" />
           {value && <>
-            <span className="font-mono text-sm text-white break-all">{value}</span>
             <button onClick={onConfirmWymiana} disabled={saving} className="btn-primary text-xs px-4 disabled:opacity-40">{saving ? 'Zapisywanie...' : 'Zatwierdź wymianę'}</button>
           </>}
           <button onClick={onCancelWymiana} disabled={saving} className="btn-secondary text-xs px-3">Anuluj</button>
@@ -702,7 +713,7 @@ export default function OperatorProductionOrders() {
                 {drenFilled}/{drenComponents.length}
               </span>
             </div>
-            {!isLocked && <p className="text-sm text-navy-400">Wybierz stację i zeskanuj kod kreskowy z etykiety drenu aparatem.</p>}
+            {!isLocked && <p className="text-sm text-navy-400">Wybierz stację i zeskanuj kod kreskowy z etykiety drenu lub wpisz numer serii ręcznie, jeśli etykieta nie ma kodu.</p>}
             <div className="space-y-2">
               {drenComponents.map(renderComponentRow)}
             </div>
