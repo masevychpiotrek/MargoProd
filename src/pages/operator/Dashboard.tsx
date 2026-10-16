@@ -1,3 +1,4 @@
+import IsProProduction from '@/components/operator/IsProProduction'
 import { useEffect, useRef, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
@@ -95,6 +96,7 @@ export default function OperatorDashboard() {
       }, loadActiveShift)
       .subscribe()
 
+    window.addEventListener('is-pro-updated', loadReports)
     const fallback = window.setInterval(() => {
       loadReports()
       loadActiveShift()
@@ -109,6 +111,7 @@ export default function OperatorDashboard() {
     document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
+      window.removeEventListener('is-pro-updated', loadReports)
       window.clearInterval(fallback)
       window.removeEventListener('focus', refreshOnFocus)
       document.removeEventListener('visibilitychange', refreshOnFocus)
@@ -246,6 +249,7 @@ export default function OperatorDashboard() {
       {/* Active shift */}
       {visibleActiveShift && (
         <>
+          <IsProProduction shift={visibleActiveShift} reports={reports} />
           {/* Alert - report due */}
           {showCurrentHourReminder && (
             <div className={cn('rounded-2xl p-4 border', isUrgent

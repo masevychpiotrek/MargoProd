@@ -96,6 +96,8 @@ export interface Shift {
 }
 
 export interface HourlyReport {
+  segment_id?: string | null
+  is_segment_close?: boolean
   id: string
   shift_id: string
   machine_id: string

@@ -1,3 +1,4 @@
+import IsProDaySummary from '@/components/operator/IsProDaySummary'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { distributeQuantity, correctedHourlyRate } from '@/lib/dayReportCorrection'
@@ -1713,6 +1714,7 @@ export default function ManagerDayReport() {
           ))}
         </div>
 
+        <IsProDaySummary date={date} />
         {/* Czasy zmian */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
           {SHIFTS.map(shift => (

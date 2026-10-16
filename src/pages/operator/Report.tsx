@@ -1,11 +1,13 @@
 import { useState, useEffect, useRef } from 'react'
+import IsProProduction from '@/components/operator/IsProProduction'
+import { useIsProProduction } from '@/hooks/useIsProProduction'
 import { useNavigate } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose } from '@/lib/utils'
+import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose, getReportBlockEndAt } from '@/lib/utils'
 import { syncProductionAlert } from '@/lib/productionAlerts'
 import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, primaryStation, localHeuristicCheck, type ReportIssueType } from '@/lib/issueReports'
 import { checkIssueDescription, type IssueCheckResult } from '@/lib/aiIssueValidation'
@@ -317,7 +319,11 @@ export default function OperatorReport() {
   const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
   const { now, hour } = useClock()
-  const shiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
+  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id, activeShift?.started_at)
+  const allShiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
+  const segmentStartHour = production.active ? Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', hour: '2-digit', hourCycle: 'h23' }).format(new Date(production.active.started_at))) : null
+  const segmentStartIndex = segmentStartHour === null ? 0 : Math.max(0, allShiftHours.indexOf(segmentStartHour))
+  const shiftHours = allShiftHours.slice(segmentStartIndex)
   // Norma godzinowa z konfiguracji maszyny (target_per_hour); stala TARGET tylko
   // jako fallback. Dzieki temu zapisany target i generowana efficiency_pct
   // zgadzaja sie z metryka na panelu kierownika.
@@ -342,7 +348,8 @@ export default function OperatorReport() {
   const [rejectChecking,   setRejectChecking]   = useState(false)
   const [downtimeCause, setDowntimeCause] = useState('')
   const [rejectCause,   setRejectCause]   = useState('')
-  const [existingReports, setExistingReports] = useState<ReportExt[]>([])
+  const [allReports, setExistingReports] = useState<ReportExt[]>([])
+  const existingReports = allReports.filter(r => !r.is_segment_close && (!production.segments.length || r.segment_id === production.active?.id))
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
@@ -410,11 +417,13 @@ export default function OperatorReport() {
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') reloadShiftData()
     }
+    window.addEventListener('is-pro-updated', reloadShiftData)
     window.addEventListener('focus', reloadShiftData)
     document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
       window.clearInterval(fallback)
+      window.removeEventListener('is-pro-updated', reloadShiftData)
       window.removeEventListener('focus', reloadShiftData)
       document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
@@ -432,6 +441,10 @@ export default function OperatorReport() {
     const firstMissing = shiftHours.find(h => !reported.includes(h))
     if (firstMissing !== undefined && selectedHour !== firstMissing) setSelectedHour(firstMissing)
   }, [activeShift?.shift_type, editingReportId, existingReports, selectedHour, testMode])
+
+  useEffect(() => {
+    setCounterGood(''); setCounterReject(''); setEditingReportId(null)
+  }, [production.active?.id])
 
   const loadReports = async () => {
     if (!activeShift) return
@@ -506,10 +519,12 @@ export default function OperatorReport() {
   const incGood    = counterGood    !== '' ? Math.max(0, curGood    - prevGood)    : 0
   const incReject  = counterReject  !== '' ? Math.max(0, curReject  - prevReject)  : 0
 
-  const reportTarget = activeTarget
+  const blockEnd = activeShift ? getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, selectedHour).getTime() : 0
+  const productionMinutes = production.active && !testMode ? Math.max(0, Math.min(60, (blockEnd - Math.max(blockEnd - 3600000, new Date(production.active.started_at).getTime())) / 60000)) : 60
+  const reportTarget = Math.round(activeTarget * productionMinutes / 60)
   const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0
-  const explanationTarget = EXPLANATION_TARGET
+  const explanationTarget = Math.round(EXPLANATION_TARGET * productionMinutes / 60)
   const belowTarget = !testMode && explanationTarget > 0 && incGood > 0 && incGood < explanationTarget
   const rejectAboveLimit = !testMode && rejectPct > 5
   const downtimeNeedsCheck = (belowTarget || downtimeReason.trim().length > 0)
@@ -685,6 +700,8 @@ export default function OperatorReport() {
 
   const validate = (): string[] => {
     const errs: string[] = []
+    if (production.loading || production.error) errs.push('Poczekaj na wczytanie asortymentu lub odśwież ekran.')
+    if (production.changeover || (!production.active && !allReports.length)) errs.push('Najpierw rozpocznij produkcję wybranego asortymentu.')
     const orderQtyVal = parseInt(orderQty) || incGood
     if (!counterGood) errs.push('Wpisz stan licznika dobrych sztuk')
     if (!testMode && activeShift && isShiftPastAutoClose(activeShift.shift_date, activeShift.shift_type)) errs.push('Zmiana zostala automatycznie zamknieta po buforze 60 minut')
@@ -748,13 +765,15 @@ export default function OperatorReport() {
     setSaving(true); setErrors([])
     try {
       const orderQtyVal = parseInt(orderQty) || incGood
-      const { data: currentReports, error: currentReportsError } = await supabase
+      let duplicateQuery = supabase
         .from('hourly_reports')
         .select('id')
         .eq('shift_id', activeShift.id)
         .eq('hour_start', selectedHour)
         .is('deleted_at', null)
-        .maybeSingle()
+        .eq('is_segment_close', false)
+      duplicateQuery = production.active ? duplicateQuery.eq('segment_id', production.active.id) : duplicateQuery.is('segment_id', null)
+      const { data: currentReports, error: currentReportsError } = await duplicateQuery.maybeSingle()
       if (currentReportsError) {
         const message = getSaveErrorMessage(currentReportsError.message)
         setErrors([message])
@@ -769,11 +788,12 @@ export default function OperatorReport() {
         return
       }
       const payload = {
+        segment_id: production.active?.id ?? null,
         shift_id: activeShift.id, machine_id: activeShift.machine_id, operator_id: profile.id,
         hour_block: testMode ? formatTestBlock(selectedHour) : formatHourBlock(selectedHour), report_date: activeShift.shift_date, hour_start: selectedHour,
         good_count: incGood, reject_count: incReject, total_count: curGood,
         counter_good: curGood, counter_reject: curReject,
-        runtime_min: 60, ready_min: 0, alarm_min: 0,
+        runtime_min: Math.round(productionMinutes), ready_min: 0, alarm_min: 0,
         downtime_min: 0, micro_stoppage_min: 0, changeover_min: 0, failure_min: 0,
         counter_runtime: null, counter_ready: null, counter_alarm: null,
         target: reportTarget,
@@ -855,14 +875,16 @@ export default function OperatorReport() {
           return
         }
       }
-      loadReports(); loadOrders()
+      loadReports(); loadOrders(); production.reload()
     } finally { setSaving(false) }
   }
 
   if (!activeShift) return null
+  if (!production.active && (production.segments.length > 0 || allReports.length === 0)) return <div className="max-w-2xl mx-auto"><h1 className="text-2xl font-bold text-white mb-4">Produkcja · {activeMachine?.name}</h1><IsProProduction shift={activeShift} reports={allReports} /></div>
 
   return (
     <div className="max-w-4xl mx-auto">
+      <IsProProduction shift={activeShift} reports={allReports} />
       <div className="flex items-start justify-between mb-5 flex-wrap gap-4">
         <div>
           <h1 className="text-2xl font-bold text-white">Wpisz wynik godziny</h1>

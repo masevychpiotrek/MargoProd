@@ -9,6 +9,8 @@
     "preview": "vite preview",
     "lint": "eslint . --ext ts,tsx --report-unused-disable-directives --max-warnings 0",
     "typecheck": "tsc --noEmit",
+    "test:is-pro": "node --test tests/is-pro-changeovers.test.mjs",
+    "test:is-pro:ui": "playwright test --config tests/is-pro.playwright.config.ts",
     "test:syringe": "node --test tests/syringe-*.test.mjs",
     "test:syringe:ui": "playwright test --config tests/syringe.playwright.config.ts",
     "test:messenger": "node --test --test-isolation=none tests/messenger.test.mjs",

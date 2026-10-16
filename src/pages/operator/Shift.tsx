@@ -1,9 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
+import IsProProduction from '@/components/operator/IsProProduction'
+import { useIsProProduction } from '@/hooks/useIsProProduction'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
+import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, getReportBlockEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
 import ShiftStatPhotosCard, { fetchPhotos as fetchShiftStatPhotos, fetchReadings as fetchShiftStatReadings, SHIFT_STAT_MODULES } from '@/components/operator/ShiftStatPhotosCard'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
@@ -106,6 +108,13 @@ export default function OperatorShift() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, reopenShift, isLoading } = useShiftStore()
+  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id, activeShift?.started_at)
+  const plannedProductionHours = activeShift && production.segments.length ? SHIFT_HOURS[activeShift.shift_type].filter(h => production.segments.some(s => {
+    const end = getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, h).getTime()
+    return new Date(s.started_at).getTime() < end && (!s.ended_at || new Date(s.ended_at).getTime() > end - 3600000)
+  })) : null
+  const closedGood = production.segments.filter(s => s.ended_at).reduce((n, s) => n + (s.final_good ?? 0), 0)
+  const closedReject = production.segments.filter(s => s.ended_at).reduce((n, s) => n + (s.final_reject ?? 0), 0)
   const [machines, setMachines]     = useState<Machine[]>([])
   const [operators, setOperators]   = useState<Profile[]>([])
   const [assortments, setAssortments] = useState<Assortment[]>([])
@@ -183,10 +192,12 @@ export default function OperatorShift() {
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') loadShiftReports()
     }
+    window.addEventListener('is-pro-updated', loadShiftReports)
     window.addEventListener('focus', loadShiftReports)
     document.addEventListener('visibilitychange', refreshOnFocus)
 
     return () => {
+      window.removeEventListener('is-pro-updated', loadShiftReports)
       window.removeEventListener('focus', loadShiftReports)
       document.removeEventListener('visibilitychange', refreshOnFocus)
       supabase.removeChannel(channel)
@@ -338,7 +349,7 @@ export default function OperatorShift() {
     }
     const latestReports = await loadShiftReports()
     const reportedHours = latestReports.map(r => r.hour_start)
-    const shiftHours = SHIFT_HOURS[activeShift.shift_type as ShiftType]
+    const shiftHours = plannedProductionHours ?? SHIFT_HOURS[activeShift.shift_type as ShiftType]
     // Wszystkie zaplanowane godziny zmiany bez wpisu - rowniez te, ktorych okno wpisu
     // jeszcze sie nie otworzylo (np. ostatni blok otwiera sie dopiero 10 min przed koncem
     // zmiany). Bez tego operator mogl zamknac zmiane tuz przed otwarciem ostatniego bloku
@@ -349,8 +360,8 @@ export default function OperatorShift() {
     setMissingHours(missing)
     const hadSavedTimes = activeShift.summary_runtime_min != null
     setEndForm({
-      good: String(good),
-      reject: String(reject),
+      good: String(Math.max(0, good - closedGood)),
+      reject: String(Math.max(0, reject - closedReject)),
       runtime: activeShift.summary_runtime_min != null ? minsToHHMM(activeShift.summary_runtime_min) : '00:00',
       ready: activeShift.summary_ready_min != null ? minsToHHMM(activeShift.summary_ready_min) : '00:00',
       alarm: activeShift.summary_alarm_min != null ? minsToHHMM(activeShift.summary_alarm_min) : '00:00',
@@ -395,8 +406,8 @@ export default function OperatorShift() {
     // Operator widzi wypelnione pola i moze je poprawic przed zapisem.
     setEndForm(prev => ({
       ...prev,
-      good: counts.good !== undefined ? String(counts.good) : prev.good,
-      reject: counts.reject !== undefined ? String(counts.reject) : prev.reject,
+      good: production.segments.length && !production.active ? '0' : counts.good !== undefined ? String(counts.good) : prev.good,
+      reject: production.segments.length && !production.active ? '0' : counts.reject !== undefined ? String(counts.reject) : prev.reject,
       runtime: prev.runtime === '00:00' ? (patch.runtime ?? prev.runtime) : prev.runtime,
       ready: prev.ready === '00:00' ? (patch.ready ?? prev.ready) : prev.ready,
       alarm: prev.alarm === '00:00' ? (patch.alarm ?? prev.alarm) : prev.alarm,
@@ -430,6 +441,7 @@ export default function OperatorShift() {
       setError('Aby zakończyć zmianę, wpisz ZAMKNIJ w oknie potwierdzenia.')
       return
     }
+    if (production.loading || production.error) { setError('Nie można potwierdzić asortymentów. Odśwież ekran.'); return }
     const runtime = parseHHMM(endForm.runtime)
     const ready = parseHHMM(endForm.ready)
     const alarm = parseHHMM(endForm.alarm)
@@ -438,8 +450,8 @@ export default function OperatorShift() {
       setError('Czasy wpisz w formacie GG:MM, np. 07:35.')
       return
     }
-    const good = Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
-    const reject = Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
+    const good = closedGood + (production.segments.length && !production.active ? 0 : Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0))
+    const reject = closedReject + (production.segments.length && !production.active ? 0 : Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0))
     const totalTime = (runtime ?? 0) + (ready ?? 0) + (alarm ?? 0) + (downtime ?? 0)
     const expected = TARGET_PER_SHIFT
     const lowResult = expected > 0 && good < Math.round(expected * 0.85)
@@ -475,7 +487,7 @@ export default function OperatorShift() {
   }
 
   // ── ACTIVE SHIFT VIEW ────────────────────────────────────────────────────
-  const activeShiftHours = activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : []
+  const activeShiftHours = plannedProductionHours ?? (activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : [])
   const reportedHours = shiftReports.map(r => r.hour_start)
   const openHours = activeShift
     ? activeShiftHours.filter(h => canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h))
@@ -493,14 +505,14 @@ export default function OperatorShift() {
     ? Math.round(totalGood / totalExpected * 100)
     : 0
   const completePct = activeShiftHours.length
-    ? Math.round(shiftReports.length / activeShiftHours.length * 100)
+    ? Math.min(100, Math.round(new Set(shiftReports.map(r => r.hour_start)).size / activeShiftHours.length * 100))
     : 0
   const shiftEndAt = activeShift ? getShiftEndAt(activeShift.shift_date, activeShift.shift_type) : null
   const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
   const shiftOperator1 = activeShift?.operator_1?.full_name ?? profile?.full_name ?? 'Operator 1'
   const shiftOperator2 = activeShift?.operator_2?.full_name ?? null
-  const endFormGood = Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
-  const endFormReject = Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
+  const endFormGood = closedGood + Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
+  const endFormReject = closedReject + Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
   const endFormRejectPct = rejectPct(endFormGood, endFormReject)
   const endFormRuntime = parseHHMM(endForm.runtime) ?? 0
   const endFormReady = parseHHMM(endForm.ready) ?? 0
@@ -520,6 +532,7 @@ export default function OperatorShift() {
           <p className="text-sm sm:text-base text-navy-400 mt-1">Aktywna zmiana produkcyjna</p>
         </div>
 
+        <IsProProduction shift={activeShift} reports={shiftReports} />
         {/* Ostrzeżenie przy kończeniu */}
         {showEndWarning && (
           <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: 'rgba(7,8,13,0.9)', backdropFilter: 'blur(8px)' }}>
@@ -535,6 +548,7 @@ export default function OperatorShift() {
               <p className="text-navy-300 text-sm mb-4">
                 Zamkniesz aktywna zmiane na maszynie {activeMachine.name}. Po zamknieciu operator nie bedzie juz wpisywal wynikow w tej zmianie.
               </p>
+              {production.segments.length > 0 && <p className="mb-4 text-sm text-amber-300">Wpisz końcowe liczniki aktualnego asortymentu. Poprzednie asortymenty ({closedGood.toLocaleString('pl-PL')} dobrych szt.) system doliczy automatycznie.</p>}
               {missingHours.length > 0 ? (
                 <>
                   <p className="text-red-300 text-sm font-semibold mb-4">
@@ -634,21 +648,21 @@ export default function OperatorShift() {
                 </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label>
-                    <span className="label">Produkcja razem</span>
+                    <span className="label">{production.segments.length ? 'Końcowy licznik — dobre sztuki' : 'Produkcja razem'}</span>
                     <input
                       type="number"
                       min="0"
-                      value={endForm.good}
+                      disabled={production.segments.length > 0 && !production.active} aria-label="Końcowy licznik dobrych sztuk aktualnego asortymentu" value={endForm.good}
                       onChange={e => setEndForm(prev => ({ ...prev, good: e.target.value }))}
                       className="input mt-1 font-mono"
                     />
                   </label>
                   <label>
-                    <span className="label">Odrzut razem</span>
+                    <span className="label">{production.segments.length ? 'Końcowy licznik — odrzut' : 'Odrzut razem'}</span>
                     <input
                       type="number"
                       min="0"
-                      value={endForm.reject}
+                      disabled={production.segments.length > 0 && !production.active} aria-label="Końcowy licznik odrzutu aktualnego asortymentu" value={endForm.reject}
                       onChange={e => setEndForm(prev => ({ ...prev, reject: e.target.value }))}
                       className="input mt-1 font-mono"
                     />
