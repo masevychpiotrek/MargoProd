@@ -367,20 +367,14 @@ export default function OperatorProductionOrders() {
       return
     }
     setSavingKey(component.id)
-    const now = new Date().toISOString()
-    const { error: histError, data: histRow } = await supabase.from('production_job_component_history').insert({
-      component_id: component.id,
-      job_id: component.job_id,
-      previous_batch_number: component.batch_number,
-      new_batch_number: value,
-      changed_by: profile!.id
-    }).select('*').single()
-    if (!histError) {
-      await supabase.from('production_job_components').update({
-        batch_number: value,
-        entered_at: now,
-        entered_by: profile!.id
-      }).eq('id', component.id)
+    const { error: histError, data: histRow } = await supabase.rpc('production_job_exchange_batch', {
+      p_component: component.id,
+      p_job: component.job_id,
+      p_previous: component.batch_number,
+      p_batch: value
+    })
+    if (!histError && histRow) {
+      const now = histRow.changed_at
       await logAudit('production_job_component_update', 'production_job_components', component.id,
         { batch_number: component.batch_number }, { batch_number: value })
       setComponents(prev => prev.map(c => c.id === component.id
@@ -392,6 +386,9 @@ export default function OperatorProductionOrders() {
       setEntryValues(prev => { const next = { ...prev }; delete next[component.id]; return next })
       setEditingKey(null)
       setConfirmErrors([])
+    }
+    if (histError) {
+      setConfirmErrors([`Nie udało się zapisać wymiany: ${histError.message}`])
     }
     setSavingKey(null)
   }
