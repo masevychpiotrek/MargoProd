@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from 'react'
+import { Fragment, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS } from '@/lib/productionJobs'
+import { collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS, productionJobPeriod, compareProductionJobs, formatBatchCell, batchCellHtml } from '@/lib/productionJobs'
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
 
 type JobRow = ProductionJob & {
@@ -111,6 +111,7 @@ export default function ManagerProductionJobs() {
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [filterAssortment, setFilterAssortment] = useState('')
+  const [filterMonth, setFilterMonth] = useState('')
   const [loadError, setLoadError] = useState('')
   const [copiedComponent, setCopiedComponent] = useState<string | null>(null)
   const [componentCopyError, setComponentCopyError] = useState(false)
@@ -180,7 +181,10 @@ export default function ManagerProductionJobs() {
   // asortymentów się kiedyś zmieni.
   const assortmentOptions = [...new Set(jobs.map(j => j.assortment_name))].sort((a, b) => a.localeCompare(b, 'pl'))
 
+  const monthOptions = [...new Set(jobs.map(j => productionJobPeriod(j.order_number)?.key).filter((key): key is string => !!key))].sort().reverse()
+
   const filtered = jobs.filter(j => {
+    if (filterMonth && productionJobPeriod(j.order_number)?.key !== filterMonth) return false
     if (filterAssortment && j.assortment_name !== filterAssortment) return false
     const q = search.trim().toLowerCase()
     if (!q) return true
@@ -188,18 +192,30 @@ export default function ManagerProductionJobs() {
       (j.series_number ?? '').toLowerCase().includes(q) ||
       j.assortment_name.toLowerCase().includes(q) ||
       (one(j.machine)?.name ?? '').toLowerCase().includes(q)
-  })
+  }).sort(compareProductionJobs)
 
   const batchGroups = collectComponentBatches(
     components.filter(component => component.job_id === selectedJob?.id),
     history.filter(entry => entry.job_id === selectedJob?.id)
   ).filter(group => group.batches.length > 0)
 
-  const copyComponentBatches = async (key: string, text: string) => {
+  const copyComponentBatches = async (key: string, batches: string[]) => {
     setCopiedComponent(null)
     setComponentCopyError(false)
     try {
-      await navigator.clipboard.writeText(text)
+      const text = formatBatchCell(batches)
+      if (typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
+        try {
+          await navigator.clipboard.write([new ClipboardItem({
+            'text/plain': new Blob([text], { type: 'text/plain' }),
+            'text/html': new Blob([batchCellHtml(batches)], { type: 'text/html' })
+          })])
+        } catch {
+          await navigator.clipboard.writeText(text)
+        }
+      } else {
+        await navigator.clipboard.writeText(text)
+      }
       setCopiedComponent(key)
     } catch {
       setComponentCopyError(true)
@@ -287,13 +303,8 @@ export default function ManagerProductionJobs() {
         componentsByJob.set(c.job_id, arr)
       })
 
-      // Grupowanie po asortymencie, a w obrebie asortymentu chronologicznie - zeby
-      // sasiednie kolumny byly kolejnymi zleceniami TEGO SAMEGO asortymentu, a nie
-      // przeplatanka wynikajaca z sortowania czysto po dacie startu.
-      const sortedJobs = filtered.slice().sort((a, b) =>
-        a.assortment_name.localeCompare(b.assortment_name, 'pl') ||
-        a.started_at.localeCompare(b.started_at)
-      )
+      // Same month/year ordering as the list, including exports.
+      const sortedJobs = filtered.slice().sort(compareProductionJobs)
 
       const wb = new ExcelJS.Workbook()
       wb.creator = 'MargoLine MES'
@@ -308,7 +319,7 @@ export default function ManagerProductionJobs() {
       const summaryWidths = [12, 9, 16, 22, 12, 16, 14, 20, 14]
       summaryWs.mergeCells(1, 1, 1, summaryColumns.length)
       const summaryTitle = summaryWs.getCell(1, 1)
-      summaryTitle.value = 'Podsumowanie produkcji — dzień po dniu, zmiana po zmianie'
+      summaryTitle.value = 'Podsumowanie produkcji — miesiące zleceń od najnowszych'
       summaryTitle.font = { name: 'Arial', bold: true, size: 13, color: { argb: GOLD } }
       summaryTitle.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: NAVY } }
       summaryTitle.alignment = { horizontal: 'center', vertical: 'middle' }
@@ -324,7 +335,7 @@ export default function ManagerProductionJobs() {
         summaryWs.getColumn(ci + 1).width = summaryWidths[ci]
       })
 
-      const chronological = filtered.slice().sort((a, b) => a.started_at.localeCompare(b.started_at))
+      const chronological = filtered.slice().sort(compareProductionJobs)
       let summaryRow = summaryHeaderRow + 1
       chronological.forEach((job, ri) => {
         const stripeColor = ri % 2 === 0 ? 'FFF3F4F6' : 'FFFFFFFF'
@@ -509,6 +520,10 @@ export default function ManagerProductionJobs() {
       </div>
 
       <div className="flex flex-wrap items-center gap-3">
+        <select aria-label="Miesiąc z numeru zlecenia" value={filterMonth} onChange={e => setFilterMonth(e.target.value)} className="input w-auto">
+          <option value="">Wszystkie miesiące</option>
+          {monthOptions.map(month => <option key={month} value={month}>{month.slice(5)}/{month.slice(0, 4)}</option>)}
+        </select>
         <input
           value={search} onChange={e => setSearch(e.target.value)}
           placeholder="Szukaj po numerze zlecenia, serii, asortymencie, automacie..."
@@ -552,7 +567,7 @@ export default function ManagerProductionJobs() {
         </div>
       )}
 
-      <p className="text-sm text-navy-400">Wybierz zlecenie z listy, aby zobaczyć użyte półfabrykaty i skopiować ich numery serii.</p>
+      <p className="text-sm text-navy-400">Miesiące od najnowszych według numeru zlecenia: Z/numer/miesiąc/rok. Wybierz zlecenie, aby skopiować serie do Excela.</p>
 
       <div className="card overflow-hidden">
         <div className="overflow-x-auto">
@@ -569,7 +584,11 @@ export default function ManagerProductionJobs() {
                 <tr><td colSpan={9} className="text-center py-8 text-navy-500">Ładowanie...</td></tr>
               ) : filtered.length === 0 ? (
                 <tr><td colSpan={9} className="text-center py-8 text-navy-500">Brak zleceń</td></tr>
-              ) : filtered.map(job => (
+              ) : filtered.map((job, index) => (
+                <Fragment key={job.id}>
+                {(index === 0 || productionJobPeriod(filtered[index - 1].order_number)?.key !== productionJobPeriod(job.order_number)?.key) && (
+                  <tr className="bg-navy-700/50"><td colSpan={9} className="px-4 py-3 font-bold text-brand">{productionJobPeriod(job.order_number)?.label ?? 'Bez rozpoznanego miesiąca'}</td></tr>
+                )}
                 <tr key={job.id} onClick={() => openDetail(job)}
                   className="border-b border-navy-800 hover:bg-navy-800/50 cursor-pointer">
                   <td className="py-2.5 px-4 font-mono text-white">{job.order_number}</td>
@@ -589,6 +608,7 @@ export default function ManagerProductionJobs() {
                     </span>
                   </td>
                 </tr>
+                </Fragment>
               ))}
             </tbody>
           </table>
@@ -628,7 +648,7 @@ export default function ManagerProductionJobs() {
 
                 <div>
                   <h3 className="text-base font-bold text-white mb-1">Półfabrykaty użyte w tym zleceniu</h3>
-                  <p className="text-sm text-navy-400 mb-3">Serie posortowane rosnąco, po jednym numerze w wierszu, bez powtórzeń — także z wymian. Dren zbiera serie ze wszystkich stacji tego zlecenia.</p>
+                  <p className="text-sm text-navy-400 mb-3">Serie posortowane rosnąco, bez powtórzeń — także z wymian. Przycisk kopiuje wszystkie serie półfabrykatu do jednej komórki Excela, oddzielone średnikami. Dren zbiera serie ze wszystkich stacji tego zlecenia.</p>
                   {componentCopyError && <p role="alert" className="text-sm text-amber-300 mb-3">Nie udało się skopiować. Kliknij pole z numerami i skopiuj zaznaczony tekst ręcznie.</p>}
                   <div className="space-y-3">
                     {batchGroups.length === 0 && <p className="text-sm text-navy-400">Nie wpisano jeszcze numerów serii półfabrykatów dla tego zlecenia.</p>}
@@ -637,11 +657,11 @@ export default function ManagerProductionJobs() {
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold text-white">{group.label}</span>
                           <button className="btn-secondary text-xs shrink-0"
-                            onClick={() => copyComponentBatches(group.key, group.batches.join('\n'))}>
-                            {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj serie'}
+                            onClick={() => copyComponentBatches(group.key, group.batches)}>
+                            {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj do komórki Excela'}
                           </button>
                         </div>
-                        <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join('\n')} rows={Math.min(10, Math.max(2, group.batches.length))}
+                        <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={formatBatchCell(group.batches)} rows={2}
                           onClick={event => event.currentTarget.select()} className="input font-mono text-sm w-full" />
                       </div>
                     ))}
@@ -680,3 +700,4 @@ export default function ManagerProductionJobs() {
     </div>
   )
 }
+

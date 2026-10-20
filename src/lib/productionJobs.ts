@@ -1,6 +1,33 @@
 // Stałe i logika dla funkcji "Zlecenie produkcyjne" (identyfikowalność półfabrykatów, moduł operator IS PRO)
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
 
+export function productionJobPeriod(orderNumber: string): { key: string; label: string; sequence: number } | null {
+  const match = /^Z\/(\d+)\/(\d{1,2})\/(\d{2}|\d{4})$/i.exec(orderNumber.trim())
+  if (!match) return null
+  const month = Number(match[2])
+  if (month < 1 || month > 12) return null
+  const year = match[3].length === 2 ? 2000 + Number(match[3]) : Number(match[3])
+  return { key: `${year}-${String(month).padStart(2, '0')}`, label: `${String(month).padStart(2, '0')}/${year}`, sequence: Number(match[1]) }
+}
+
+export function compareProductionJobs(a: Pick<ProductionJob, 'order_number' | 'started_at' | 'id'>, b: Pick<ProductionJob, 'order_number' | 'started_at' | 'id'>): number {
+  const ap = productionJobPeriod(a.order_number)
+  const bp = productionJobPeriod(b.order_number)
+  return (bp?.key ?? '').localeCompare(ap?.key ?? '') ||
+    (bp?.sequence ?? 0) - (ap?.sequence ?? 0) ||
+    b.started_at.localeCompare(a.started_at) || a.id.localeCompare(b.id)
+}
+
+// No line breaks or tabs: Excel pastes all series into one cell.
+export function formatBatchCell(batches: string[]): string {
+  return batches.map(batch => batch.replace(/[\t\r\n]+/g, ' ').trim()).join('; ')
+}
+
+export function batchCellHtml(batches: string[]): string {
+  const value = formatBatchCell(batches).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+  return `<table><tr><td style='mso-number-format:"\\@"'>${value}</td></tr></table>`
+}
+
 export interface AssortmentOption {
   name: string
   length_cm: 150 | 180

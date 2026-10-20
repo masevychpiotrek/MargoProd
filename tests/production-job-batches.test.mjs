@@ -47,3 +47,21 @@ test('Job summary keeps every batch used in the job, including its first batch',
  const copied=formatJobCopyText({job:{order_number:'Z/1',calculated_qty:1},machineName:'A',operatorName:'B',components:[component],history:history.slice(0,1)})
  assert.ok(copied.includes('Igła: CURRENT, FIRST'))
 })
+
+test('Orders sort by year, month and sequence from the order number; Excel copy stays in one text cell', async () => {
+ const ts=(await import('typescript')).default
+ const source=await readFile(new URL('../src/lib/productionJobs.ts',import.meta.url),'utf8')
+ const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2020,target:ts.ScriptTarget.ES2020}}).outputText
+ const {productionJobPeriod,compareProductionJobs,formatBatchCell,batchCellHtml}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+ assert.equal(productionJobPeriod('Z/09/11/26').key,'2026-11')
+ assert.equal(productionJobPeriod('Z/09/13/26'),null)
+ assert.equal(productionJobPeriod('Z/09/11/2026').key,'2026-11')
+ const numbers=['Z/64/07/26','Z/09/11/26','Z/10/11/26','Z/01/01/27','bad','Z/99/12/25']
+ const jobs=numbers.map((order_number,id)=>({order_number,id:String(id),started_at:'2026-10-20'}))
+ assert.deepEqual(jobs.sort(compareProductionJobs).map(j=>j.order_number),['Z/01/01/27','Z/10/11/26','Z/09/11/26','Z/64/07/26','Z/99/12/25','bad'])
+ assert.equal(formatBatchCell(['00123','LOT-2','LOT-10']),'00123; LOT-2; LOT-10')
+ assert.ok(!/[\t\r\n]/.test(formatBatchCell(['A\nB','C\tD'])))
+ assert.equal((batchCellHtml(['00123','<B>']).match(/<td /g)||[]).length,1)
+ assert.ok(batchCellHtml(['00123','<B>']).includes('&lt;B&gt;'))
+ assert.ok(batchCellHtml(['00123']).includes('mso-number-format'))
+})
