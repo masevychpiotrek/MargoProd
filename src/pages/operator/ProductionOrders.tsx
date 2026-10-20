@@ -24,7 +24,7 @@ function historyOperatorName(row: HistoryRow) {
 // nowy typ komponentu przy kazdym renderze rodzica i pole input traciloby fokus po
 // kazdym wpisanym znaku (trzeba by bylo klikac ponownie przed kazdym kolejnym znakiem).
 function ComponentRow({
-  component, isLocked, isEditing, value, saving, inputRef,
+  component, isLocked, isEditing, value, saving, inputRef, error,
   onValueChange, onSaveEntry, onStartWymiana, onCancelWymiana, onConfirmWymiana
 }: {
   component: ProductionJobComponent
@@ -32,6 +32,7 @@ function ComponentRow({
   isEditing: boolean
   value: string
   saving: boolean
+  error?: string
   inputRef?: (el: HTMLInputElement | null) => void
   onValueChange: (v: string) => void
   onSaveEntry: () => void
@@ -151,6 +152,7 @@ function ComponentRow({
           <button onClick={onCancelWymiana} className="btn-secondary text-xs px-3">Anuluj</button>
         </div>
       )}
+      {error && <p role="alert" className="mt-2 text-sm text-red-300">{error}</p>}
       {scanning && component.is_dren && !isLocked && (
         <DrenBarcodeScanner label={component.component_label}
           onClose={() => setScanning(false)}
@@ -231,6 +233,7 @@ export default function OperatorProductionOrders() {
   const [orderNumberEditError, setOrderNumberEditError] = useState('')
   const [savingOrderNumber, setSavingOrderNumber] = useState(false)
 
+  const [entryError, setEntryError] = useState<{ id: string; message: string } | null>(null)
   const [confirmErrors, setConfirmErrors] = useState<string[]>([])
   const [confirming, setConfirming] = useState(false)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
@@ -324,73 +327,83 @@ export default function OperatorProductionOrders() {
     await load()
   }
 
+  const reportEntryError = (component: ProductionJobComponent, message: string) => {
+    setEntryError({ id: component.id, message })
+    setConfirmErrors([message])
+  }
+
   const handleSaveEntry = async (component: ProductionJobComponent) => {
     const value = (entryValues[component.id] ?? '').trim()
     if (!isPlausibleBatchNumber(value)) {
-      setConfirmErrors([`Podaj konkretny numer serii dla: ${component.component_label}`])
+      reportEntryError(component, `Podaj konkretny numer serii dla: ${component.component_label}`)
+      return
+    }
+    if (!profile || !job || job.status !== 'active') {
+      reportEntryError(component, 'Przywróć zlecenie do edycji i sprawdź zalogowanie.')
       return
     }
     setSavingKey(component.id)
-    const now = new Date().toISOString()
-    const { error } = await supabase.from('production_job_components').update({
-      batch_number: value,
-      status: 'aktywny',
-      entered_at: now,
-      entered_by: profile!.id
-    }).eq('id', component.id)
-    if (!error) {
-      await logAudit('production_job_component_update', 'production_job_components', component.id, undefined, { batch_number: value })
-      const updated = components.map(c => c.id === component.id
-        ? { ...c, batch_number: value, status: 'aktywny' as const, entered_at: now, entered_by: profile!.id }
-        : c)
-      setComponents(updated)
+    setEntryError(null)
+    try {
+      const { data, error } = await supabase.from('production_job_components').update({
+        batch_number: value, status: 'aktywny', entered_at: new Date().toISOString(), entered_by: profile.id
+      }).eq('id', component.id).eq('job_id', job.id).is('batch_number', null).select('*').single()
+      if (error) throw error
+      if (!data) throw new Error('Nie zapisano partii. Odśwież dane zlecenia.')
+      setComponents(prev => prev.map(c => c.id === component.id ? data as ProductionJobComponent : c))
       setEntryValues(prev => { const next = { ...prev }; delete next[component.id]; return next })
       setConfirmErrors([])
-      // przenies fokus na kolejna pusta pozycje - operator wpisuje wiele numerow pod rzad
-      const next = updated
-        .filter(c => c.sort_order > component.sort_order && !c.batch_number)
+      const next = components.filter(c => c.sort_order > component.sort_order && !c.batch_number)
         .sort((a, b) => a.sort_order - b.sort_order)[0]
       if (window.matchMedia('(any-pointer: coarse)').matches) {
         const focused = document.activeElement
         if (focused instanceof HTMLInputElement) focused.blur()
       } else if (next) requestAnimationFrame(() => inputRefs.current[next.id]?.focus())
-    } else {
-      setConfirmErrors([`Nie udało się zapisać serii dla: ${component.component_label}. Spróbuj ponownie.`])
+      // A separate audit request must not block confirmation of a saved batch.
+      void logAudit('production_job_component_update', 'production_job_components', component.id, undefined, { batch_number: value }).catch(() => {})
+    } catch (cause) {
+      const message = cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : 'Sprawdź połączenie i spróbuj ponownie.'
+      reportEntryError(component, `Nie udało się zapisać serii: ${message}`)
+    } finally {
+      setSavingKey(null)
     }
-    setSavingKey(null)
   }
 
   const handleConfirmWymiana = async (component: ProductionJobComponent) => {
     const value = (entryValues[component.id] ?? '').trim()
     if (!isPlausibleBatchNumber(value)) {
-      setConfirmErrors([`Podaj konkretny nowy numer serii dla: ${component.component_label}`])
+      reportEntryError(component, `Podaj konkretny nowy numer serii dla: ${component.component_label}`)
+      return
+    }
+    if (!profile || !job || job.status !== 'active') {
+      reportEntryError(component, 'Przywróć zlecenie do edycji i sprawdź zalogowanie.')
       return
     }
     setSavingKey(component.id)
-    const { error: histError, data: histRow } = await supabase.rpc('production_job_exchange_batch', {
-      p_component: component.id,
-      p_job: component.job_id,
-      p_previous: component.batch_number,
-      p_batch: value
-    })
-    if (!histError && histRow) {
-      const now = histRow.changed_at
-      await logAudit('production_job_component_update', 'production_job_components', component.id,
-        { batch_number: component.batch_number }, { batch_number: value })
-      setComponents(prev => prev.map(c => c.id === component.id
-        ? { ...c, batch_number: value, entered_at: now, entered_by: profile!.id }
-        : c))
-      if (histRow) {
-        setHistory(prev => [{ ...(histRow as HistoryRow), changed_by_profile: { id: profile!.id, full_name: profile?.full_name ?? '—' } }, ...prev])
+    setEntryError(null)
+    try {
+      const { error, data: histRow } = await supabase.rpc('production_job_exchange_batch', {
+        p_component: component.id, p_job: component.job_id, p_previous: component.batch_number, p_batch: value
+      })
+      if (error) {
+        if (error.code === 'PGRST202') throw new Error('Zapis wymian wymaga aktualizacji aplikacji przez administratora. Wpisany numer pozostał w polu.')
+        throw error
       }
+      if (!histRow) throw new Error('Baza nie potwierdziła wymiany. Odśwież dane zlecenia.')
+      setComponents(prev => prev.map(c => c.id === component.id
+        ? { ...c, batch_number: value, entered_at: histRow.changed_at, entered_by: profile.id, status: 'aktywny' as const } : c))
+      setHistory(prev => [{ ...(histRow as HistoryRow), changed_by_profile: { id: profile.id, full_name: profile.full_name ?? '—' } }, ...prev])
       setEntryValues(prev => { const next = { ...prev }; delete next[component.id]; return next })
       setEditingKey(null)
       setConfirmErrors([])
+      void logAudit('production_job_component_update', 'production_job_components', component.id,
+        { batch_number: component.batch_number }, { batch_number: value }).catch(() => {})
+    } catch (cause) {
+      const message = cause && typeof cause === 'object' && 'message' in cause ? String(cause.message) : 'Sprawdź połączenie i spróbuj ponownie.'
+      reportEntryError(component, `Nie udało się zapisać wymiany: ${message}`)
+    } finally {
+      setSavingKey(null)
     }
-    if (histError) {
-      setConfirmErrors([`Nie udało się zapisać wymiany: ${histError.message}`])
-    }
-    setSavingKey(null)
   }
 
   const startEditOrderNumber = () => {
@@ -513,7 +526,11 @@ export default function OperatorProductionOrders() {
 
   const isLocked = job?.status === 'confirmed'
   const standardComponents = components.filter(c => !c.is_dren)
-  const drenComponents = components.filter(c => c.is_dren)
+  // Reverse the two visible spools per station; IDs, labels and batches stay together.
+  const drenComponents = components.filter(c => c.is_dren).sort((a, b) => {
+    const rank = (c: ProductionJobComponent) => c.sort_order + (c.component_key.endsWith('_lewa') ? 1 : c.component_key.endsWith('_prawa') ? -1 : 0)
+    return rank(a) - rank(b)
+  })
   const standardFilled = standardComponents.filter(c => isPlausibleBatchNumber(c.batch_number)).length
   const drenFilled = drenComponents.filter(c => isPlausibleBatchNumber(c.batch_number)).length
 
@@ -524,6 +541,7 @@ export default function OperatorProductionOrders() {
       isLocked={isLocked}
       isEditing={editingKey === component.id}
       value={entryValues[component.id] ?? ''}
+      error={entryError?.id === component.id ? entryError.message : undefined}
       saving={savingKey === component.id}
       inputRef={el => { inputRefs.current[component.id] = el }}
       onValueChange={v => setEntryValues(prev => ({ ...prev, [component.id]: v }))}
