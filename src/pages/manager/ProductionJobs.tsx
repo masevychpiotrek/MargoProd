@@ -275,9 +275,10 @@ export default function ManagerProductionJobs() {
     setExportError('')
     try {
       const jobIds = filtered.map(j => j.id)
-      const [ExcelJS, allComponents] = await Promise.all([
+      const [ExcelJS, allComponents, allHistory] = await Promise.all([
         loadExcelJS(),
-        fetchComponentsForJobs(jobIds)
+        fetchComponentsForJobs(jobIds),
+        fetchHistoryForJobs(jobIds)
       ])
       const componentsByJob = new Map<string, ProductionJobComponent[]>()
       allComponents.forEach(c => {
@@ -440,10 +441,12 @@ export default function ManagerProductionJobs() {
               const col = firstDataCol + ci
               const comp = componentsByJob.get(job.id)?.find(c => c.component_key === def.key)
               const cell = ws.getCell(row, col)
-              cell.value = comp?.batch_number ?? ''
+              const batches = comp ? collectComponentBatches([comp], allHistory)[0]?.batches ?? [] : []
+              cell.value = batches.join('\n')
+              ws.getRow(row).height = Math.max(ws.getRow(row).height ?? 20, batches.length * 14 + 8)
               cell.font = { name: 'Arial', size: 9 }
               cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: stripeColor } }
-              cell.alignment = { horizontal: 'right', vertical: 'middle' }
+              cell.alignment = { horizontal: 'left', vertical: 'middle', wrapText: true }
               cell.border = isLastOfGroup[ci] ? { ...THIN_BORDER, right: groupEndBorder } : THIN_BORDER
             })
           })
@@ -625,7 +628,7 @@ export default function ManagerProductionJobs() {
 
                 <div>
                   <h3 className="text-base font-bold text-white mb-1">Półfabrykaty użyte w tym zleceniu</h3>
-                  <p className="text-sm text-navy-400 mb-3">Wszystkie wpisane serie, także z wymian, bez powtórzeń. Dren zbiera serie ze wszystkich stacji tego zlecenia.</p>
+                  <p className="text-sm text-navy-400 mb-3">Serie posortowane rosnąco, po jednym numerze w wierszu, bez powtórzeń — także z wymian. Dren zbiera serie ze wszystkich stacji tego zlecenia.</p>
                   {componentCopyError && <p role="alert" className="text-sm text-amber-300 mb-3">Nie udało się skopiować. Kliknij pole z numerami i skopiuj zaznaczony tekst ręcznie.</p>}
                   <div className="space-y-3">
                     {batchGroups.length === 0 && <p className="text-sm text-navy-400">Nie wpisano jeszcze numerów serii półfabrykatów dla tego zlecenia.</p>}
@@ -634,11 +637,11 @@ export default function ManagerProductionJobs() {
                         <div className="flex items-center justify-between gap-3">
                           <span className="text-sm font-semibold text-white">{group.label}</span>
                           <button className="btn-secondary text-xs shrink-0"
-                            onClick={() => copyComponentBatches(group.key, group.batches.join(', '))}>
+                            onClick={() => copyComponentBatches(group.key, group.batches.join('\n'))}>
                             {copiedComponent === group.key ? 'Skopiowano ✓' : 'Kopiuj serie'}
                           </button>
                         </div>
-                        <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join(', ')} rows={2}
+                        <textarea readOnly aria-label={`Numery serii: ${group.label}`} value={group.batches.join('\n')} rows={Math.min(10, Math.max(2, group.batches.length))}
                           onClick={event => event.currentTarget.select()} className="input font-mono text-sm w-full" />
                       </div>
                     ))}

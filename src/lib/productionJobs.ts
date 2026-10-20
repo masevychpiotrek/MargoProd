@@ -137,14 +137,15 @@ export function formatJobCopyText({ job, machineName, operatorName, components, 
     '',
     'Półfabrykaty:'
   ]
-  standard.forEach(c => lines.push(`- ${c.component_label}: ${c.batch_number ?? '—'}`))
+  const batchesFor = (c: ProductionJobComponent) => collectComponentBatches([c], history)[0]?.batches.join(', ') || '—'
+  standard.forEach(c => lines.push(`- ${c.component_label}: ${batchesFor(c)}`))
   lines.push('', 'Dren:')
-  dren.forEach(c => lines.push(`- ${c.component_label}: ${c.batch_number ?? '—'}`))
+  dren.forEach(c => lines.push(`- ${c.component_label}: ${batchesFor(c)}`))
   lines.push('', 'Wymiany:')
   if (history.length === 0) {
     lines.push('- brak wymian')
   } else {
-    history.forEach(h => {
+    history.slice().sort((a, b) => a.changed_at.localeCompare(b.changed_at) || a.id.localeCompare(b.id)).forEach(h => {
       lines.push(`- ${formatDateTime(h.changed_at)} ${h.component_label ?? ''} zmieniono z ${h.previous_batch_number ?? '—'} na ${h.new_batch_number}, operator: ${h.changed_by_name ?? '—'}`)
     })
   }

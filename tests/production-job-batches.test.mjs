@@ -37,9 +37,13 @@ test('Job summary keeps every batch used in the job, including its first batch',
  const ts = (await import('typescript')).default
  const source=await readFile(new URL('../src/lib/productionJobs.ts',import.meta.url),'utf8')
  const compiled=ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.ES2020,target:ts.ScriptTarget.ES2020}}).outputText
- const {collectComponentBatches}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
+ const {collectComponentBatches,formatJobCopyText}=await import(`data:text/javascript;base64,${Buffer.from(compiled).toString('base64')}`)
  const component={id:'current-component',job_id:'current-job',component_key:'igla',component_label:'Igła',sort_order:1,is_dren:false,batch_number:'CURRENT'}
  const history=[{component_id:'current-component',previous_batch_number:'FIRST',new_batch_number:'CURRENT'}, {component_id:'other-component',previous_batch_number:'FOREIGN',new_batch_number:'FOREIGN2'}]
  assert.deepEqual(collectComponentBatches([component],history)[0].batches,['CURRENT','FIRST'])
  assert.deepEqual(collectComponentBatches([{...component,batch_number:null}],[])[0].batches,[])
+ const numbered=[{component_id:component.id,previous_batch_number:'LOT-10',new_batch_number:'LOT-2'}, {component_id:component.id,previous_batch_number:' LOT-2 ',new_batch_number:'LOT-1'}]
+ assert.deepEqual(collectComponentBatches([{...component,batch_number:'LOT-10'}],numbered)[0].batches,['LOT-1','LOT-2','LOT-10'])
+ const copied=formatJobCopyText({job:{order_number:'Z/1',calculated_qty:1},machineName:'A',operatorName:'B',components:[component],history:history.slice(0,1)})
+ assert.ok(copied.includes('Igła: CURRENT, FIRST'))
 })
