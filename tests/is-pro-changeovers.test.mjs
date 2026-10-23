@@ -112,3 +112,29 @@ test('Changeover survives shift handover and is split by overlap, not counted tw
     assert.equal(overlap(0,30,10,10),0)
   } finally { await db.close() }
 })
+
+
+test('Whole-shift result after changeover does not add the previous assortment twice', async () => {
+  const { db, ids, command, report } = await setup()
+  try {
+    const a = await command('start', null, ids.a)
+    await report(a, 14, 7603, 7603)
+    await command('changeover', a, null, 7603, 0)
+    const b = await command('start', null, ids.b)
+    await report(b, 19, 5864, 5864)
+    // The form sends the whole shift (paper: 13469), including 2 unreported pieces.
+    await db.query('UPDATE shifts SET summary_good_count=13469,summary_reject_count=0,ended_at=now() WHERE id=$1', [ids.shift])
+    assert.equal((await db.query('SELECT sum(good_count) n FROM hourly_reports')).rows[0].n, 13469)
+    assert.equal((await db.query('SELECT good_count FROM hourly_reports WHERE is_segment_close AND segment_id=$1', [b])).rows[0].good_count, 2)
+    assert.equal((await db.query('SELECT final_good FROM is_pro_segments WHERE id=$1', [b])).rows[0].final_good, 5866)
+  } finally { await db.close() }
+})
+
+test('Final counts reject decimals, negative values, missing values and integer overflow', async () => {
+  const source = await readFile(new URL('../src/lib/isProProduction.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.ESNext } }).outputText
+  const { parseShiftEndCount } = await import('data:text/javascript;base64,' + Buffer.from(compiled).toString('base64'))
+  for (const value of ['', '-1', '1.5', '13abc', 'NaN', '2147483648']) assert.equal(parseShiftEndCount(value), null)
+  assert.equal(parseShiftEndCount('13469'), 13469)
+  assert.equal(parseShiftEndCount('0'), 0)
+})

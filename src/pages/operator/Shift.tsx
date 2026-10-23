@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react'
+import { parseShiftEndCount } from '@/lib/isProProduction'
 import IsProProduction from '@/components/operator/IsProProduction'
 import { useIsProProduction } from '@/hooks/useIsProProduction'
 import { useNavigate, useSearchParams } from 'react-router-dom'
@@ -140,6 +141,7 @@ export default function OperatorShift() {
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
   const [earlyEndRequested, setEarlyEndRequested] = useState(false)
   const [earlyEndReason,    setEarlyEndReason]    = useState('')
+  const [countDifferenceConfirmed, setCountDifferenceConfirmed] = useState(false)
   const [timesFromPhoto,    setTimesFromPhoto]    = useState(false)
   const EARLY_END_MIN_REASON_LENGTH = 15
   const [endForm, setEndForm] = useState<ShiftEndForm>({
@@ -360,8 +362,8 @@ export default function OperatorShift() {
     setMissingHours(missing)
     const hadSavedTimes = activeShift.summary_runtime_min != null
     setEndForm({
-      good: String(Math.max(0, good - closedGood)),
-      reject: String(Math.max(0, reject - closedReject)),
+      good: String(good),
+      reject: String(reject),
       runtime: activeShift.summary_runtime_min != null ? minsToHHMM(activeShift.summary_runtime_min) : '00:00',
       ready: activeShift.summary_ready_min != null ? minsToHHMM(activeShift.summary_ready_min) : '00:00',
       alarm: activeShift.summary_alarm_min != null ? minsToHHMM(activeShift.summary_alarm_min) : '00:00',
@@ -369,6 +371,7 @@ export default function OperatorShift() {
       notes: activeShift.notes ?? ''
     })
     setEndConfirmText('')
+    setCountDifferenceConfirmed(false)
     setEarlyEndRequested(false)
     setEarlyEndReason('')
     setTimesFromPhoto(false)
@@ -401,13 +404,13 @@ export default function OperatorShift() {
       }
     }
     if (Object.keys(patch).length === 0 && Object.keys(counts).length === 0) return
-    // Liczniki GOOD/SCRAP z automatu maja pierwszenstwo nad suma wpisow
-    // godzinowych - to twardy licznik maszyny, a nie reczne przepisywanie.
+    // Zdjęcie nie określa zakresu licznika po zmianie asortymentu.
+    // Dla produkcji z segmentami zachowujemy sumę raportów.
     // Operator widzi wypelnione pola i moze je poprawic przed zapisem.
     setEndForm(prev => ({
       ...prev,
-      good: production.segments.length && !production.active ? '0' : counts.good !== undefined ? String(counts.good) : prev.good,
-      reject: production.segments.length && !production.active ? '0' : counts.reject !== undefined ? String(counts.reject) : prev.reject,
+      good: production.segments.length ? prev.good : counts.good !== undefined ? String(counts.good) : prev.good,
+      reject: production.segments.length ? prev.reject : counts.reject !== undefined ? String(counts.reject) : prev.reject,
       runtime: prev.runtime === '00:00' ? (patch.runtime ?? prev.runtime) : prev.runtime,
       ready: prev.ready === '00:00' ? (patch.ready ?? prev.ready) : prev.ready,
       alarm: prev.alarm === '00:00' ? (patch.alarm ?? prev.alarm) : prev.alarm,
@@ -450,8 +453,22 @@ export default function OperatorShift() {
       setError('Czasy wpisz w formacie GG:MM, np. 07:35.')
       return
     }
-    const good = closedGood + (production.segments.length && !production.active ? 0 : Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0))
-    const reject = closedReject + (production.segments.length && !production.active ? 0 : Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0))
+    const good = parseShiftEndCount(endForm.good)
+    const reject = parseShiftEndCount(endForm.reject)
+    if (good === null || reject === null) { setError('Wpisz nieujemne, całkowite liczby sztuk.'); return }
+    // The database accepts whole-shift totals and subtracts closed segments itself.
+    const latestReports = await loadShiftReports()
+    const recordedGood = latestReports.reduce((n, r) => n + r.good_count, 0)
+    const recordedReject = latestReports.reduce((n, r) => n + r.reject_count, 0)
+    if (production.segments.length && !production.active && (good !== recordedGood || reject !== recordedReject)) {
+      setError('Wszystkie asortymenty są zamknięte. Wynik musi odpowiadać zapisanym raportom; korektę zgłoś kierownikowi.'); return
+    }
+    if (good < Math.max(recordedGood, closedGood) || reject < Math.max(recordedReject, closedReject)) {
+      setError('Wynik całej zmiany nie może być mniejszy od zapisanej produkcji. Błędne raporty musi najpierw skorygować kierownik.'); return
+    }
+    if ((good !== recordedGood || reject !== recordedReject) && (!countDifferenceConfirmed || endForm.notes.trim().length < 15)) {
+      setError('Wynik różni się od raportów. Sprawdź różnicę, potwierdź dodatkowe sztuki i opisz przyczynę (minimum 15 znaków).'); return
+    }
     const totalTime = (runtime ?? 0) + (ready ?? 0) + (alarm ?? 0) + (downtime ?? 0)
     const expected = TARGET_PER_SHIFT
     const lowResult = expected > 0 && good < Math.round(expected * 0.85)
@@ -511,8 +528,10 @@ export default function OperatorShift() {
   const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
   const shiftOperator1 = activeShift?.operator_1?.full_name ?? profile?.full_name ?? 'Operator 1'
   const shiftOperator2 = activeShift?.operator_2?.full_name ?? null
-  const endFormGood = closedGood + Math.max(0, Number.parseInt(endForm.good || '0', 10) || 0)
-  const endFormReject = closedReject + Math.max(0, Number.parseInt(endForm.reject || '0', 10) || 0)
+  const endFormGood = parseShiftEndCount(endForm.good) ?? 0
+  const endFormReject = parseShiftEndCount(endForm.reject) ?? 0
+  const endGoodDifference = endFormGood - totalGood
+  const endRejectDifference = endFormReject - totalReject
   const endFormRejectPct = rejectPct(endFormGood, endFormReject)
   const endFormRuntime = parseHHMM(endForm.runtime) ?? 0
   const endFormReady = parseHHMM(endForm.ready) ?? 0
@@ -548,7 +567,7 @@ export default function OperatorShift() {
               <p className="text-navy-300 text-sm mb-4">
                 Zamkniesz aktywna zmiane na maszynie {activeMachine.name}. Po zamknieciu operator nie bedzie juz wpisywal wynikow w tej zmianie.
               </p>
-              {production.segments.length > 0 && <p className="mb-4 text-sm text-amber-300">Wpisz końcowe liczniki aktualnego asortymentu. Poprzednie asortymenty ({closedGood.toLocaleString('pl-PL')} dobrych szt.) system doliczy automatycznie.</p>}
+              {production.segments.length > 0 && <p className="mb-4 text-sm text-amber-300">Wpisz wynik całej zmiany, łącznie ze wszystkimi asortymentami. Wynik zawiera już poprzednie asortymenty ({closedGood.toLocaleString('pl-PL')} dobrych szt.).</p>}
               {missingHours.length > 0 ? (
                 <>
                   <p className="text-red-300 text-sm font-semibold mb-4">
@@ -624,7 +643,7 @@ export default function OperatorShift() {
                   <div className="text-xs text-navy-400">Produkcja i odrzut sa podpowiedziane z wpisow godzinowych. Czasy wpisujesz dopiero tutaj.</div>
                   {timesFromPhoto && (
                     <div className="mt-1.5 text-xs text-brand">
-                      Dane (produkcja, odrzut, czasy) podpowiedziane ze zdjecia ekranu automatu — sprawdz i popraw jesli trzeba.
+                      {production.segments.length ? 'Czasy podpowiedziane ze zdjęcia. Produkcja i odrzut pozostają sumą raportów — zdjęcie może pokazywać inny zakres licznika.' : 'Dane podpowiedziane ze zdjęcia ekranu automatu — sprawdź i popraw, jeśli trzeba.'}
                     </div>
                   )}
                 </div>
@@ -646,24 +665,32 @@ export default function OperatorShift() {
                     <div className="font-mono text-lg font-bold text-cyan-300">{endFormMachineRate ? endFormMachineRate.toLocaleString('pl-PL') : '-'}</div>
                   </div>
                 </div>
+                <div className="mb-4 rounded-lg border border-navy-700 p-3 text-sm text-navy-200">
+                  <div>Suma zapisanych raportów: <strong>{totalGood.toLocaleString('pl-PL')}</strong> dobrych / <strong>{totalReject.toLocaleString('pl-PL')}</strong> odrzutu.</div>
+                  <div>Wynik do zapisania: <strong>{endFormGood.toLocaleString('pl-PL')}</strong> dobrych / <strong>{endFormReject.toLocaleString('pl-PL')}</strong> odrzutu.</div>
+                  {(endGoodDifference !== 0 || endRejectDifference !== 0) && <div role="alert" className="mt-2 text-amber-300">
+                    <div>Różnica: {endGoodDifference > 0 ? '+' : ''}{endGoodDifference.toLocaleString('pl-PL')} dobrych / {endRejectDifference > 0 ? '+' : ''}{endRejectDifference.toLocaleString('pl-PL')} odrzutu. Dodatnie różnice zostaną dopisane jako „Koniec zmiany”.</div>
+                    <label className="mt-2 flex items-start gap-2"><input type="checkbox" checked={countDifferenceConfirmed} onChange={e => setCountDifferenceConfirmed(e.target.checked)} />Potwierdzam dodatkowe sztuki poza raportami. Wynik obejmuje wszystkie asortymenty, a przyczynę różnicy opisuję w uwagach.</label>
+                  </div>}
+                </div>
                 <div className="grid grid-cols-2 gap-3">
                   <label>
-                    <span className="label">{production.segments.length ? 'Końcowy licznik — dobre sztuki' : 'Produkcja razem'}</span>
+                    <span className="label">Dobre sztuki — cała zmiana</span>
                     <input
                       type="number"
                       min="0"
-                      disabled={production.segments.length > 0 && !production.active} aria-label="Końcowy licznik dobrych sztuk aktualnego asortymentu" value={endForm.good}
-                      onChange={e => setEndForm(prev => ({ ...prev, good: e.target.value }))}
+                      disabled={production.segments.length > 0 && !production.active} aria-label="Dobre sztuki — cała zmiana" value={endForm.good}
+                      onChange={e => { setCountDifferenceConfirmed(false); setEndForm(prev => ({ ...prev, good: e.target.value })) }}
                       className="input mt-1 font-mono"
                     />
                   </label>
                   <label>
-                    <span className="label">{production.segments.length ? 'Końcowy licznik — odrzut' : 'Odrzut razem'}</span>
+                    <span className="label">Odrzut — cała zmiana</span>
                     <input
                       type="number"
                       min="0"
-                      disabled={production.segments.length > 0 && !production.active} aria-label="Końcowy licznik odrzutu aktualnego asortymentu" value={endForm.reject}
-                      onChange={e => setEndForm(prev => ({ ...prev, reject: e.target.value }))}
+                      disabled={production.segments.length > 0 && !production.active} aria-label="Odrzut — cała zmiana" value={endForm.reject}
+                      onChange={e => { setCountDifferenceConfirmed(false); setEndForm(prev => ({ ...prev, reject: e.target.value })) }}
                       className="input mt-1 font-mono"
                     />
                   </label>
