@@ -133,7 +133,7 @@ export function isPlausibleBatchNumber(value: string | null | undefined): boolea
 
 // ─── Format kopiowania (jedno źródło prawdy — podgląd operatora + kopiowanie kierownika) ──
 
-function formatDateTime(iso: string | null | undefined): string {
+export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) return '—'
   return new Date(iso).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' })
 }

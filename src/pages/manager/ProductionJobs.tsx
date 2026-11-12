@@ -1,7 +1,7 @@
 import { Fragment, useEffect, useRef, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
-import { collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS, productionJobPeriod, compareProductionJobs, formatBatchCell, batchCellHtml } from '@/lib/productionJobs'
+import { ASSORTMENTS, calculateQty, collectComponentBatches, formatJobCopyText, STANDARD_COMPONENTS, DREN_COMPONENTS, productionJobPeriod, compareProductionJobs, formatBatchCell, batchCellHtml, formatDateTime } from '@/lib/productionJobs'
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
 
 type JobRow = ProductionJob & {
@@ -121,6 +121,9 @@ export default function ManagerProductionJobs() {
   const [history, setHistory] = useState<HistoryRow[]>([])
   const [detailLoading, setDetailLoading] = useState(false)
   const [detailError, setDetailError] = useState('')
+  const [correction, setCorrection] = useState<{ order: string; assortment: string; labels: string; reason: string } | null>(null)
+  const [correctionError, setCorrectionError] = useState('')
+  const [correcting, setCorrecting] = useState(false)
   const detailRequest = useRef(0)
   const [copyStatus, setCopyStatus] = useState<'idle' | 'ok' | 'fail'>('idle')
   const [fallbackText, setFallbackText] = useState<string | null>(null)
@@ -155,6 +158,8 @@ export default function ManagerProductionJobs() {
 
   const openDetail = async (job: JobRow) => {
     const request = ++detailRequest.current
+    setCorrection(null)
+    setCorrectionError('')
     setSelectedJob(job)
     setDetailLoading(true)
     setDetailError('')
@@ -174,6 +179,30 @@ export default function ManagerProductionJobs() {
     } finally {
       if (request === detailRequest.current) setDetailLoading(false)
     }
+  }
+
+  const saveCorrection = async () => {
+    if (!selectedJob || !correction || correcting) return
+    setCorrecting(true)
+    setCorrectionError('')
+    try {
+      const { data, error } = await supabase.rpc('production_job_correct', {
+        p_job: selectedJob.id, p_expected_updated_at: selectedJob.updated_at,
+        p_order: correction.order.trim(), p_assortment: correction.assortment,
+        p_labels: Number(correction.labels), p_reason: correction.reason.trim()
+      })
+      if (error) throw error
+      if (!data) throw new Error('Nie zapisano korekty.')
+      const updated = { ...selectedJob, ...data } as JobRow
+      setJobs(prev => prev.map(job => job.id === updated.id ? updated : job))
+      setSelectedJob(updated)
+      setCorrection(null)
+      setCopyStatus('idle')
+      setFallbackText(null)
+    } catch (error) {
+      setCorrectionError(error && typeof error === 'object' && 'message' in error
+        ? String(error.message) : 'Nie udało się zapisać korekty.')
+    } finally { setCorrecting(false) }
   }
 
   // Lista asortymentów do filtra brana z faktycznie załadowanych zleceń (nie ze stałej
@@ -606,6 +635,11 @@ export default function ManagerProductionJobs() {
                     )}>
                       {job.status === 'confirmed' ? 'Zatwierdzone' : 'W trakcie'}
                     </span>
+                    {job.status === 'confirmed' && job.confirmed_at && (
+                      <time dateTime={job.confirmed_at} className="mt-1 block whitespace-nowrap text-xs text-navy-300">
+                        {formatDateTime(job.confirmed_at)}
+                      </time>
+                    )}
                   </td>
                 </tr>
                 </Fragment>
@@ -623,7 +657,7 @@ export default function ManagerProductionJobs() {
                 <h2 className="text-xl font-bold text-white">{selectedJob.order_number}</h2>
                 <p className="text-navy-400 text-sm">{selectedJob.series_number}</p>
               </div>
-              <button onClick={() => { detailRequest.current++; setSelectedJob(null) }} aria-label="Zamknij zlecenie" className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
+              <button onClick={() => { detailRequest.current++; setSelectedJob(null) }} disabled={correcting} aria-label="Zamknij zlecenie" className="text-navy-400 hover:text-white text-xl leading-none">✕</button>
             </div>
 
             {detailLoading ? (
@@ -644,6 +678,32 @@ export default function ManagerProductionJobs() {
                   <div><div className="text-navy-500 text-xs">Przelicznik</div><div className="font-mono text-white">{selectedJob.multiplier}</div></div>
                   <div><div className="text-navy-500 text-xs">Ilość sztuk</div><div className="font-mono text-brand font-bold">{selectedJob.calculated_qty.toLocaleString('pl-PL')}</div></div>
                   <div className="col-span-2"><div className="text-navy-500 text-xs">Start</div><div className="text-white">{new Date(selectedJob.started_at).toLocaleString('pl-PL')}</div></div>
+                  {selectedJob.status === 'confirmed' && selectedJob.confirmed_at && (
+                    <div className="col-span-2">
+                      <div className="text-navy-500 text-xs">Data zatwierdzenia</div>
+                      <time dateTime={selectedJob.confirmed_at} className="text-white">{formatDateTime(selectedJob.confirmed_at)}</time>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-xl border border-navy-600 p-4 space-y-3">
+                  {!correction ? <button className="btn-secondary" onClick={() => {
+                    setCorrectionError('')
+                    setCorrection({ order: selectedJob.order_number, assortment: selectedJob.assortment_name, labels: String(selectedJob.label_count), reason: '' })
+                  }}>Korekta zlecenia</button> : <form className="space-y-3" onSubmit={event => { event.preventDefault(); void saveCorrection() }}>
+                    <h3 className="font-bold text-white">Korekta zlecenia</h3>
+                    <label className="label">Numer zlecenia<input required disabled={correcting} className="input mt-1" value={correction.order} onChange={e => setCorrection({ ...correction, order: e.target.value })} /></label>
+                    <label className="label">Asortyment<select required disabled={correcting} className="input mt-1" value={correction.assortment} onChange={e => setCorrection({ ...correction, assortment: e.target.value })}>
+                      <option value="">Wybierz asortyment...</option>
+                      {ASSORTMENTS.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+                    </select></label>
+                    <label className="label">Liczba etykiet<input required disabled={correcting} type="number" min="1" step="1" className="input mt-1" value={correction.labels} onChange={e => setCorrection({ ...correction, labels: e.target.value })} /></label>
+                    <p className="text-sm text-brand">Ilość sztuk: {calculateQty(Number(correction.labels) || 0, ASSORTMENTS.find(a => a.name === correction.assortment)?.multiplier ?? 0).toLocaleString('pl-PL')}</p>
+                    <label className="label">Powód korekty<textarea required minLength={15} disabled={correcting} className="input mt-1" value={correction.reason} onChange={e => setCorrection({ ...correction, reason: e.target.value })} placeholder="Minimum 15 znaków" /></label>
+                    <p className="text-xs text-navy-400">Korekta obejmuje również zatwierdzone zlecenia. Powód i poprzednie dane zostaną zapisane w rejestrze zmian.</p>
+                    <div className="flex gap-2"><button disabled={correcting} className="btn-primary">{correcting ? 'Zapisywanie...' : 'Zapisz korektę'}</button><button type="button" disabled={correcting} className="btn-secondary" onClick={() => setCorrection(null)}>Anuluj</button></div>
+                  </form>}
+                  {correctionError && <p role="alert" className="text-sm text-red-300">{correctionError}</p>}
                 </div>
 
                 <div>

@@ -7,7 +7,7 @@ import { supabase, logAudit } from '@/lib/supabase'
 import { cn } from '@/lib/utils'
 import {
   ASSORTMENTS, calculateQty,
-  isPlausibleBatchNumber, formatJobCopyText,
+  isPlausibleBatchNumber, formatJobCopyText, formatDateTime,
   type AssortmentOption
 } from '@/lib/productionJobs'
 import type { ProductionJob, ProductionJobComponent, ProductionJobComponentHistory } from '@/types/database'
@@ -301,7 +301,7 @@ export default function OperatorProductionOrders() {
       shift_id: activeShift!.id,
       operator_id: profile!.id,
       shift_type: activeShift!.shift_type
-    }).select('id').single()
+    }).select('*').single()
 
     if (error) {
       const message = error.message.includes('idx_production_jobs_one_active_per_machine')
@@ -314,9 +314,9 @@ export default function OperatorProductionOrders() {
       return
     }
 
-    await logAudit('production_job_start', 'production_jobs', data.id, undefined, {
+    void logAudit('production_job_start', 'production_jobs', data.id, undefined, {
       order_number: orderNumber.trim(), assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
-    })
+    }).catch(() => {})
     setOrderNumberPart('')
     setOrderMonthPart('')
     setOrderYearPart('')
@@ -324,7 +324,17 @@ export default function OperatorProductionOrders() {
     setLabelCount('')
     setStarting(false)
     setShowStartForm(false)
-    await load()
+    setJob(data as ProductionJob)
+    setComponents([])
+    setHistory([])
+    setEntryValues({})
+    setEditingKey(null)
+    setEntryError(null)
+    setConfirmErrors([])
+    setEditingOrderNumber(false)
+    const [comps, hist] = await Promise.all([fetchComponents(data.id), fetchHistory(data.id)])
+    setComponents(comps)
+    setHistory(hist)
   }
 
   const reportEntryError = (component: ProductionJobComponent, message: string) => {
@@ -649,7 +659,7 @@ export default function OperatorProductionOrders() {
               <div className="card-title">Dane zlecenia</div>
               <div className="flex items-center gap-2">
                 {isLocked && (
-                  <button onClick={() => setShowStartForm(true)} className="text-xs text-navy-400 hover:text-white underline">
+                  <button onClick={() => { setSelectedAssortment(''); setLabelCount(''); setOrderNumberPart(''); setOrderMonthPart(''); setOrderYearPart(''); setStartErrors([]); setShowStartForm(true) }} className="text-xs text-navy-400 hover:text-white underline">
                     Rozpocznij nowe zlecenie
                   </button>
                 )}
@@ -696,6 +706,12 @@ export default function OperatorProductionOrders() {
               </div>
               <div><div className="text-navy-500 text-xs">Numer serii</div><div className="font-mono text-white">{job.series_number ?? '—'}</div></div>
               <div><div className="text-navy-500 text-xs">Start</div><div className="text-white">{new Date(job.started_at).toLocaleString('pl-PL', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}</div></div>
+              {isLocked && job.confirmed_at && (
+                <div>
+                  <div className="text-navy-500 text-xs">Data zatwierdzenia</div>
+                  <time dateTime={job.confirmed_at} className="text-white">{formatDateTime(job.confirmed_at)}</time>
+                </div>
+              )}
               <div><div className="text-navy-500 text-xs">Automat</div><div className="text-white">{activeMachine.name}</div></div>
               <div><div className="text-navy-500 text-xs">Zmiana</div><div className="text-white">{job.shift_type}</div></div>
               <div><div className="text-navy-500 text-xs">Operator</div><div className="text-white">{profile?.full_name}</div></div>

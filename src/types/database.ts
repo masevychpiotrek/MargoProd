@@ -17,7 +17,7 @@ export type AuditAction =
   | 'shift_manager_correction' | 'manager_report_update' | 'manager_report_delete'
   | 'manager_order_update' | 'manager_order_report_update'
   | 'ai_issue_validation'
-  | 'production_job_start' | 'production_job_component_update'
+  | 'production_job_start' | 'production_job_component_update' | 'production_job_correction'
   | 'syringe_session_start' | 'syringe_session_finish' | 'syringe_status_update'
   | 'syringe_production_save' | 'syringe_production_correction' | 'syringe_defect_assign'
   | 'syringe_downtime_start' | 'syringe_downtime_end'
