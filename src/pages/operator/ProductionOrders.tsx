@@ -212,7 +212,6 @@ export default function OperatorProductionOrders() {
   const [orderNumberPart, setOrderNumberPart] = useState('')
   const [orderMonthPart, setOrderMonthPart] = useState('')
   const [orderYearPart, setOrderYearPart] = useState('')
-  const orderNumber = `Z/${orderNumberPart}/${orderMonthPart}/${orderYearPart}`
   const orderNumberPartRef = useRef<HTMLInputElement>(null)
   const orderMonthPartRef = useRef<HTMLInputElement>(null)
   const orderYearPartRef = useRef<HTMLInputElement>(null)
@@ -279,7 +278,8 @@ export default function OperatorProductionOrders() {
   const handleStart = async () => {
     const errs: string[] = []
     if (!activeShift || !activeMachine || !profile) { errs.push('Brak aktywnej zmiany.'); setStartErrors(errs); return }
-    if (!orderNumberPart.trim() || !orderMonthPart.trim() || !orderYearPart.trim()) {
+    const orderNumber = `Z/${orderNumberPart.trim()}/${orderMonthPart.trim()}/${orderYearPart.trim()}`
+    if (!/^Z\/\d+\/(?:0[1-9]|1[0-2])\/\d{2}$/.test(orderNumber)) {
       errs.push('Wpisz pełny numer zlecenia (numer / miesiąc / rok), np. Z/01/07/26.')
     }
     if (!assortment) errs.push('Wybierz asortyment.')
@@ -291,7 +291,7 @@ export default function OperatorProductionOrders() {
     setStartErrors([])
     const qty = calculateQty(count, assortment!.multiplier)
     const { data, error } = await supabase.from('production_jobs').insert({
-      order_number: orderNumber.trim(),
+      order_number: orderNumber,
       assortment_name: assortment!.name,
       assortment_length_cm: assortment!.length_cm,
       label_count: count,
@@ -307,7 +307,7 @@ export default function OperatorProductionOrders() {
       const message = error.message.includes('idx_production_jobs_one_active_per_machine')
         ? 'Na tym automacie jest już aktywne zlecenie. Odśwież stronę.'
         : error.message.includes('production_jobs_order_number_key')
-          ? 'Zlecenie o takim numerze już istnieje. Wpisz inny numer.'
+          ? `Zlecenie ${orderNumber} już istnieje.`
           : `Nie udało się rozpocząć zlecenia: ${error.message}`
       setStartErrors([message])
       setStarting(false)
@@ -315,7 +315,7 @@ export default function OperatorProductionOrders() {
     }
 
     void logAudit('production_job_start', 'production_jobs', data.id, undefined, {
-      order_number: orderNumber.trim(), assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
+      order_number: orderNumber, assortment_name: assortment!.name, label_count: count, calculated_qty: qty, machine_id: activeMachine!.id
     }).catch(() => {})
     setOrderNumberPart('')
     setOrderMonthPart('')
@@ -435,7 +435,7 @@ export default function OperatorProductionOrders() {
     setSavingOrderNumber(false)
     if (error) {
       setOrderNumberEditError(error.message.includes('production_jobs_order_number_key')
-        ? 'Zlecenie o takim numerze już istnieje.'
+        ? `Zlecenie ${value} już istnieje.`
         : `Nie udało się zapisać: ${error.message}`)
       return
     }
@@ -590,6 +590,14 @@ export default function OperatorProductionOrders() {
                 ref={orderNumberPartRef}
                 value={orderNumberPart}
                 onChange={e => setOrderNumberPart(e.target.value)}
+                onPaste={e => {
+                  const fullNumber = /^Z\s*\/\s*(\d+)\s*\/\s*(0[1-9]|1[0-2])\s*\/\s*(\d{2})$/i.exec(e.clipboardData.getData('text').trim())
+                  if (!fullNumber) return
+                  e.preventDefault()
+                  setOrderNumberPart(fullNumber[1])
+                  setOrderMonthPart(fullNumber[2])
+                  setOrderYearPart(fullNumber[3])
+                }}
                 onKeyDown={e => { if (e.key === 'Enter') orderMonthPartRef.current?.focus() }}
                 placeholder="numer"
                 inputMode="numeric"
@@ -618,7 +626,7 @@ export default function OperatorProductionOrders() {
               />
             </div>
             <div className="text-xs text-navy-500 mt-1">
-              Format: Z / numer / miesiąc / rok — „Z/" jest stałe, wpisz tylko numer, miesiąc i rok
+              Wpisz numer, miesiąc i rok lub wklej pełny numer w pierwsze pole, np. Z/21/10/26.
             </div>
           </div>
           <div>

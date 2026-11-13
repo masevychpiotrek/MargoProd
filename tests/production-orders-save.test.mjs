@@ -65,6 +65,7 @@ test('Starting a new job displays the inserted assortment even while audit is pe
  await buttons.find(b=>b.props.children==='Rozpocznij nowe zlecenie').props.onClick()
  app.render()
  assert.equal(app.getState()[0].id,'new-job')
+ assert.equal(app.getState()[0].order_number,'Z/2/11/26')
  assert.equal(app.getState()[0].assortment_name,'IS PRO 180 cm')
  assert.equal(app.getState()[4],false)
  assert.deepEqual(Object.keys(app.getState()[13]??{}),[])
