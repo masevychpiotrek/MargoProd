@@ -22,7 +22,7 @@ import OeeHero from '@/components/manager/OeeHero'
 import { detectMachineSignals } from '@/lib/machineDiagnostics'
 import MachineDiagnostics from '@/components/manager/MachineDiagnostics'
 import type { HourlyReport, Machine, Profile, Shift, ShiftType } from '@/types/database'
-import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend } from 'chart.js'
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend, type ChartOptions } from 'chart.js'
 import { Bar, Line } from 'react-chartjs-2'
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, LineElement, PointElement, Tooltip, Legend)
@@ -40,6 +40,31 @@ const CHART_OPTS = {
   scales: {
     y: { grid: { color: 'rgba(255,255,255,0.04)' }, ticks: { color: '#6B7A99' } },
     x: { grid: { display: false }, ticks: { color: '#6B7A99' } }
+  }
+}
+
+const MONTHLY_ASSORTMENT_CHART_OPTS: ChartOptions<'bar'> = {
+  ...CHART_OPTS,
+  plugins: {
+    legend: { display: false },
+    tooltip: {
+      callbacks: {
+        label: item => `${(item.parsed.y ?? 0).toLocaleString('pl-PL')} szt.`
+      }
+    }
+  },
+  scales: {
+    ...CHART_OPTS.scales,
+    y: {
+      ...CHART_OPTS.scales.y,
+      beginAtZero: true,
+      title: { display: true, text: 'Dobre sztuki', color: '#94A3B8' },
+      ticks: { color: '#94A3B8', precision: 0 }
+    },
+    x: {
+      ...CHART_OPTS.scales.x,
+      ticks: { color: '#94A3B8', autoSkip: false }
+    }
   }
 }
 
@@ -102,6 +127,8 @@ type Recommendation = {
   reportId?: string
 }
 
+type ReportAssortment = { id: string; name: string }
+
 type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   ready_min?: number
   alarm_min?: number
@@ -112,6 +139,33 @@ type ReportWithContext = Omit<HourlyReport, 'operator'> & {
   counter_alarm?: number
   operator?: { full_name: string } | { full_name: string }[] | null
   shift?: { shift_type: string; shift_date?: string } | { shift_type: string; shift_date?: string }[] | null
+  segment?: { assortment: ReportAssortment | ReportAssortment[] | null } | { assortment: ReportAssortment | ReportAssortment[] | null }[] | null
+}
+
+const REPORT_CONTEXT = '*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)'
+
+async function loadReportsForRange(from: string, to: string, monthly: boolean) {
+  const select = monthly
+    ? `${REPORT_CONTEXT}, segment:is_pro_segments!segment_id(assortment:assortments!assortment_id(id, name))`
+    : REPORT_CONTEXT
+  const query = () => supabase.from('hourly_reports').select(select)
+    .gte('report_date', from)
+    .lte('report_date', to)
+    .is('deleted_at', null)
+    .order('report_date', { ascending: false })
+    .order('hour_start', { ascending: false })
+
+  if (!monthly) return await query()
+
+  const pageSize = 500
+  const reports: ReportWithContext[] = []
+  for (let offset = 0; ; offset += pageSize) {
+    const { data, error } = await query().order('id').range(offset, offset + pageSize - 1)
+    if (error) return { data: null, error }
+    const page = (data ?? []) as unknown as ReportWithContext[]
+    reports.push(...page)
+    if (page.length < pageSize) return { data: reports, error: null }
+  }
 }
 
 type ShiftWithContext = Shift & {
@@ -375,6 +429,7 @@ export default function ManagerDashboard() {
   const [shiftSummaries, setShiftSummaries] = useState<ShiftWithContext[]>([])
   const [reports, setReports] = useState<ReportWithContext[]>([])
   const [historyReports, setHistoryReports] = useState<ReportWithContext[]>([])
+  const [monthlyReportsError, setMonthlyReportsError] = useState(false)
   const [loading, setLoading] = useState(true)
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
@@ -458,6 +513,7 @@ export default function ManagerDashboard() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'hourly_reports' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'shifts' }, load)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'machines' }, load)
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'assortments' }, load)
       .subscribe()
     const refreshOnFocus = () => {
       if (document.visibilityState === 'visible') load()
@@ -470,7 +526,7 @@ export default function ManagerDashboard() {
       document.removeEventListener('visibilitychange', refreshOnFocus)
       channel.current?.unsubscribe()
     }
-  }, [queryRange.from, queryRange.to])
+  }, [activeTab, queryRange.from, queryRange.to])
 
   const load = async () => {
     const requestId = ++loadRequestSeq.current
@@ -496,14 +552,7 @@ export default function ManagerDashboard() {
         .gte('shift_date', queryRange.from)
         .lte('shift_date', queryRange.to)
         .order('shift_date', { ascending: false }),
-      supabase
-        .from('hourly_reports')
-        .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
-        .gte('report_date', queryRange.from)
-        .lte('report_date', queryRange.to)
-        .is('deleted_at', null)
-        .order('report_date', { ascending: false })
-        .order('hour_start', { ascending: false }),
+      loadReportsForRange(queryRange.from, queryRange.to, activeTab === 'monthly'),
       supabase
         .from('hourly_reports')
         .select('*, operator:profiles!operator_id(full_name), shift:shifts!shift_id(shift_type, shift_date)')
@@ -527,6 +576,7 @@ export default function ManagerDashboard() {
       ))
     }
 
+    if (requestId !== loadRequestSeq.current) return
     if (!mRes.error) setMachines((mRes.data ?? []) as Machine[])
     if (!pRes.error) setOperators((pRes.data ?? []) as Pick<Profile, 'id' | 'full_name'>[])
     if (!activeRes.error) {
@@ -535,7 +585,8 @@ export default function ManagerDashboard() {
       ))
     }
     if (!shiftRes.error) setShiftSummaries((shiftRes.data ?? []) as ShiftWithContext[])
-    if (!rRes.error) setReports((rRes.data ?? []) as ReportWithContext[])
+    if (activeTab === 'monthly') setMonthlyReportsError(Boolean(rRes.error))
+    if (!rRes.error || activeTab === 'monthly') setReports((rRes.data ?? []) as ReportWithContext[])
     if (!historyRes.error) setHistoryReports((historyRes.data ?? []) as ReportWithContext[])
     setLoading(false)
   }
@@ -1261,6 +1312,32 @@ export default function ManagerDashboard() {
   }, [dayReports, machineFilter, machines])
 
   const monthlyTarget = Math.max(0, Number.parseInt(monthlyTargetInput || '0', 10) || 0)
+  const monthlyAssortmentChart = useMemo(() => {
+    const totals = new Map<string | null, { name: string; good: number }>()
+    for (const report of filteredReports) {
+      if (!report.report_date.startsWith(`${year}-${month}-`)) continue
+      const assortment = one(one(report.segment)?.assortment)
+      const key = assortment?.id ?? null
+      const total = totals.get(key) ?? { name: assortment?.name ?? 'Bez przypisanego asortymentu', good: 0 }
+      total.good += report.good_count
+      totals.set(key, total)
+    }
+    const rows = [...totals.values()]
+      .filter(row => row.good > 0)
+      .sort((a, b) => b.good - a.good || a.name.localeCompare(b.name, 'pl'))
+
+    return {
+      labels: rows.map(row => row.name),
+      datasets: [{
+        label: 'Dobre sztuki',
+        data: rows.map(row => row.good),
+        backgroundColor: '#38BDF8',
+        borderRadius: 4,
+        maxBarThickness: 64
+      }]
+    }
+  }, [filteredReports, month, year])
+
   const monthlyPlan = useMemo(() => {
     const workdays = workdaysOfMonth(year, month)
     const calendarDays = calendarDaysOfMonth(year, month)
@@ -1879,6 +1956,26 @@ export default function ManagerDashboard() {
                 </tbody>
               </table>
             </div>
+          </div>
+          <div className="mt-4 min-w-0 rounded-xl border border-navy-700 bg-navy-900 p-4 sm:p-5">
+            <h2 className="mb-4 text-sm font-bold text-white">Produkcja według asortymentu</h2>
+            {loading ? (
+              <p className="text-sm text-navy-400">Wczytywanie produkcji…</p>
+            ) : monthlyReportsError ? (
+              <p className="text-sm text-amber-200" role="alert">Nie udało się wczytać produkcji według asortymentu.</p>
+            ) : monthlyAssortmentChart.labels.length === 0 ? (
+              <p className="text-sm text-navy-400">Brak wyprodukowanych sztuk w wybranym miesiącu.</p>
+            ) : (
+              <div className="overflow-x-auto">
+                <div className="relative h-80" style={{ minWidth: monthlyAssortmentChart.labels.length * 96 }}>
+                  <Bar
+                    data={monthlyAssortmentChart}
+                    options={MONTHLY_ASSORTMENT_CHART_OPTS}
+                    aria-label="Liczba dobrych sztuk według asortymentu w wybranym miesiącu"
+                  />
+                </div>
+              </div>
+            )}
           </div>
         </div>
       )}
