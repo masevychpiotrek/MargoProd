@@ -321,7 +321,8 @@ export default function OperatorReport() {
   const { display: countdown, isUrgent } = useHourCountdown()
   const { now, hour } = useClock()
   const [allReports, setExistingReports] = useState<ReportExt[]>([])
-  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id, activeShift?.started_at)
+  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id,
+    activeShift ? getShiftStartAt(activeShift.shift_date, activeShift.shift_type).toISOString() : undefined)
   const allShiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
   const firstReportedHour = allShiftHours.find(h => allReports.some(report =>
     !report.is_segment_close && report.segment_id === production.active?.id && report.hour_start === h

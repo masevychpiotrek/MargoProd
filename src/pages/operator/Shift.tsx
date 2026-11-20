@@ -1,12 +1,12 @@
 import { useState, useEffect, useRef } from 'react'
-import { parseShiftEndCount } from '@/lib/isProProduction'
+import { isProPlannedHours, parseShiftEndCount } from '@/lib/isProProduction'
 import IsProProduction from '@/components/operator/IsProProduction'
 import { useIsProProduction } from '@/hooks/useIsProProduction'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import { useShiftStore } from '@/stores/shiftStore'
 import { useAuthStore } from '@/stores/authStore'
 import { supabase, getMachines, getProfiles } from '@/lib/supabase'
-import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftEndAt, getReportBlockEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
+import { canEnterHourlyReport, cn, efficiencyColor, formatHourBlock, getReportEntryOpenAt, getShiftAutoCloseAt, getShiftDateForStart, getShiftStartAt, getShiftEndAt, getReportBlockEndAt, isShiftPastAutoClose, SHIFT_HOURS } from '@/lib/utils'
 import { TimeInput } from '@/components/shared/FormControls'
 import ShiftStatPhotosCard, { fetchPhotos as fetchShiftStatPhotos, fetchReadings as fetchShiftStatReadings, SHIFT_STAT_MODULES } from '@/components/operator/ShiftStatPhotosCard'
 import type { HourlyReport, Machine, Profile, ShiftType } from '@/types/database'
@@ -109,11 +109,8 @@ export default function OperatorShift() {
   const [searchParams, setSearchParams] = useSearchParams()
   const { profile } = useAuthStore()
   const { activeShift, activeMachine, startShift, endShift, reopenShift, isLoading } = useShiftStore()
-  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id, activeShift?.started_at)
-  const plannedProductionHours = activeShift && production.segments.length ? SHIFT_HOURS[activeShift.shift_type].filter(h => production.segments.some(s => {
-    const end = getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, h).getTime()
-    return new Date(s.started_at).getTime() < end && (!s.ended_at || new Date(s.ended_at).getTime() > end - 3600000)
-  })) : null
+  const production = useIsProProduction(activeShift?.id, activeShift?.machine_id,
+    activeShift ? getShiftStartAt(activeShift.shift_date, activeShift.shift_type).toISOString() : undefined)
   const closedGood = production.segments.filter(s => s.ended_at).reduce((n, s) => n + (s.final_good ?? 0), 0)
   const closedReject = production.segments.filter(s => s.ended_at).reduce((n, s) => n + (s.final_reject ?? 0), 0)
   const [machines, setMachines]     = useState<Machine[]>([])
@@ -139,6 +136,13 @@ export default function OperatorShift() {
   const [endConfirmText, setEndConfirmText] = useState('')
   const [missingHours,   setMissingHours]   = useState<number[]>([])
   const [shiftReports,   setShiftReports]   = useState<HourlyReport[]>([])
+  const productionHoursFor = (reports: HourlyReport[]) => activeShift && production.segments.length
+    ? isProPlannedHours(SHIFT_HOURS[activeShift.shift_type].map(hour => {
+      const end = getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, hour).getTime()
+      return { hour, start: end - 3600000, end }
+    }), production.segments, production.changeovers, reports)
+    : null
+  const plannedProductionHours = productionHoursFor(shiftReports)
   const [earlyEndRequested, setEarlyEndRequested] = useState(false)
   const [earlyEndReason,    setEarlyEndReason]    = useState('')
   const [countDifferenceConfirmed, setCountDifferenceConfirmed] = useState(false)
@@ -350,8 +354,8 @@ export default function OperatorShift() {
       return
     }
     const latestReports = await loadShiftReports()
-    const reportedHours = latestReports.map(r => r.hour_start)
-    const shiftHours = plannedProductionHours ?? SHIFT_HOURS[activeShift.shift_type as ShiftType]
+    const reportedHours = latestReports.filter(r => !r.is_segment_close).map(r => r.hour_start)
+    const shiftHours = productionHoursFor(latestReports) ?? SHIFT_HOURS[activeShift.shift_type as ShiftType]
     // Wszystkie zaplanowane godziny zmiany bez wpisu - rowniez te, ktorych okno wpisu
     // jeszcze sie nie otworzylo (np. ostatni blok otwiera sie dopiero 10 min przed koncem
     // zmiany). Bez tego operator mogl zamknac zmiane tuz przed otwarciem ostatniego bloku
@@ -505,7 +509,7 @@ export default function OperatorShift() {
 
   // ── ACTIVE SHIFT VIEW ────────────────────────────────────────────────────
   const activeShiftHours = plannedProductionHours ?? (activeShift ? SHIFT_HOURS[activeShift.shift_type as ShiftType] : [])
-  const reportedHours = shiftReports.map(r => r.hour_start)
+  const reportedHours = shiftReports.filter(r => !r.is_segment_close).map(r => r.hour_start)
   const openHours = activeShift
     ? activeShiftHours.filter(h => canEnterHourlyReport(activeShift.shift_date, activeShift.shift_type, h))
     : []
@@ -521,8 +525,9 @@ export default function OperatorShift() {
   const avgEff = shiftReports.length && activeMachine
     ? Math.round(totalGood / totalExpected * 100)
     : 0
+  const completedHours = activeShiftHours.filter(h => reportedHours.includes(h)).length
   const completePct = activeShiftHours.length
-    ? Math.min(100, Math.round(new Set(shiftReports.map(r => r.hour_start)).size / activeShiftHours.length * 100))
+    ? Math.round(completedHours / activeShiftHours.length * 100)
     : 0
   const shiftEndAt = activeShift ? getShiftEndAt(activeShift.shift_date, activeShift.shift_type) : null
   const autoCloseAt = activeShift ? getShiftAutoCloseAt(activeShift.shift_date, activeShift.shift_type) : null
@@ -836,7 +841,7 @@ export default function OperatorShift() {
                 </div>
               </div>
               <div className={cn('text-sm font-bold', missingOpenHours.length ? 'text-amber-300' : 'text-green-400')}>
-                {shiftReports.length}/{activeShiftHours.length} raportow
+                {completedHours}/{activeShiftHours.length} raportow
               </div>
             </div>
             <div className="h-2 rounded-full bg-navy-700">

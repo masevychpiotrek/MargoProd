@@ -12,7 +12,8 @@ const duration = (ms: number) => {
 const time = (date: string) => new Date(date).toLocaleTimeString('pl-PL', { timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit' })
 
 export default function IsProProduction({ shift, reports, readOnly = false }: { shift: Shift; reports: HourlyReport[]; readOnly?: boolean }) {
-  const { segments, changeovers, active, changeover, error: loadError, loading, reload } = useIsProProduction(shift.id, shift.machine_id, shift.started_at)
+  const { segments, changeovers, active, changeover, error: loadError, loading, reload } = useIsProProduction(
+    shift.id, shift.machine_id, getShiftStartAt(shift.shift_date, shift.shift_type).toISOString())
   const [assortments, setAssortments] = useState<{ id: string; name: string }[]>([])
   const [assortment, setAssortment] = useState('')
   const [confirm, setConfirm] = useState(false)
@@ -51,7 +52,7 @@ export default function IsProProduction({ shift, reports, readOnly = false }: { 
     } catch { setError('Nie udało się zapisać. Sprawdź połączenie i spróbuj ponownie.') }
     finally { setBusy(false) }
   }
-  const start = Math.max(new Date(shift.started_at).getTime(), getShiftStartAt(shift.shift_date, shift.shift_type).getTime())
+  const start = getShiftStartAt(shift.shift_date, shift.shift_type).getTime()
   const end = Math.min(shift.ended_at ? new Date(shift.ended_at).getTime() : now, getShiftEndAt(shift.shift_date, shift.shift_type).getTime())
   const events = changeovers.filter(c => new Date(c.started_at).getTime() < end && (!c.ended_at || new Date(c.ended_at).getTime() > start))
   const overlap = (c: typeof changeover) => c ? overlapMilliseconds(new Date(c.started_at).getTime(), c.ended_at ? new Date(c.ended_at).getTime() : now, start, end) : 0
