@@ -7,7 +7,8 @@ import { useAuthStore } from '@/stores/authStore'
 import { supabase, logAudit } from '@/lib/supabase'
 import { useHourCountdown, useClock } from '@/hooks/useClock'
 import { useTestMode } from '@/hooks/useTestMode'
-import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose, getReportBlockEndAt } from '@/lib/utils'
+import { formatHourBlock, efficiencyColor, efficiencyBg, cn, SHIFT_HOURS, canEnterHourlyReport, getReportEntryOpenAt, isShiftPastAutoClose, getReportBlockEndAt, getShiftStartAt, getSessionEntryHours } from '@/lib/utils'
+import { isProReportStart, overlapMilliseconds } from '@/lib/isProProduction'
 import { syncProductionAlert } from '@/lib/productionAlerts'
 import { STATIONS, GENERAL_CATEGORIES, problemCategoryLabel, stationLabel, primaryStation, localHeuristicCheck, type ReportIssueType } from '@/lib/issueReports'
 import { checkIssueDescription, type IssueCheckResult } from '@/lib/aiIssueValidation'
@@ -319,11 +320,22 @@ export default function OperatorReport() {
   const testMode = useTestMode()
   const { display: countdown, isUrgent } = useHourCountdown()
   const { now, hour } = useClock()
+  const [allReports, setExistingReports] = useState<ReportExt[]>([])
   const production = useIsProProduction(activeShift?.id, activeShift?.machine_id, activeShift?.started_at)
   const allShiftHours = testMode ? TEST_SLOTS : getShiftHours(activeShift?.shift_type)
-  const segmentStartHour = production.active ? Number(new Intl.DateTimeFormat('en-GB', { timeZone: 'Europe/Warsaw', hour: '2-digit', hourCycle: 'h23' }).format(new Date(production.active.started_at))) : null
-  const segmentStartIndex = segmentStartHour === null ? 0 : Math.max(0, allShiftHours.indexOf(segmentStartHour))
-  const shiftHours = allShiftHours.slice(segmentStartIndex)
+  const firstReportedHour = allShiftHours.find(h => allReports.some(report =>
+    !report.is_segment_close && report.segment_id === production.active?.id && report.hour_start === h
+  ))
+  const firstReportedAt = activeShift && firstReportedHour !== undefined
+    ? getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, firstReportedHour).getTime() - 3600000
+    : undefined
+  const reportStart = activeShift ? isProReportStart(
+    getShiftStartAt(activeShift.shift_date, activeShift.shift_type).getTime(),
+    production.active, production.segments, production.changeovers, firstReportedAt
+  ) : 0
+  const shiftHours = !testMode && activeShift
+    ? getSessionEntryHours(activeShift.shift_date, activeShift.shift_type, new Date(reportStart))
+    : allShiftHours
   // Norma godzinowa z konfiguracji maszyny (target_per_hour); stala TARGET tylko
   // jako fallback. Dzieki temu zapisany target i generowana efficiency_pct
   // zgadzaja sie z metryka na panelu kierownika.
@@ -348,7 +360,6 @@ export default function OperatorReport() {
   const [rejectChecking,   setRejectChecking]   = useState(false)
   const [downtimeCause, setDowntimeCause] = useState('')
   const [rejectCause,   setRejectCause]   = useState('')
-  const [allReports, setExistingReports] = useState<ReportExt[]>([])
   const existingReports = allReports.filter(r => !r.is_segment_close && (!production.segments.length || r.segment_id === production.active?.id))
   const [editingReportId, setEditingReportId] = useState<string | null>(null)
   const [saving,  setSaving]  = useState(false)
@@ -520,7 +531,9 @@ export default function OperatorReport() {
   const incReject  = counterReject  !== '' ? Math.max(0, curReject  - prevReject)  : 0
 
   const blockEnd = activeShift ? getReportBlockEndAt(activeShift.shift_date, activeShift.shift_type, selectedHour).getTime() : 0
-  const productionMinutes = production.active && !testMode ? Math.max(0, Math.min(60, (blockEnd - Math.max(blockEnd - 3600000, new Date(production.active.started_at).getTime())) / 60000)) : 60
+  const productionMinutes = production.active && !testMode
+    ? overlapMilliseconds(reportStart, blockEnd, blockEnd - 3600000, blockEnd) / 60000
+    : 60
   const reportTarget = Math.round(activeTarget * productionMinutes / 60)
   const efficiency  = incGood > 0 ? calcEfficiency(incGood, reportTarget) : 0
   const rejectPct   = (incGood + incReject) > 0 ? Math.round(incReject / (incGood + incReject) * 100) : 0

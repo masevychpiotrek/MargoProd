@@ -1,6 +1,7 @@
+import { getLastCompletedProductionDate } from '@/lib/completedProductionDate'
 import { Fragment, useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
-import { rejectPercent, syringeProductionDate } from '@/lib/syringeMetrics'
+import { rejectPercent } from '@/lib/syringeMetrics'
 import { compareSyringeReportLines, syringeReportLine } from '@/lib/syringeReportLayout'
 import { cn } from '@/lib/utils'
 import { includeSyringeEmailShift, requiresSyringeIdleReason } from '@/lib/syringeEmailPolicy'
@@ -42,7 +43,7 @@ type SessionRow = {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-function todayIso() { return syringeProductionDate() }
+function todayIso() { return getLastCompletedProductionDate() }
 function addDays(date: string, days: number) {
   const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)

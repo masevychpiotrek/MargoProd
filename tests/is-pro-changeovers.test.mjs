@@ -69,6 +69,19 @@ test('Cumulative counters reset per assortment, closing tail is saved once, shif
   } finally { await db.close() }
 })
 
+test('A first assortment registered at 10:00 accepts sequential earlier readings from 06:00', async () => {
+  const { db, ids, command, report } = await setup()
+  try {
+    await db.query("UPDATE shifts SET shift_date='2026-11-20',started_at='2026-11-20T09:00:00Z' WHERE id=$1", [ids.shift])
+    const segment = await command('start', null, ids.a)
+    await db.query("UPDATE is_pro_segments SET started_at='2026-11-20T09:00:00Z' WHERE id=$1", [segment])
+    for (let hour = 6; hour <= 10; hour++) await report(segment, hour, 2200, (hour - 5) * 2200)
+    const saved = (await db.query('SELECT hour_start,counter_good FROM hourly_reports ORDER BY hour_start')).rows
+    assert.deepEqual(saved, [6, 7, 8, 9, 10].map((hour, i) => ({ hour_start: hour, counter_good: (i + 1) * 2200 })))
+    assert.equal((await db.query('SELECT sum(good_count) n FROM hourly_reports')).rows[0].n, 11000)
+  } finally { await db.close() }
+})
+
 test('Final shift counter includes the unreported remainder without duplicating hourly readings', async () => {
   const { db, ids, command, report } = await setup()
   try {

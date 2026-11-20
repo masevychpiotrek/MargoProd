@@ -1,7 +1,8 @@
+import { getLastCompletedProductionDate } from '@/lib/completedProductionDate'
 import { useMemo, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { syringeRange, syringeProductionDate } from '@/lib/syringeMetrics'
+import { syringeRange } from '@/lib/syringeMetrics'
 import { supabase } from '@/lib/supabase'
 import { exportXlsx, exportCsv, printDocument, esc, type Sheet } from '@/lib/tpmExport'
 import type { SaSession } from '@/types/database'
@@ -74,7 +75,7 @@ function groupSum<T>(items: T[], keyFn: (i: T) => string, valFn: (i: T) => numbe
 function SyringeExportReports({ embedded = false }: { embedded?: boolean }) {
   const navigate = useNavigate()
   const [type, setType] = useState<PeriodType>('day')
-  const [anchor, setAnchor] = useState(syringeProductionDate)
+  const [anchor, setAnchor] = useState(getLastCompletedProductionDate)
   const [shift, setShift] = useState<string>('')
   const { from, to } = syringeRange(type, anchor)
 

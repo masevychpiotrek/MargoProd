@@ -1,8 +1,9 @@
+import { getLastCompletedProductionDate } from '@/lib/completedProductionDate'
 import IsProDaySummary from '@/components/operator/IsProDaySummary'
 import { useEffect, useMemo, useRef, useState, useCallback } from 'react'
 import { supabase } from '@/lib/supabase'
 import { distributeQuantity, correctedHourlyRate } from '@/lib/dayReportCorrection'
-import { PRODUCTION_DAY_HOURS, cn, compareProductionHours, getProductionDate } from '@/lib/utils'
+import { PRODUCTION_DAY_HOURS, cn, compareProductionHours } from '@/lib/utils'
 import { useAuthStore } from '@/stores/authStore'
 import {
   fetchShiftEmailData, coverageStats, confirmActionItem, previewShiftEmail, sendShiftEmailNow,
@@ -54,7 +55,7 @@ type ShiftEvent = { machine: string; hour: string; text: string; operator: strin
 function one<T>(value: T | T[] | null | undefined) {
   return Array.isArray(value) ? value[0] : value
 }
-function todayIso() { return getProductionDate() }
+function todayIso() { return getLastCompletedProductionDate() }
 function addDays(date: string, days: number) {
   const d = new Date(`${date}T12:00:00`); d.setDate(d.getDate() + days)
   return d.toISOString().slice(0, 10)
